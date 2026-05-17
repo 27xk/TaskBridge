@@ -1,0 +1,933 @@
+from copy import deepcopy
+from datetime import date, datetime, timedelta
+from typing import Any
+
+from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
+
+from app.core.exceptions import AppException
+from app.models.sync_log import SyncLog
+from app.models.task import Task
+from app.models.user import User
+from app.schemas.task import (
+    ChecklistItem,
+    ChecklistItemUpdate,
+    TaskBatchRequest,
+    TaskConflictResolveRequest,
+    TaskCreate,
+    TaskHistoryRead,
+    TaskImportItem,
+    TaskImportRequest,
+    TaskPlanRequest,
+    TaskPostponeRequest,
+    TaskSnoozeRequest,
+    TaskTemplateInstantiateRequest,
+    TaskUpdate,
+)
+from app.services.sync_service import append_sync_log
+from app.utils.time import normalize_to_utc_naive, utc_now
+
+
+def _get_owned_task(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    include_deleted: bool = False,
+) -> Task:
+    conditions = [Task.id == task_id, Task.user_id == current_user.id]
+    if not include_deleted:
+        conditions.append(Task.is_deleted.is_(False))
+
+    task = db.scalar(select(Task).where(*conditions))
+    if task is None:
+        raise AppException(status_code=404, message="task not found")
+    return task
+
+
+def _snapshot(task: Task) -> dict[str, Any]:
+    return {
+        "id": task.id,
+        "title": task.title,
+        "status": task.status,
+        "version": task.version,
+        "is_deleted": task.is_deleted,
+        "list_type": task.list_type,
+        "project": task.project,
+    }
+
+
+def _task_to_export_dict(task: Task) -> dict[str, Any]:
+    return {
+        "id": task.id,
+        "title": task.title,
+        "content": task.content,
+        "status": task.status,
+        "priority": task.priority,
+        "tag": task.tag,
+        "project": task.project,
+        "list_type": task.list_type,
+        "due_time": task.due_time.isoformat() if task.due_time else None,
+        "remind_time": task.remind_time.isoformat() if task.remind_time else None,
+        "repeat_rule": task.repeat_rule,
+        "planned_date": task.planned_date.isoformat() if task.planned_date else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "snoozed_until": task.snoozed_until.isoformat() if task.snoozed_until else None,
+        "checklist": task.checklist or [],
+        "is_template": task.is_template,
+        "version": task.version,
+        "is_deleted": task.is_deleted,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+    }
+
+
+def list_tasks(
+    db: Session,
+    current_user: User,
+    *,
+    q: str | None = None,
+    status: str | None = None,
+    tag: str | None = None,
+    project: str | None = None,
+    list_type: str | None = None,
+    planned_date: date | None = None,
+    view: str | None = None,
+    now: datetime | None = None,
+    include_deleted: bool = False,
+    templates_only: bool = False,
+    offset: int = 0,
+    limit: int = 100,
+) -> list[Task]:
+    conditions = [Task.user_id == current_user.id]
+    if not include_deleted:
+        conditions.append(Task.is_deleted.is_(False))
+    if q:
+        keyword = f"%{q.strip()}%"
+        conditions.append(
+            or_(
+                Task.title.ilike(keyword),
+                Task.content.ilike(keyword),
+                Task.tag.ilike(keyword),
+                Task.project.ilike(keyword),
+            ),
+        )
+    if status:
+        conditions.append(Task.status == status)
+    if tag:
+        conditions.append(Task.tag == tag)
+    if project:
+        conditions.append(Task.project == project)
+    if list_type:
+        conditions.append(Task.list_type == list_type)
+    if planned_date:
+        conditions.append(Task.planned_date == planned_date)
+    if templates_only:
+        conditions.append(Task.is_template.is_(True))
+    _apply_view_conditions(conditions, view=view, now=now)
+
+    query = (
+        select(Task)
+        .where(*conditions)
+        .order_by(
+            Task.sort_order.asc(),
+            Task.updated_at.desc(),
+            Task.id.desc(),
+        )
+        .offset(offset)
+        .limit(limit)
+    )
+    return list(db.scalars(query))
+
+
+def get_task_meta(db: Session, current_user: User) -> dict[str, Any]:
+    now = utc_now()
+    today = now.date()
+    base = [Task.user_id == current_user.id]
+    active = base + [Task.is_deleted.is_(False)]
+
+    projects = [
+        item
+        for item in db.scalars(
+            select(Task.project)
+            .where(*active, Task.project.is_not(None), Task.project != "")
+            .distinct()
+            .order_by(Task.project.asc()),
+        )
+    ]
+    tags = [
+        item
+        for item in db.scalars(
+            select(Task.tag)
+            .where(*active, Task.tag.is_not(None), Task.tag != "")
+            .distinct()
+            .order_by(Task.tag.asc()),
+        )
+    ]
+
+    counts = {
+        "open": _count_tasks(db, active + [Task.status != "completed"]),
+        "completed": _count_tasks(db, active + [Task.status == "completed"]),
+        "inbox": _count_tasks(db, active + [Task.list_type == "inbox", Task.status != "completed"]),
+        "today": _count_tasks(
+            db,
+            active
+            + [
+                Task.status != "completed",
+                or_(Task.planned_date == today, and_(Task.due_time.is_not(None), func.date(Task.due_time) == today)),
+            ],
+        ),
+        "overdue": _count_tasks(db, active + [Task.status != "completed", Task.due_time < now]),
+        "templates": _count_tasks(db, active + [Task.is_template.is_(True)]),
+        "trash": _count_tasks(db, base + [Task.is_deleted.is_(True)]),
+    }
+    return {"projects": projects, "tags": tags, "counts": counts}
+
+
+def export_tasks(db: Session, current_user: User) -> list[dict[str, Any]]:
+    tasks = db.scalars(
+        select(Task)
+        .where(Task.user_id == current_user.id)
+        .order_by(Task.is_deleted.asc(), Task.updated_at.desc(), Task.id.desc()),
+    )
+    return [_task_to_export_dict(task) for task in tasks]
+
+
+def batch_update_tasks(db: Session, current_user: User, payload: TaskBatchRequest) -> dict[str, Any]:
+    tasks = list(
+        db.scalars(
+            select(Task).where(
+                Task.user_id == current_user.id,
+                Task.id.in_(payload.task_ids),
+            ),
+        ),
+    )
+    now = utc_now()
+    for task in tasks:
+        if payload.action == "complete":
+            task.status = "completed"
+            task.completed_at = now
+        elif payload.action == "restore":
+            task.status = "todo"
+            task.completed_at = None
+            task.is_deleted = False
+            task.deleted_at = None
+        elif payload.action == "delete":
+            task.is_deleted = True
+            task.deleted_at = now
+        elif payload.action == "plan":
+            task.list_type = "today"
+            task.planned_date = payload.planned_date or now.date()
+        elif payload.action == "move_inbox":
+            task.list_type = "inbox"
+            task.planned_date = None
+        task.version += 1
+        task.updated_at = now
+        append_sync_log(
+            db,
+            user_id=current_user.id,
+            task_id=task.id,
+            operation=f"batch_{payload.action}",
+            version=task.version,
+            payload=_snapshot(task),
+        )
+        db.add(task)
+    db.commit()
+    for task in tasks:
+        db.refresh(task)
+    return {"updated_count": len(tasks), "tasks": tasks}
+
+
+def rename_task_meta(
+    db: Session,
+    current_user: User,
+    *,
+    field: str,
+    old_value: str,
+    new_value: str | None,
+) -> dict[str, Any]:
+    if field not in {"project", "tag"}:
+        raise AppException(status_code=400, message="unsupported metadata field")
+    column = Task.project if field == "project" else Task.tag
+    tasks = list(
+        db.scalars(
+            select(Task).where(
+                Task.user_id == current_user.id,
+                Task.is_deleted.is_(False),
+                column == old_value,
+            ),
+        ),
+    )
+    now = utc_now()
+    normalized = new_value.strip() if new_value else None
+    for task in tasks:
+        setattr(task, field, normalized or None)
+        task.version += 1
+        task.updated_at = now
+        append_sync_log(
+            db,
+            user_id=current_user.id,
+            task_id=task.id,
+            operation=f"{field}_renamed",
+            version=task.version,
+            payload=_snapshot(task) | {field: getattr(task, field)},
+        )
+        db.add(task)
+    db.commit()
+    return {"updated_count": len(tasks), field: normalized}
+
+
+def import_tasks(db: Session, current_user: User, payload: TaskImportRequest) -> dict[str, Any]:
+    created = 0
+    updated = 0
+    imported_tasks: list[Task] = []
+    for item in payload.tasks:
+        existing = None
+        if item.id is not None:
+            existing = db.scalar(select(Task).where(Task.id == item.id, Task.user_id == current_user.id))
+        if existing is None:
+            task = Task(user_id=current_user.id, **_import_item_to_task_data(item))
+            db.add(task)
+            db.flush()
+            created += 1
+            operation = "import_created"
+        else:
+            task = existing
+            for key, value in _import_item_to_task_data(item).items():
+                setattr(task, key, value)
+            task.version += 1
+            task.updated_at = utc_now()
+            updated += 1
+            operation = "import_updated"
+        append_sync_log(
+            db,
+            user_id=current_user.id,
+            task_id=task.id,
+            operation=operation,
+            version=task.version,
+            payload=_snapshot(task),
+        )
+        imported_tasks.append(task)
+    db.commit()
+    for task in imported_tasks:
+        db.refresh(task)
+    return {"created_count": created, "updated_count": updated, "tasks": imported_tasks}
+
+
+def resolve_task_conflict(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    payload: TaskConflictResolveRequest,
+) -> Task:
+    task = _get_owned_task(db, current_user, task_id, include_deleted=True)
+    if payload.strategy == "use_server":
+        return task
+    if payload.task is None:
+        raise AppException(status_code=400, message="task is required for overwrite_server")
+    updates = _task_payload_dump(payload.task, exclude_unset=True)
+    for field, value in updates.items():
+        setattr(task, field, value)
+    task.version += 1
+    task.updated_at = utc_now()
+    task.is_deleted = False
+    task.deleted_at = None
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="conflict_overwritten",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def _count_tasks(db: Session, conditions: list[Any]) -> int:
+    return int(db.scalar(select(func.count()).select_from(Task).where(*conditions)) or 0)
+
+
+def _apply_view_conditions(
+    conditions: list[Any],
+    *,
+    view: str | None,
+    now: datetime | None,
+) -> None:
+    if not view:
+        return
+    normalized = view.strip().lower()
+    current = normalize_to_utc_naive(now) if now else utc_now()
+    today = current.date()
+
+    if normalized == "inbox":
+        conditions.extend([Task.list_type == "inbox", Task.status != "completed"])
+    elif normalized == "today":
+        conditions.append(
+            or_(
+                Task.planned_date == today,
+                and_(Task.due_time.is_not(None), func.date(Task.due_time) == today),
+                and_(Task.remind_time.is_not(None), func.date(Task.remind_time) == today),
+            ),
+        )
+    elif normalized == "overdue":
+        conditions.extend([Task.status != "completed", Task.due_time.is_not(None), Task.due_time < current])
+    elif normalized == "week":
+        end_date = today + timedelta(days=7)
+        conditions.append(
+            or_(
+                Task.planned_date.between(today, end_date),
+                and_(Task.due_time.is_not(None), func.date(Task.due_time).between(today, end_date)),
+            ),
+        )
+    elif normalized == "high_priority":
+        conditions.extend([Task.status != "completed", Task.priority >= 3])
+    elif normalized == "completed":
+        conditions.append(Task.status == "completed")
+    elif normalized == "templates":
+        conditions.append(Task.is_template.is_(True))
+    elif normalized == "trash":
+        conditions.append(Task.is_deleted.is_(True))
+
+
+def create_task(db: Session, current_user: User, payload: TaskCreate) -> Task:
+    data = _task_payload_dump(payload)
+    task = Task(user_id=current_user.id, **data)
+    db.add(task)
+    db.flush()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="created",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def get_task(db: Session, current_user: User, task_id: int) -> Task:
+    return _get_owned_task(db, current_user, task_id)
+
+
+def update_task(db: Session, current_user: User, task_id: int, payload: TaskUpdate) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    updates = _task_payload_dump(payload, exclude_unset=True)
+    for field, value in updates.items():
+        setattr(task, field, value)
+    task.version += 1
+    task.updated_at = utc_now()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="updated",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def soft_delete_task(db: Session, current_user: User, task_id: int) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    task.is_deleted = True
+    task.deleted_at = utc_now()
+    task.version += 1
+    task.updated_at = utc_now()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="deleted",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def complete_task(db: Session, current_user: User, task_id: int) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    was_completed = task.status == "completed"
+    task.status = "completed"
+    task.completed_at = utc_now()
+    task.version += 1
+    task.updated_at = utc_now()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="completed",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    if not was_completed:
+        _create_repeat_occurrence_if_needed(db, current_user, task)
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def undo_complete_task(db: Session, current_user: User, task_id: int) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    task.status = "todo"
+    task.completed_at = None
+    task.version += 1
+    task.updated_at = utc_now()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="undo_completed",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def postpone_task(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    payload: TaskPostponeRequest,
+) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    if payload.due_time is not None:
+        task.due_time = normalize_to_utc_naive(payload.due_time)
+    if payload.remind_time is not None:
+        task.remind_time = normalize_to_utc_naive(payload.remind_time)
+    if payload.planned_date is not None:
+        task.planned_date = payload.planned_date
+    task.snoozed_until = None
+    task.version += 1
+    task.updated_at = utc_now()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="postponed",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def snooze_task(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    payload: TaskSnoozeRequest,
+) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    task.snoozed_until = normalize_to_utc_naive(payload.snoozed_until)
+    task.version += 1
+    task.updated_at = utc_now()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="snoozed",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def plan_task(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    payload: TaskPlanRequest,
+) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    task.planned_date = payload.planned_date
+    task.list_type = "today"
+    task.version += 1
+    task.updated_at = utc_now()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="planned",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def restore_task(db: Session, current_user: User, task_id: int) -> Task:
+    task = _get_owned_task(db, current_user, task_id, include_deleted=True)
+    task.status = "todo"
+    task.is_deleted = False
+    task.deleted_at = None
+    task.version += 1
+    task.updated_at = utc_now()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="restored",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def add_checklist_item(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    payload: ChecklistItem,
+) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    checklist = list(task.checklist or [])
+    if any(item.get("id") == payload.id for item in checklist):
+        raise AppException(status_code=409, message="checklist item already exists")
+    checklist.append(payload.model_dump())
+    return _save_checklist(db, current_user, task, checklist, "checklist_added")
+
+
+def update_checklist_item(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    item_id: str,
+    payload: ChecklistItemUpdate,
+) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    checklist = list(task.checklist or [])
+    updated = False
+    for item in checklist:
+        if item.get("id") != item_id:
+            continue
+        if payload.title is not None:
+            item["title"] = payload.title
+        if payload.done is not None:
+            item["done"] = payload.done
+        updated = True
+        break
+    if not updated:
+        raise AppException(status_code=404, message="checklist item not found")
+    return _save_checklist(db, current_user, task, checklist, "checklist_updated")
+
+
+def delete_checklist_item(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    item_id: str,
+) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    checklist = list(task.checklist or [])
+    next_checklist = [item for item in checklist if item.get("id") != item_id]
+    if len(next_checklist) == len(checklist):
+        raise AppException(status_code=404, message="checklist item not found")
+    return _save_checklist(db, current_user, task, next_checklist, "checklist_deleted")
+
+
+def instantiate_template(
+    db: Session,
+    current_user: User,
+    template_id: int,
+    payload: TaskTemplateInstantiateRequest,
+) -> Task:
+    template = _get_owned_task(db, current_user, template_id, include_deleted=False)
+    if not template.is_template:
+        raise AppException(status_code=400, message="task is not a template")
+
+    task = Task(
+        user_id=current_user.id,
+        title=payload.title or template.title,
+        content=payload.content if payload.content is not None else template.content,
+        status="todo",
+        priority=template.priority,
+        tag=payload.tag if payload.tag is not None else template.tag,
+        project=payload.project if payload.project is not None else template.project,
+        list_type=payload.list_type if payload.list_type is not None else "inbox",
+        due_time=normalize_to_utc_naive(payload.due_time) if payload.due_time else template.due_time,
+        remind_time=normalize_to_utc_naive(payload.remind_time) if payload.remind_time else template.remind_time,
+        repeat_rule=template.repeat_rule,
+        planned_date=payload.planned_date if payload.planned_date is not None else template.planned_date,
+        parent_task_id=template.parent_task_id,
+        checklist=deepcopy(template.checklist or []),
+        is_template=False,
+        template_name=None,
+        sort_order=template.sort_order,
+    )
+    db.add(task)
+    db.flush()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="template_instantiated",
+        version=task.version,
+        payload={**_snapshot(task), "template_id": template.id},
+    )
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def create_next_occurrence(db: Session, current_user: User, task_id: int) -> Task:
+    task = _get_owned_task(db, current_user, task_id)
+    next_task = _build_repeat_occurrence(task, current_user.id)
+    if next_task is None:
+        raise AppException(status_code=400, message="unsupported repeat_rule")
+    db.add(next_task)
+    db.flush()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=next_task.id,
+        operation="repeat_created",
+        version=next_task.version,
+        payload={**_snapshot(next_task), "source_task_id": task.id},
+    )
+    db.commit()
+    db.refresh(next_task)
+    return next_task
+
+
+def _create_repeat_occurrence_if_needed(db: Session, current_user: User, task: Task) -> Task | None:
+    if not task.repeat_rule:
+        return None
+    existing_id = db.scalar(
+        select(Task.id).where(
+            Task.user_id == current_user.id,
+            Task.parent_task_id == task.id,
+            Task.is_deleted.is_(False),
+        ),
+    )
+    if existing_id is not None:
+        return None
+
+    next_task = _build_repeat_occurrence(task, current_user.id)
+    if next_task is None:
+        return None
+    db.add(next_task)
+    db.flush()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=next_task.id,
+        operation="repeat_created",
+        version=next_task.version,
+        payload={**_snapshot(next_task), "source_task_id": task.id},
+    )
+    return next_task
+
+
+def _build_repeat_occurrence(task: Task, user_id: int) -> Task | None:
+    delta = _repeat_delta(task.repeat_rule)
+    if delta is None:
+        return None
+    return Task(
+        user_id=user_id,
+        title=task.title,
+        content=task.content,
+        status="todo",
+        priority=task.priority,
+        tag=task.tag,
+        project=task.project,
+        list_type=task.list_type,
+        due_time=_shift_datetime(task.due_time, delta),
+        remind_time=_shift_datetime(task.remind_time, delta),
+        repeat_rule=task.repeat_rule,
+        planned_date=_shift_date(task.planned_date, delta),
+        parent_task_id=task.id,
+        checklist=_reset_checklist(task.checklist or []),
+        is_template=False,
+        template_name=None,
+        sort_order=task.sort_order,
+    )
+
+
+def list_trash(db: Session, current_user: User) -> list[Task]:
+    return list(
+        db.scalars(
+            select(Task)
+            .where(Task.user_id == current_user.id, Task.is_deleted.is_(True))
+            .order_by(Task.deleted_at.desc(), Task.updated_at.desc(), Task.id.desc()),
+        ),
+    )
+
+
+def purge_task(db: Session, current_user: User, task_id: int) -> Task:
+    task = _get_owned_task(db, current_user, task_id, include_deleted=True)
+    if not task.is_deleted:
+        raise AppException(status_code=400, message="only deleted tasks can be purged")
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation="purged",
+        version=task.version,
+        payload=_snapshot(task),
+    )
+    db.flush()
+    db.execute(update(SyncLog).where(SyncLog.task_id == task.id).values(task_id=None))
+    db.delete(task)
+    db.commit()
+    return task
+
+
+def list_task_history(db: Session, current_user: User, task_id: int) -> list[TaskHistoryRead]:
+    _get_owned_task(db, current_user, task_id, include_deleted=True)
+    logs = db.scalars(
+        select(SyncLog)
+        .where(SyncLog.user_id == current_user.id, SyncLog.task_id == task_id)
+        .order_by(SyncLog.created_at.asc(), SyncLog.id.asc()),
+    )
+    return [
+        TaskHistoryRead(
+            id=log.id,
+            task_id=log.task_id,
+            operation=log.action,
+            result=log.result,
+            version=log.version,
+            device_id=log.device_id,
+            local_id=log.local_id,
+            server_id=log.server_id,
+            payload=log.payload,
+            created_at=log.created_at,
+        )
+        for log in logs
+    ]
+
+
+def _task_payload_dump(payload: TaskCreate | TaskUpdate, exclude_unset: bool = False) -> dict[str, Any]:
+    data = payload.model_dump(exclude_unset=exclude_unset)
+    for key in ("due_time", "remind_time", "completed_at", "snoozed_until"):
+        if data.get(key) is not None:
+            data[key] = normalize_to_utc_naive(data[key])
+    checklist = data.get("checklist")
+    if checklist is not None:
+        data["checklist"] = [
+            item.model_dump() if hasattr(item, "model_dump") else item
+            for item in checklist
+        ]
+    return data
+
+
+def _import_item_to_task_data(item: TaskImportItem) -> dict[str, Any]:
+    return {
+        "title": item.title.strip(),
+        "content": item.content,
+        "status": item.status,
+        "priority": item.priority,
+        "tag": item.tag,
+        "project": item.project,
+        "list_type": item.list_type,
+        "due_time": normalize_to_utc_naive(item.due_time) if item.due_time else None,
+        "remind_time": normalize_to_utc_naive(item.remind_time) if item.remind_time else None,
+        "repeat_rule": item.repeat_rule,
+        "planned_date": item.planned_date,
+        "snoozed_until": normalize_to_utc_naive(item.snoozed_until) if item.snoozed_until else None,
+        "checklist": [
+            checklist_item.model_dump() if hasattr(checklist_item, "model_dump") else checklist_item
+            for checklist_item in item.checklist
+        ],
+        "is_template": item.is_template,
+        "template_name": item.template_name,
+        "is_deleted": False,
+    }
+
+
+def _save_checklist(
+    db: Session,
+    current_user: User,
+    task: Task,
+    checklist: list[dict[str, Any]],
+    operation: str,
+) -> Task:
+    task.checklist = checklist
+    flag_modified(task, "checklist")
+    task.version += 1
+    task.updated_at = utc_now()
+    append_sync_log(
+        db,
+        user_id=current_user.id,
+        task_id=task.id,
+        operation=operation,
+        version=task.version,
+        payload=_snapshot(task) | {"checklist": checklist},
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def _repeat_delta(repeat_rule: str | None) -> timedelta | str | None:
+    if repeat_rule is None:
+        return None
+    normalized = repeat_rule.strip().lower()
+    if normalized in {"daily", "every_day", "every day"}:
+        return timedelta(days=1)
+    if normalized in {"weekly", "every_week", "every week"}:
+        return timedelta(days=7)
+    if normalized in {"monthly", "every_month", "every month"}:
+        return "monthly"
+    return None
+
+
+def _shift_datetime(value: datetime | None, delta: timedelta | str) -> datetime | None:
+    if value is None:
+        return None
+    if delta == "monthly":
+        return _add_month(value)
+    return value + delta
+
+
+def _shift_date(value: date | None, delta: timedelta | str) -> date | None:
+    if value is None:
+        return None
+    if delta == "monthly":
+        shifted = _add_month(datetime.combine(value, datetime.min.time()))
+        return shifted.date()
+    return value + delta
+
+
+def _add_month(value: datetime) -> datetime:
+    month = value.month + 1
+    year = value.year + (month - 1) // 12
+    month = ((month - 1) % 12) + 1
+    day = min(value.day, _last_day_of_month(year, month))
+    return value.replace(year=year, month=month, day=day)
+
+
+def _reset_checklist(checklist: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{**item, "done": False} for item in deepcopy(checklist)]
+
+
+def _last_day_of_month(year: int, month: int) -> int:
+    if month == 12:
+        return 31
+    first_next_month = date(year, month + 1, 1)
+    return (first_next_month - timedelta(days=1)).day

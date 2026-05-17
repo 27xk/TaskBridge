@@ -1,0 +1,41 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: taskbridge-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: taskbridge_root
+      MYSQL_DATABASE: taskbridge
+      MYSQL_USER: taskbridge
+      MYSQL_PASSWORD: taskbridge_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - taskbridge_mysql:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-utaskbridge", "-ptaskbridge_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: taskbridge-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - taskbridge_redis:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  taskbridge_mysql:
+  taskbridge_redis:
+

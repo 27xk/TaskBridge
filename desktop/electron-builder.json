@@ -1,0 +1,36 @@
+{
+  "appId": "com.taskbridge.desktop",
+  "productName": "TaskBridge",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "out/**/*",
+    "package.json",
+    "!**/*.map",
+    "!**/*.tsbuildinfo",
+    "!**/*.log",
+    "!**/README.md",
+    "!**/.vite/**",
+    "!**/.cache/**",
+    "!**/test/**",
+    "!**/tests/**"
+  ],
+  "asar": true,
+  "asarUnpack": [
+    "**/*.node"
+  ],
+  "compression": "maximum",
+  "win": {
+    "target": [
+      "nsis"
+    ],
+    "artifactName": "TaskBridge-${version}-Setup.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
+  }
+}

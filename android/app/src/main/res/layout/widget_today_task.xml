@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widgetRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:clickable="true"
+    android:orientation="vertical"
+    android:padding="14dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widgetTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="TaskBridge 今日待办"
+            android:textColor="#17211F"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widgetRefreshButton"
+            android:layout_width="44dp"
+            android:layout_height="32dp"
+            android:background="#E6EFEC"
+            android:clickable="true"
+            android:gravity="center"
+            android:text="刷新"
+            android:textColor="#1A665B"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widgetMessage"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="今天暂无待办"
+        android:textColor="#6A7773"
+        android:textSize="13sp" />
+
+    <LinearLayout
+        android:id="@+id/widgetTaskRow1"
+        style="@style/WidgetTaskRow">
+
+        <TextView
+            android:id="@+id/widgetTaskStatus1"
+            style="@style/WidgetTaskStatus" />
+
+        <LinearLayout style="@style/WidgetTaskBody">
+            <TextView
+                android:id="@+id/widgetTaskTitle1"
+                style="@style/WidgetTaskTitle" />
+
+            <TextView
+                android:id="@+id/widgetTaskMeta1"
+                style="@style/WidgetTaskMeta" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widgetTaskRow2"
+        style="@style/WidgetTaskRow">
+
+        <TextView
+            android:id="@+id/widgetTaskStatus2"
+            style="@style/WidgetTaskStatus" />
+
+        <LinearLayout style="@style/WidgetTaskBody">
+            <TextView
+                android:id="@+id/widgetTaskTitle2"
+                style="@style/WidgetTaskTitle" />
+
+            <TextView
+                android:id="@+id/widgetTaskMeta2"
+                style="@style/WidgetTaskMeta" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widgetTaskRow3"
+        style="@style/WidgetTaskRow">
+
+        <TextView
+            android:id="@+id/widgetTaskStatus3"
+            style="@style/WidgetTaskStatus" />
+
+        <LinearLayout style="@style/WidgetTaskBody">
+            <TextView
+                android:id="@+id/widgetTaskTitle3"
+                style="@style/WidgetTaskTitle" />
+
+            <TextView
+                android:id="@+id/widgetTaskMeta3"
+                style="@style/WidgetTaskMeta" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widgetTaskRow4"
+        style="@style/WidgetTaskRow">
+
+        <TextView
+            android:id="@+id/widgetTaskStatus4"
+            style="@style/WidgetTaskStatus" />
+
+        <LinearLayout style="@style/WidgetTaskBody">
+            <TextView
+                android:id="@+id/widgetTaskTitle4"
+                style="@style/WidgetTaskTitle" />
+
+            <TextView
+                android:id="@+id/widgetTaskMeta4"
+                style="@style/WidgetTaskMeta" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widgetTaskRow5"
+        style="@style/WidgetTaskRow">
+
+        <TextView
+            android:id="@+id/widgetTaskStatus5"
+            style="@style/WidgetTaskStatus" />
+
+        <LinearLayout style="@style/WidgetTaskBody">
+            <TextView
+                android:id="@+id/widgetTaskTitle5"
+                style="@style/WidgetTaskTitle" />
+
+            <TextView
+                android:id="@+id/widgetTaskMeta5"
+                style="@style/WidgetTaskMeta" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widgetSpacer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:text="" />
+
+    <TextView
+        android:id="@+id/widgetAddButton"
+        android:layout_width="match_parent"
+        android:layout_height="34dp"
+        android:layout_marginTop="8dp"
+        android:background="#167C70"
+        android:clickable="true"
+        android:gravity="center"
+        android:text="添加任务"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+</LinearLayout>
