@@ -4,21 +4,22 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.repository.TaskRepository
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.notification.ReminderManager
 import com.taskbridge.app.sync.SyncManager
+import com.taskbridge.app.utils.ShanghaiTime
 import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
 
 data class TaskListUiState(
     val syncText: String = "本地缓存已就绪",
@@ -38,19 +39,25 @@ enum class TaskListFilter(val label: String) {
     Templates("模板"),
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class TaskListViewModel(
     private val appContext: Context,
     private val taskRepository: TaskRepository,
     private val syncManager: SyncManager,
+    private val tokenDataStore: TokenDataStore,
 ) : ViewModel() {
-    private val shanghaiZone = ZoneId.of("Asia/Shanghai")
-    private val todayPrefix = LocalDate.now(shanghaiZone).toString()
     private val reminderManager = ReminderManager(appContext)
+    val displayTimeZone: StateFlow<String> = tokenDataStore.displayTimeZone
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ShanghaiTime.DEFAULT_ZONE_ID)
 
     val tasks: StateFlow<List<Task>> = taskRepository.observeTasks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val todayTasks: StateFlow<List<Task>> = taskRepository.observeTodayTasks(todayPrefix)
+    val todayTasks: StateFlow<List<Task>> = tokenDataStore.displayTimeZone
+        .flatMapLatest { timeZoneId ->
+            val todayPrefix = ShanghaiTime.todayString(timeZoneId)
+            taskRepository.observeTodayTasks(todayPrefix, timeZoneId)
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _uiState = MutableStateFlow(TaskListUiState())
@@ -60,9 +67,7 @@ class TaskListViewModel(
         syncManager.enqueueNetworkSync()
         syncManager.syncNow()
         viewModelScope.launch {
-            todayTasks
-                .distinctUntilChanged()
-                .collect { TodayTaskWidgetUpdateWorker.enqueue(appContext) }
+            todayTasks.collect { TodayTaskWidgetUpdateWorker.enqueue(appContext) }
         }
     }
 
@@ -126,10 +131,10 @@ class TaskListViewModel(
 
     fun postponeToTomorrow(localId: String) {
         viewModelScope.launch {
-            val tomorrow = LocalDate.now(shanghaiZone).plusDays(1)
+            val tomorrow = ShanghaiTime.todayDate(displayTimeZone.value).plusDays(1)
             val dueTime = tomorrow
                 .atTime(9, 0)
-                .atZone(shanghaiZone)
+                .atZone(ShanghaiTime.zone(displayTimeZone.value))
                 .toInstant()
                 .toString()
             taskRepository.postponeTask(
@@ -155,7 +160,7 @@ class TaskListViewModel(
 
     fun planToday(localId: String) {
         viewModelScope.launch {
-            taskRepository.planTaskForToday(localId, LocalDate.now(shanghaiZone).toString())
+            taskRepository.planTaskForToday(localId, ShanghaiTime.todayString(displayTimeZone.value))
             taskRepository.getTask(localId)?.let(reminderManager::schedule)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync("已加入今日计划")
@@ -193,9 +198,10 @@ class TaskListViewModelFactory(
     private val appContext: Context,
     private val taskRepository: TaskRepository,
     private val syncManager: SyncManager,
+    private val tokenDataStore: TokenDataStore,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return TaskListViewModel(appContext, taskRepository, syncManager) as T
+        return TaskListViewModel(appContext, taskRepository, syncManager, tokenDataStore) as T
     }
 }

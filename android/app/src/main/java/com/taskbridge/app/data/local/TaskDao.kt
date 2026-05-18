@@ -89,6 +89,7 @@ interface TaskDao {
                 WHEN plannedDate = :today THEN 2
                 ELSE 3
             END,
+            CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
             CASE WHEN dueTime IS NULL THEN 1 ELSE 0 END,
             dueTime ASC,
             priority DESC,
@@ -103,6 +104,21 @@ interface TaskDao {
         highPriority: Int,
         limit: Int,
     ): List<TodayWidgetTaskProjection>
+
+    @Query(
+        """
+        SELECT localId, title, status, priority, dueTime, remindTime, plannedDate FROM tasks
+        WHERE isDeleted = 0
+        ORDER BY
+            CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
+            CASE WHEN dueTime IS NULL THEN 1 ELSE 0 END,
+            dueTime ASC,
+            priority DESC,
+            updatedAt DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun getAllWidgetTasks(limit: Int): List<TodayWidgetTaskProjection>
 
     @Query("SELECT * FROM tasks WHERE serverId = :serverId LIMIT 1")
     suspend fun getByServerId(serverId: Int): TaskEntity?

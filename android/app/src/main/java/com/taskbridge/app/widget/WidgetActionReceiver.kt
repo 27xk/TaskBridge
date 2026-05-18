@@ -13,9 +13,6 @@ import java.time.Instant
 class WidgetActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            WidgetConstants.ACTION_REFRESH -> {
-                TodayTaskWidgetUpdateWorker.enqueue(context)
-            }
             WidgetConstants.ACTION_COMPLETE -> {
                 val localId = intent.getStringExtra(WidgetConstants.EXTRA_TASK_LOCAL_ID) ?: return
                 val pendingResult = goAsync()

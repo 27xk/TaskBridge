@@ -1,10 +1,10 @@
 package com.taskbridge.app.sync
 
+import android.net.Uri
 import com.google.gson.JsonParser
 import com.taskbridge.app.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -33,11 +33,12 @@ class WebSocketClient(
         }
 
         val request = runCatching {
-            val url = BuildConfig.TASKBRIDGE_WS_URL.toHttpUrl()
-                .newBuilder()
-                .addQueryParameter("ticket", ticket)
-                .addQueryParameter("device_id", deviceId)
+            val url = Uri.parse(BuildConfig.TASKBRIDGE_WS_URL)
+                .buildUpon()
+                .appendQueryParameter("ticket", ticket)
+                .appendQueryParameter("device_id", deviceId)
                 .build()
+                .toString()
             Request.Builder().url(url).build()
         }.getOrElse {
             connecting = false

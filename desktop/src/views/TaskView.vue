@@ -40,9 +40,7 @@ const shouldGroupByCompletion = computed(() => filter.value !== "completed");
 watch(
   () => props.quickAddSignal,
   (value) => {
-    if (value && value > 0) {
-      openCreate();
-    }
+    if (value && value > 0) openCreate();
   },
   { immediate: true },
 );
@@ -51,9 +49,7 @@ watch(
   () => props.openTaskRequest,
   async (request) => {
     if (!request) return;
-    if (taskStore.tasks.length === 0) {
-      await taskStore.load();
-    }
+    if (taskStore.tasks.length === 0) await taskStore.load();
     const task = taskStore.tasks.find((item) => item.localId === request.localId);
     if (task) openEdit(task);
   },
@@ -82,7 +78,7 @@ async function save(draft: TaskDraft): Promise<void> {
 }
 
 async function completeCurrentView(): Promise<void> {
-  await taskStore.batchComplete(filteredTasks.value);
+  await taskStore.batchComplete(openFilteredTasks.value);
   showNotice(settingsStore.t("task.feedbackBatchCompleted"));
 }
 
@@ -102,9 +98,7 @@ async function restoreTask(task: TaskRecord): Promise<void> {
 
 function showNotice(message: string): void {
   notice.value = message;
-  if (noticeTimer !== undefined) {
-    window.clearTimeout(noticeTimer);
-  }
+  if (noticeTimer !== undefined) window.clearTimeout(noticeTimer);
   noticeTimer = window.setTimeout(() => {
     notice.value = "";
     noticeTimer = undefined;
@@ -112,7 +106,7 @@ function showNotice(message: string): void {
 }
 
 function matchesFilter(task: TaskRecord, mode: typeof filter.value): boolean {
-  const today = todayLocalDate();
+  const today = todayLocalDate(new Date(), settingsStore.displayTimeZone);
   const taskDate = task.plannedDate ?? isoDate(task.dueTime);
   switch (mode) {
     case "inbox":
@@ -122,7 +116,7 @@ function matchesFilter(task: TaskRecord, mode: typeof filter.value): boolean {
     case "overdue":
       return task.status !== "completed" && Boolean(task.dueTime && (parseTaskBridgeDate(task.dueTime)?.getTime() ?? Number.POSITIVE_INFINITY) < Date.now());
     case "week":
-      return Boolean(taskDate && taskDate >= today && taskDate <= todayLocalDate(new Date(Date.now() + 7 * 86_400_000)));
+      return Boolean(taskDate && taskDate >= today && taskDate <= todayLocalDate(new Date(Date.now() + 7 * 86_400_000), settingsStore.displayTimeZone));
     case "high":
       return task.status !== "completed" && task.priority >= 3;
     case "completed":
@@ -141,7 +135,7 @@ function matchesFilter(task: TaskRecord, mode: typeof filter.value): boolean {
 function isoDate(value: string | null): string | null {
   if (!value) return null;
   const date = parseTaskBridgeDate(value);
-  return date ? todayLocalDate(date) : null;
+  return date ? todayLocalDate(date, settingsStore.displayTimeZone) : null;
 }
 </script>
 
@@ -192,20 +186,61 @@ function isoDate(value: string | null): string | null {
     <p v-if="notice" class="action-feedback">{{ notice }}</p>
 
     <div class="task-list">
-      <TaskItem
-        v-for="task in filteredTasks"
-        :key="task.localId"
-        :task="task"
-        @edit="openEdit"
-        @complete="completeTask"
-        @restore="restoreTask"
-        @postpone="taskStore.postponeTomorrow"
-        @snooze="taskStore.snoozeOneHour"
-        @plan-today="taskStore.planToday"
-        @next-occurrence="taskStore.createNextOccurrence"
-        @instantiate-template="taskStore.instantiateTemplate"
-        @delete="taskStore.deleteTask"
-      />
+      <template v-if="shouldGroupByCompletion">
+        <div class="task-section-header">
+          <span>{{ settingsStore.language === "zh-CN" ? "未完成" : "Open" }}</span>
+          <strong>{{ openFilteredTasks.length }}</strong>
+        </div>
+        <TaskItem
+          v-for="task in openFilteredTasks"
+          :key="task.localId"
+          :task="task"
+          @edit="openEdit"
+          @complete="completeTask"
+          @restore="restoreTask"
+          @postpone="taskStore.postponeTomorrow"
+          @snooze="taskStore.snoozeOneHour"
+          @plan-today="taskStore.planToday"
+          @next-occurrence="taskStore.createNextOccurrence"
+          @instantiate-template="taskStore.instantiateTemplate"
+          @delete="taskStore.deleteTask"
+        />
+
+        <div v-if="completedFilteredTasks.length > 0" class="task-section-header completed-section">
+          <span>{{ settingsStore.language === "zh-CN" ? "已完成" : "Completed" }}</span>
+          <strong>{{ completedFilteredTasks.length }}</strong>
+        </div>
+        <TaskItem
+          v-for="task in completedFilteredTasks"
+          :key="task.localId"
+          :task="task"
+          @edit="openEdit"
+          @complete="completeTask"
+          @restore="restoreTask"
+          @postpone="taskStore.postponeTomorrow"
+          @snooze="taskStore.snoozeOneHour"
+          @plan-today="taskStore.planToday"
+          @next-occurrence="taskStore.createNextOccurrence"
+          @instantiate-template="taskStore.instantiateTemplate"
+          @delete="taskStore.deleteTask"
+        />
+      </template>
+      <template v-else>
+        <TaskItem
+          v-for="task in completedFilteredTasks"
+          :key="task.localId"
+          :task="task"
+          @edit="openEdit"
+          @complete="completeTask"
+          @restore="restoreTask"
+          @postpone="taskStore.postponeTomorrow"
+          @snooze="taskStore.snoozeOneHour"
+          @plan-today="taskStore.planToday"
+          @next-occurrence="taskStore.createNextOccurrence"
+          @instantiate-template="taskStore.instantiateTemplate"
+          @delete="taskStore.deleteTask"
+        />
+      </template>
       <div
         v-for="task in filteredTasks.filter((item) => item.syncStatus === 'conflict')"
         :key="`${task.localId}-conflict`"

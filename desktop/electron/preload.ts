@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld("taskBridge", {
     onOpacityChanged: (callback: Listener<[number]>) => on("taskbridge:floating-opacity-changed", callback),
     getPosition: () => ipcRenderer.invoke("floating:get-position"),
     savePosition: (x?: number, y?: number) => ipcRenderer.invoke("floating:save-position", x, y),
+    getSize: () => ipcRenderer.invoke("floating:get-size"),
+    setSize: (width: number, height: number) => ipcRenderer.invoke("floating:set-size", width, height),
   },
   task: {
     listToday: (limit?: number) => ipcRenderer.invoke("task:list-today", limit),

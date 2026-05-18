@@ -1,9 +1,9 @@
 package com.taskbridge.app.domain.usecase
 
+import com.taskbridge.app.utils.ShanghaiTime
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -16,12 +16,16 @@ data class ParsedQuickTask(
 )
 
 object QuickAddParser {
-    private val shanghaiZone: ZoneId = ZoneId.of("Asia/Shanghai")
     private val priorityRegex = Regex("""(?i)\bP([0-5])\b""")
     private val tagRegex = Regex("""#([\p{L}\p{N}_-]{1,32})""")
     private val timeRegex = Regex("""(?:(上午|下午|晚上|中午)\s*)?(\d{1,2})(?::(\d{2}))?\s*(点|:)?""")
 
-    fun parse(input: String, now: LocalDateTime = LocalDateTime.now(shanghaiZone)): ParsedQuickTask {
+    fun parse(
+        input: String,
+        timeZoneId: String = ShanghaiTime.DEFAULT_ZONE_ID,
+        now: LocalDateTime = LocalDateTime.now(ShanghaiTime.zone(timeZoneId)),
+    ): ParsedQuickTask {
+        val targetZone = ShanghaiTime.zone(timeZoneId)
         var working = input.trim()
 
         val priority = priorityRegex.find(working)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
@@ -65,7 +69,7 @@ object QuickAddParser {
             val dueDate = date ?: now.toLocalDate()
             val dueClock = parsedTime ?: LocalTime.of(18, 0)
             LocalDateTime.of(dueDate, dueClock)
-                .atZone(shanghaiZone)
+                .atZone(targetZone)
                 .toInstant()
                 .toString()
         } else {

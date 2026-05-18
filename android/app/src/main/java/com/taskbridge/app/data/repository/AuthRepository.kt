@@ -14,7 +14,7 @@ class AuthRepository(
         return runCatching {
             val envelope = apiService.login(LoginRequestDto(usernameOrEmail, password))
             val tokenPair = envelope.data ?: error(envelope.message)
-            tokenDataStore.saveTokens(tokenPair.accessToken, tokenPair.refreshToken)
+            tokenDataStore.saveTokens(tokenPair.accessToken, tokenPair.refreshToken, tokenPair.user.id)
             tokenPair.user
         }
     }
@@ -23,7 +23,7 @@ class AuthRepository(
         return runCatching {
             val envelope = apiService.register(RegisterRequestDto(username, email, password))
             val tokenPair = envelope.data ?: error(envelope.message)
-            tokenDataStore.saveTokens(tokenPair.accessToken, tokenPair.refreshToken)
+            tokenDataStore.saveTokens(tokenPair.accessToken, tokenPair.refreshToken, tokenPair.user.id)
             tokenPair.user
         }
     }
@@ -38,4 +38,3 @@ class AuthRepository(
         tokenDataStore.clear()
     }
 }
-

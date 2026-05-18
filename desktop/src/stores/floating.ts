@@ -21,6 +21,8 @@ export const useFloatingStore = defineStore("floating", () => {
   const authenticated = ref(false);
   const miniMode = ref(false);
   const feedback = ref("");
+  const width = ref(320);
+  const height = ref(460);
   let refreshTimer: number | null = null;
   let feedbackTimer: number | null = null;
 
@@ -30,6 +32,8 @@ export const useFloatingStore = defineStore("floating", () => {
     const settings = await bridge().app.getSettings();
     opacity.value = settings.floatingOpacity;
     miniMode.value = settings.floatingMiniMode;
+    width.value = settings.floatingWidth;
+    height.value = settings.floatingHeight;
     await refresh();
   }
 
@@ -95,6 +99,12 @@ export const useFloatingStore = defineStore("floating", () => {
     opacity.value = await bridge().floating.setOpacity(nextOpacity);
   }
 
+  async function setSize(nextWidth: number, nextHeight: number): Promise<void> {
+    const size = await bridge().floating.setSize(nextWidth, nextHeight);
+    width.value = size.width;
+    height.value = size.height;
+  }
+
   async function toggleMiniMode(): Promise<void> {
     miniMode.value = !miniMode.value;
     await bridge().app.setSetting("floatingMiniMode", miniMode.value);
@@ -147,6 +157,8 @@ export const useFloatingStore = defineStore("floating", () => {
     syncMessage,
     syncState,
     opacity,
+    width,
+    height,
     loading,
     authenticated,
     miniMode,
@@ -159,6 +171,7 @@ export const useFloatingStore = defineStore("floating", () => {
     hide,
     openMain,
     setOpacity,
+    setSize,
     toggleMiniMode,
     scheduleRefresh,
     subscribe,

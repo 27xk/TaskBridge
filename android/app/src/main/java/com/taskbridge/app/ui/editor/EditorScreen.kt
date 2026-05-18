@@ -1,5 +1,7 @@
 package com.taskbridge.app.ui.editor
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,11 +10,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -23,19 +27,36 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
+import com.taskbridge.app.utils.ShanghaiTime
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun EditorScreen(
     viewModel: EditorViewModel,
+    displayTimeZone: String,
     onSaved: () -> Unit,
     onCancel: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val strings = LocalTaskBridgeStrings.current
-    var advancedOpen by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var advancedOpen by remember(state.editingLocalId) { mutableStateOf(state.editingLocalId != null) }
+    var priorityMenuOpen by remember { mutableStateOf(false) }
+    var repeatMenuOpen by remember { mutableStateOf(false) }
+    val priorityOptions = remember { (0..5).map { it.toString() } }
+    val repeatOptions = remember {
+        listOf(
+            "" to "不重复",
+            "daily" to "每天",
+            "weekly" to "每周",
+            "monthly" to "每月",
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -43,7 +64,10 @@ fun EditorScreen(
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
     ) {
-        Text(strings.addTask, style = MaterialTheme.typography.headlineMedium)
+        Text(
+            text = if (state.editingLocalId == null) strings.addTask else strings.edit,
+            style = MaterialTheme.typography.headlineMedium,
+        )
         Spacer(Modifier.height(20.dp))
         OutlinedTextField(
             value = state.title,
@@ -71,13 +95,28 @@ fun EditorScreen(
             Text(if (advancedOpen) strings.hideSettings else strings.moreSettings)
         }
         if (advancedOpen) {
-            OutlinedTextField(
-                value = state.priority,
-                onValueChange = viewModel::updatePriority,
-                label = { Text(strings.priority) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Column {
+                OutlinedButton(
+                    onClick = { priorityMenuOpen = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("${strings.priority}: ${state.priority.ifBlank { "0" }}")
+                }
+                DropdownMenu(
+                    expanded = priorityMenuOpen,
+                    onDismissRequest = { priorityMenuOpen = false },
+                ) {
+                    priorityOptions.forEach { value ->
+                        DropdownMenuItem(
+                            text = { Text(value) },
+                            onClick = {
+                                viewModel.updatePriority(value)
+                                priorityMenuOpen = false
+                            },
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = state.tag,
@@ -89,16 +128,75 @@ fun EditorScreen(
             OutlinedTextField(
                 value = state.dueTime,
                 onValueChange = viewModel::updateDueTime,
-                label = { Text(strings.dueTime) },
+                label = { Text("${strings.dueTime} ($displayTimeZone)") },
                 modifier = Modifier.fillMaxWidth(),
             )
+            Row(modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = {
+                        showDateTimePicker(
+                            context = context,
+                            currentValue = state.dueTime,
+                            timeZoneId = displayTimeZone,
+                            onPicked = viewModel::updateDueTime,
+                        )
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("选择截止时间")
+                }
+                TextButton(onClick = { viewModel.updateDueTime("") }) {
+                    Text("清除")
+                }
+            }
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
-                value = state.repeatRule,
-                onValueChange = viewModel::updateRepeatRule,
-                label = { Text(strings.repeatRule) },
+                value = state.remindTime,
+                onValueChange = viewModel::updateRemindTime,
+                label = { Text("${strings.remindTime} ($displayTimeZone)") },
                 modifier = Modifier.fillMaxWidth(),
             )
+            Row(modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = {
+                        showDateTimePicker(
+                            context = context,
+                            currentValue = state.remindTime,
+                            timeZoneId = displayTimeZone,
+                            onPicked = viewModel::updateRemindTime,
+                        )
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("选择提醒时间")
+                }
+                TextButton(onClick = { viewModel.updateRemindTime("") }) {
+                    Text("清除")
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Column {
+                OutlinedButton(
+                    onClick = { repeatMenuOpen = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("${strings.repeatRule}：${repeatOptions.firstOrNull { it.first == state.repeatRule }?.second ?: state.repeatRule.ifBlank { "不重复" }}")
+                }
+                DropdownMenu(
+                    expanded = repeatMenuOpen,
+                    onDismissRequest = { repeatMenuOpen = false },
+                ) {
+                    repeatOptions.forEach { (value, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                viewModel.updateRepeatRule(value)
+                                repeatMenuOpen = false
+                            },
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(8.dp))
             Row {
                 Checkbox(
@@ -133,9 +231,43 @@ fun EditorScreen(
     }
 }
 
+private val editorDateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
+private fun showDateTimePicker(
+    context: android.content.Context,
+    currentValue: String,
+    timeZoneId: String,
+    onPicked: (String) -> Unit,
+) {
+    val zone = ShanghaiTime.zone(timeZoneId)
+    val initial = ShanghaiTime.inputToInstantText(currentValue, timeZoneId)
+        ?.let { runCatching { Instant.parse(it).atZone(zone).toLocalDateTime() }.getOrNull() }
+        ?: LocalDateTime.now(zone)
+
+    DatePickerDialog(
+        context,
+        { _, year, month, day ->
+            TimePickerDialog(
+                context,
+                { _, hour, minute ->
+                    val picked = LocalDateTime.of(year, month + 1, day, hour, minute)
+                    onPicked(editorDateTimeFormatter.format(picked))
+                },
+                initial.hour,
+                initial.minute,
+                true,
+            ).show()
+        },
+        initial.year,
+        initial.monthValue - 1,
+        initial.dayOfMonth,
+    ).show()
+}
+
 private fun localizeEditorError(error: String, strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings): String {
     return when (error) {
         "Title is required." -> strings.titleRequired
+        "Invalid time." -> strings.invalidTime
         else -> error
     }
 }

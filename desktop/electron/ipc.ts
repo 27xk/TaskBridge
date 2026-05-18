@@ -24,10 +24,12 @@ import {
 } from "./db";
 import {
   getFloatingWindowPosition,
+  getFloatingWindowSize,
   hideFloatingWindow,
   notifyFloatingTasksChanged,
   notifyFloatingSyncStatusChanged,
   saveFloatingWindowPosition,
+  setFloatingWindowSize,
   setFloatingWindowOpacity,
   showFloatingWindow,
   toggleFloatingWindow,
@@ -45,6 +47,7 @@ import {
   windows,
 } from "./state";
 import { getTraySyncStatus, refreshTrayMenu, setTraySyncStatus } from "./tray";
+import { normalizeTimeZone } from "../shared/quick-add-parser";
 
 const MAX_IMPORT_BYTES = 1_000_000;
 const MAX_IMPORT_TASKS = 500;
@@ -119,6 +122,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("floating:set-opacity", (_, opacity: number) => setFloatingWindowOpacity(opacity));
   ipcMain.handle("floating:get-position", () => getFloatingWindowPosition());
   ipcMain.handle("floating:save-position", (_, x?: number, y?: number) => saveFloatingWindowPosition(x, y));
+  ipcMain.handle("floating:get-size", () => getFloatingWindowSize());
+  ipcMain.handle("floating:set-size", (_, width: number, height: number) => setFloatingWindowSize(width, height));
 
   ipcMain.handle("task:list-today", (_, limit?: number) => listTodayFloatingTasks(limit));
   ipcMain.handle("task:quick-add", (_, title: string) => quickAddTask(title));
@@ -140,7 +145,7 @@ function setAppSetting(key: string, value: unknown): AppSettings {
     if (key === "language" && value !== "zh-CN" && value !== "en-US") {
       return getSettings();
     }
-    const settings = setSetting(key, value);
+    const settings = setSetting(key, key === "displayTimeZone" ? normalizeTimeZone(value) : value);
     if (key === "language") refreshTrayMenu();
     return settings;
   }
@@ -160,14 +165,25 @@ function setAppSetting(key: string, value: unknown): AppSettings {
   return getSettings();
 }
 
-function isStringSetting(key: string): key is "baseUrl" | "wsUrl" | "deviceId" | "lastSyncTime" | "language" {
-  return key === "baseUrl" || key === "wsUrl" || key === "deviceId" || key === "lastSyncTime" || key === "language";
+function isStringSetting(key: string): key is "baseUrl" | "wsUrl" | "deviceId" | "lastSyncTime" | "language" | "displayTimeZone" {
+  return (
+    key === "baseUrl" ||
+    key === "wsUrl" ||
+    key === "deviceId" ||
+    key === "lastSyncTime" ||
+    key === "language" ||
+    key === "displayTimeZone"
+  );
 }
 
 function isTokenState(value: unknown): value is TokenState {
   if (!value || typeof value !== "object") return false;
   const token = value as Partial<TokenState>;
-  return typeof token.accessToken === "string" && typeof token.refreshToken === "string";
+  return (
+    typeof token.accessToken === "string" &&
+    typeof token.refreshToken === "string" &&
+    (token.userId === undefined || (typeof token.userId === "number" && Number.isFinite(token.userId)))
+  );
 }
 
 function isAllowedBaseUrl(value: string): boolean {

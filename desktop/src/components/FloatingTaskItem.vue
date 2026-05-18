@@ -6,12 +6,12 @@ const props = defineProps<{
   task: TaskRecord;
 }>();
 
-const emit = defineEmits<{
+defineEmits<{
   complete: [task: TaskRecord];
   open: [task: TaskRecord];
 }>();
-const settingsStore = useSettingsStore();
 
+const settingsStore = useSettingsStore();
 const priorityLabel = ["P0", "P1", "P2", "P3", "P4", "P5"];
 
 function priorityLevel(value: number): number {
@@ -24,7 +24,7 @@ function priorityText(value: number): string {
 
 function dueTimeLabel(value: string | null): string {
   if (!value) return props.task.plannedDate ? settingsStore.t("task.todayTitle") : settingsStore.t("task.noDue");
-  return formatShanghaiTime(value, settingsStore.language);
+  return formatShanghaiTime(value, settingsStore.language, settingsStore.displayTimeZone);
 }
 
 function syncStatusText(status: TaskRecord["syncStatus"]): string {
@@ -48,7 +48,7 @@ function syncStatusText(status: TaskRecord["syncStatus"]): string {
     <button
       type="button"
       class="floating-check"
-      :title="props.task.status === 'completed' ? settingsStore.language === 'zh-CN' ? '已完成' : 'Completed' : settingsStore.t('task.complete')"
+      :title="props.task.status === 'completed' ? settingsStore.t('task.restore') : settingsStore.t('task.complete')"
       :disabled="props.task.status === 'completed'"
       @click="$emit('complete', props.task)"
     >

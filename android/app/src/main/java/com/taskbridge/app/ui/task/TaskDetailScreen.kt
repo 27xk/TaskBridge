@@ -14,6 +14,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,16 +30,15 @@ import com.taskbridge.app.data.repository.TaskRepository
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
+import com.taskbridge.app.utils.ShanghaiTime
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.launch
 import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 private val detailGson = Gson()
 private val detailChecklistType = object : TypeToken<List<UiChecklistItem>>() {}.type
-private val shanghaiZone: ZoneId = ZoneId.of("Asia/Shanghai")
-private val dateTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
 private data class UiChecklistItem(
     val id: String,
@@ -50,17 +50,33 @@ private data class UiChecklistItem(
 fun TaskDetailScreen(
     taskRepository: TaskRepository,
     localId: String,
+    displayTimeZone: String,
     onBack: () -> Unit,
     onAddClick: () -> Unit,
+    onEditClick: (String) -> Unit,
     onTaskChanged: () -> Unit,
 ) {
     var task by remember(localId) { mutableStateOf<Task?>(null) }
     var newChecklistTitle by remember(localId) { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val strings = LocalTaskBridgeStrings.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(localId) {
         task = taskRepository.getTask(localId)
+    }
+    DisposableEffect(lifecycleOwner, localId) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                scope.launch {
+                    task = taskRepository.getTask(localId)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     Column(
@@ -100,10 +116,10 @@ fun TaskDetailScreen(
                 text = listOfNotNull(
                     current.project?.let { "${strings.project} $it" },
                     current.plannedDate?.let { "${strings.plan} $it" },
-                    current.dueTime?.let { "${strings.due} ${formatShanghaiInstant(it)}" },
-                    current.remindTime?.let { "${strings.reminder} ${formatShanghaiInstant(it)}" },
-                    current.snoozedUntil?.let { "${strings.snoozed} ${formatShanghaiInstant(it)}" },
-                    current.completedAt?.let { "${strings.completed} ${formatShanghaiInstant(it)}" },
+                    current.dueTime?.let { "${strings.due} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
+                    current.remindTime?.let { "${strings.reminder} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
+                    current.snoozedUntil?.let { "${strings.snoozed} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
+                    current.completedAt?.let { "${strings.completed} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
                     current.tag?.let { "#$it" },
                     "${strings.list} ${current.listType}",
                     "${strings.priority} ${current.priority}",
@@ -112,6 +128,13 @@ fun TaskDetailScreen(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = { onEditClick(current.localId) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(strings.edit)
+            }
+            Spacer(Modifier.height(8.dp))
             Text(strings.checklist, style = MaterialTheme.typography.titleMedium)
             val checklist = remember(current.checklistJson) {
                 parseChecklist(current.checklistJson)
@@ -192,10 +215,10 @@ fun TaskDetailScreen(
             Button(
                 onClick = {
                     scope.launch {
-                        val tomorrow = LocalDate.now(shanghaiZone).plusDays(1)
+                        val tomorrow = ShanghaiTime.todayDate(displayTimeZone).plusDays(1)
                         val dueTime = tomorrow
                             .atTime(9, 0)
-                            .atZone(shanghaiZone)
+                            .atZone(ShanghaiTime.zone(displayTimeZone))
                             .toInstant()
                             .toString()
                         taskRepository.postponeTask(current.localId, dueTime, null, tomorrow.toString())
@@ -260,10 +283,4 @@ private fun parseChecklist(value: String): List<UiChecklistItem> {
     return runCatching {
         detailGson.fromJson<List<UiChecklistItem>>(value, detailChecklistType)
     }.getOrDefault(emptyList())
-}
-
-private fun formatShanghaiInstant(value: String): String {
-    return runCatching {
-        dateTimeFormatter.format(Instant.parse(value).atZone(shanghaiZone))
-    }.getOrDefault(value)
 }

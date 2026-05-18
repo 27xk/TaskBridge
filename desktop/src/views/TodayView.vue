@@ -35,7 +35,7 @@ async function save(draft: TaskDraft): Promise<void> {
     await taskStore.addTask({
       ...draft,
       listType: "today",
-      plannedDate: draft.plannedDate || todayLocalDate(),
+      plannedDate: draft.plannedDate || todayLocalDate(new Date(), settingsStore.displayTimeZone),
     });
   }
   editorOpen.value = false;
@@ -55,9 +55,7 @@ async function restoreTask(task: TaskRecord): Promise<void> {
 
 function showNotice(message: string): void {
   notice.value = message;
-  if (noticeTimer !== undefined) {
-    window.clearTimeout(noticeTimer);
-  }
+  if (noticeTimer !== undefined) window.clearTimeout(noticeTimer);
   noticeTimer = window.setTimeout(() => {
     notice.value = "";
     noticeTimer = undefined;

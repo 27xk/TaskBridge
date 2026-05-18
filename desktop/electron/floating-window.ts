@@ -5,14 +5,18 @@ import { join } from "node:path";
 import {
   getFloatingOpacity,
   getFloatingPosition,
+  getFloatingSize,
   saveFloatingPosition as persistFloatingPosition,
+  saveFloatingSize as persistFloatingSize,
   setFloatingOpacity as persistFloatingOpacity,
   settingsStore,
   windows,
 } from "./state";
 
-const FLOATING_WIDTH = 320;
-const FLOATING_HEIGHT = 460;
+const MIN_FLOATING_WIDTH = 280;
+const MIN_FLOATING_HEIGHT = 260;
+const MAX_FLOATING_WIDTH = 520;
+const MAX_FLOATING_HEIGHT = 720;
 let floatingTasksChangedTimer: NodeJS.Timeout | null = null;
 let revealWhenReady = false;
 
@@ -21,11 +25,16 @@ export function createFloatingWindow(): BrowserWindow {
     return windows.floatingWindow;
   }
 
+  const restoredSize = getFloatingSize();
   const restoredPosition = getSafeFloatingPosition() ?? getDefaultFloatingPosition();
   const preloadPath = resolvePreloadPath();
   const floatingWindow = new BrowserWindow({
-    width: FLOATING_WIDTH,
-    height: FLOATING_HEIGHT,
+    width: restoredSize.width,
+    height: restoredSize.height,
+    minWidth: MIN_FLOATING_WIDTH,
+    minHeight: MIN_FLOATING_HEIGHT,
+    maxWidth: MAX_FLOATING_WIDTH,
+    maxHeight: MAX_FLOATING_HEIGHT,
     ...(restoredPosition ?? {}),
     frame: false,
     transparent: false,
@@ -33,7 +42,7 @@ export function createFloatingWindow(): BrowserWindow {
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
-    resizable: false,
+    resizable: true,
     title: "TaskBridge Floating",
     hasShadow: true,
     webPreferences: {
@@ -64,6 +73,10 @@ export function createFloatingWindow(): BrowserWindow {
   floatingWindow.on("moved", () => {
     saveCurrentFloatingPosition();
   });
+  floatingWindow.on("resized", () => {
+    saveCurrentFloatingSize();
+    ensureFloatingWindowOnScreen(floatingWindow);
+  });
 
   floatingWindow.once("ready-to-show", () => {
     if (settingsStore.get("floatingVisibleOnStart") || revealWhenReady) {
@@ -74,6 +87,7 @@ export function createFloatingWindow(): BrowserWindow {
 
   floatingWindow.on("close", (event) => {
     saveCurrentFloatingPosition();
+    saveCurrentFloatingSize();
     if (!windows.isQuitting) {
       event.preventDefault();
       floatingWindow.hide();
@@ -171,6 +185,23 @@ export function getFloatingWindowPosition(): { x: number | null; y: number | nul
   return getFloatingPosition();
 }
 
+export function getFloatingWindowSize(): { width: number; height: number } {
+  if (windows.floatingWindow && !windows.floatingWindow.isDestroyed()) {
+    const [width, height] = windows.floatingWindow.getSize();
+    return { width, height };
+  }
+  return getFloatingSize();
+}
+
+export function setFloatingWindowSize(width: number, height: number): { width: number; height: number } {
+  const next = persistFloatingSize(width, height);
+  if (windows.floatingWindow && !windows.floatingWindow.isDestroyed()) {
+    windows.floatingWindow.setSize(next.width, next.height, false);
+    ensureFloatingWindowOnScreen(windows.floatingWindow);
+  }
+  return next;
+}
+
 export function saveFloatingWindowPosition(x?: number, y?: number): { x: number | null; y: number | null } {
   if (typeof x === "number" && typeof y === "number") {
     persistFloatingPosition(x, y);
@@ -205,16 +236,23 @@ function saveCurrentFloatingPosition(): void {
   persistFloatingPosition(x, y);
 }
 
+function saveCurrentFloatingSize(): void {
+  if (!windows.floatingWindow || windows.floatingWindow.isDestroyed()) return;
+  const [width, height] = windows.floatingWindow.getSize();
+  persistFloatingSize(width, height);
+}
+
 function getSafeFloatingPosition(): Pick<Rectangle, "x" | "y"> | null {
   const position = getFloatingPosition();
   if (position.x === null || position.y === null) return null;
   const { x, y } = position;
+  const size = getFloatingSize();
 
   const displays = screen.getAllDisplays();
   const isVisible = displays.some((display) => {
     const area = display.workArea;
-    const right = x + FLOATING_WIDTH;
-    const bottom = y + FLOATING_HEIGHT;
+    const right = x + size.width;
+    const bottom = y + size.height;
     return (
       x >= area.x &&
       y >= area.y &&
@@ -228,8 +266,9 @@ function getSafeFloatingPosition(): Pick<Rectangle, "x" | "y"> | null {
 
 function getDefaultFloatingPosition(): Pick<Rectangle, "x" | "y"> {
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const size = getFloatingSize();
   return {
-    x: Math.max(area.x, area.x + area.width - FLOATING_WIDTH - 24),
+    x: Math.max(area.x, area.x + area.width - size.width - 24),
     y: Math.max(area.y, area.y + 64),
   };
 }
@@ -243,15 +282,16 @@ function ensureFloatingWindowOnScreen(floatingWindow: BrowserWindow): void {
 }
 
 function getSafePositionForBounds(x: number, y: number): Pick<Rectangle, "x" | "y"> | null {
+  const size = getFloatingSize();
   for (const display of screen.getAllDisplays()) {
     const area = display.workArea;
-    const nextX = Math.min(Math.max(x, area.x), area.x + area.width - FLOATING_WIDTH);
-    const nextY = Math.min(Math.max(y, area.y), area.y + area.height - FLOATING_HEIGHT);
+    const nextX = Math.min(Math.max(x, area.x), area.x + area.width - size.width);
+    const nextY = Math.min(Math.max(y, area.y), area.y + area.height - size.height);
     if (
       nextX >= area.x &&
       nextY >= area.y &&
-      nextX + FLOATING_WIDTH <= area.x + area.width &&
-      nextY + FLOATING_HEIGHT <= area.y + area.height
+      nextX + size.width <= area.x + area.width &&
+      nextY + size.height <= area.y + area.height
     ) {
       return { x: Math.round(nextX), y: Math.round(nextY) };
     }

@@ -72,7 +72,7 @@ function syncStatusText(status: TaskRecord["syncStatus"]): string {
       </div>
       <p v-if="task.content">{{ task.content }}</p>
       <div class="task-meta">
-        <span v-if="task.dueTime">{{ settingsStore.t("task.due") }} {{ formatShanghaiDateTime(task.dueTime, settingsStore.language) }}</span>
+        <span v-if="task.dueTime">{{ settingsStore.t("task.due") }} {{ formatShanghaiDateTime(task.dueTime, settingsStore.language, settingsStore.displayTimeZone) }}</span>
         <span v-if="task.plannedDate">{{ settingsStore.t("task.plan") }} {{ task.plannedDate }}</span>
         <span v-if="task.tag">#{{ task.tag }}</span>
         <span v-if="task.project">{{ task.project }}</span>

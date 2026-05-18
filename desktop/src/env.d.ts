@@ -6,12 +6,14 @@ declare global {
   interface TaskBridgeTokens {
     accessToken: string;
     refreshToken: string;
+    userId?: number;
   }
 
   interface TaskBridgeSettings {
     baseUrl: string;
     wsUrl: string;
     language: "zh-CN" | "en-US";
+    displayTimeZone: string;
     deviceId: string;
     lastSyncTime: string;
     autoStart: boolean;
@@ -20,6 +22,8 @@ declare global {
     floatingMiniMode: boolean;
     floatingX: number | null;
     floatingY: number | null;
+    floatingWidth: number;
+    floatingHeight: number;
   }
 
   interface TaskRecord {
@@ -147,6 +151,8 @@ declare global {
         onOpacityChanged: (callback: (opacity: number) => void) => () => void;
         getPosition: () => Promise<{ x: number | null; y: number | null }>;
         savePosition: (x?: number, y?: number) => Promise<{ x: number | null; y: number | null }>;
+        getSize: () => Promise<{ width: number; height: number }>;
+        setSize: (width: number, height: number) => Promise<{ width: number; height: number }>;
       };
       task: {
         listToday: (limit?: number) => Promise<TaskRecord[]>;

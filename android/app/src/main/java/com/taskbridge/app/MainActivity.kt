@@ -36,6 +36,7 @@ import com.taskbridge.app.ui.settings.SettingsScreen
 import com.taskbridge.app.ui.task.TaskDetailScreen
 import com.taskbridge.app.ui.task.TaskListScreen
 import com.taskbridge.app.ui.task.TaskListViewModelFactory
+import com.taskbridge.app.utils.ShanghaiTime
 import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
 import com.taskbridge.app.widget.WidgetConstants
 import kotlinx.coroutines.launch
@@ -46,9 +47,11 @@ private object Routes {
     const val Tasks = "tasks"
     const val Today = "today"
     const val Editor = "editor"
+    const val EditorPattern = "editor/{localId}"
     const val Settings = "settings"
     const val TaskDetailPattern = "task-detail/{localId}"
 
+    fun editTask(localId: String): String = "editor/$localId"
     fun taskDetail(localId: String): String = "task-detail/$localId"
 }
 
@@ -138,6 +141,9 @@ private fun TaskBridgeNavHost(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val displayTimeZone by container.tokenDataStore.displayTimeZone.collectAsStateWithLifecycle(
+        initialValue = ShanghaiTime.DEFAULT_ZONE_ID,
+    )
 
     NavHost(navController = navController, startDestination = Routes.Login) {
         composable(Routes.Login) {
@@ -186,12 +192,14 @@ private fun TaskBridgeNavHost(
                     context.applicationContext,
                     container.taskRepository,
                     container.syncManager,
+                    container.tokenDataStore,
                 ),
             )
             TaskListScreen(
                 viewModel = viewModel,
                 todayOnly = false,
                 onAddClick = { navController.navigate(Routes.Editor) },
+                onEditClick = { navController.navigate(Routes.editTask(it)) },
                 onSettingsClick = { navController.navigate(Routes.Settings) },
                 onTodayClick = { navController.navigate(Routes.Today) },
                 onAllClick = { },
@@ -204,12 +212,14 @@ private fun TaskBridgeNavHost(
                     context.applicationContext,
                     container.taskRepository,
                     container.syncManager,
+                    container.tokenDataStore,
                 ),
             )
             TaskListScreen(
                 viewModel = viewModel,
                 todayOnly = true,
                 onAddClick = { navController.navigate(Routes.Editor) },
+                onEditClick = { navController.navigate(Routes.editTask(it)) },
                 onSettingsClick = { navController.navigate(Routes.Settings) },
                 onTodayClick = { },
                 onAllClick = { navController.navigate(Routes.Tasks) },
@@ -217,19 +227,29 @@ private fun TaskBridgeNavHost(
         }
 
         composable(Routes.Editor) {
-            val viewModel = viewModel<com.taskbridge.app.ui.editor.EditorViewModel>(
-                factory = EditorViewModelFactory(
-                    context.applicationContext,
-                    container.taskRepository,
-                    container.syncManager,
-                ),
+            EditorRoute(
+                container = container,
+                localId = null,
+                displayTimeZone = displayTimeZone,
+                sharedTextState = sharedTextState,
+                onSaved = {
+                    sharedTextState.value = null
+                    navController.popBackStack()
+                },
+                onCancel = {
+                    sharedTextState.value = null
+                    navController.popBackStack()
+                },
             )
-            LaunchedEffect(sharedTextState.value) {
-                val text = sharedTextState.value ?: return@LaunchedEffect
-                viewModel.updateTitle(text.take(255))
-            }
-            EditorScreen(
-                viewModel = viewModel,
+        }
+
+        composable(Routes.EditorPattern) { backStackEntry ->
+            val localId = backStackEntry.arguments?.getString("localId")
+            EditorRoute(
+                container = container,
+                localId = localId,
+                displayTimeZone = displayTimeZone,
+                sharedTextState = sharedTextState,
                 onSaved = {
                     sharedTextState.value = null
                     navController.popBackStack()
@@ -246,8 +266,16 @@ private fun TaskBridgeNavHost(
             TaskDetailScreen(
                 taskRepository = container.taskRepository,
                 localId = localId,
-                onBack = { navController.popBackStack() },
+                displayTimeZone = displayTimeZone,
+                onBack = {
+                    if (!navController.popBackStack()) {
+                        navController.navigate(Routes.Today) {
+                            launchSingleTop = true
+                        }
+                    }
+                },
                 onAddClick = { navController.navigate(Routes.Editor) },
+                onEditClick = { navController.navigate(Routes.editTask(it)) },
                 onTaskChanged = {
                     TodayTaskWidgetUpdateWorker.enqueue(context.applicationContext)
                     container.syncManager.enqueueNetworkSync()
@@ -259,6 +287,7 @@ private fun TaskBridgeNavHost(
         composable(Routes.Settings) {
             SettingsScreen(
                 taskRepository = container.taskRepository,
+                tokenDataStore = container.tokenDataStore,
                 language = language,
                 onLanguageChange = { nextLanguage ->
                     scope.launch {
@@ -279,6 +308,41 @@ private fun TaskBridgeNavHost(
             )
         }
     }
+}
+
+@Composable
+private fun EditorRoute(
+    container: AppContainer,
+    localId: String?,
+    displayTimeZone: String,
+    sharedTextState: MutableState<String?>,
+    onSaved: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val context = LocalContext.current
+    val viewModel = viewModel<com.taskbridge.app.ui.editor.EditorViewModel>(
+        factory = EditorViewModelFactory(
+            context.applicationContext,
+            container.taskRepository,
+            container.syncManager,
+            container.tokenDataStore,
+        ),
+    )
+    LaunchedEffect(localId) {
+        if (!localId.isNullOrBlank()) {
+            viewModel.loadTask(localId)
+        }
+    }
+    LaunchedEffect(sharedTextState.value) {
+        val text = sharedTextState.value ?: return@LaunchedEffect
+        viewModel.updateTitle(text.take(255))
+    }
+    EditorScreen(
+        viewModel = viewModel,
+        displayTimeZone = displayTimeZone,
+        onSaved = onSaved,
+        onCancel = onCancel,
+    )
 }
 
 private fun sharedTextFromIntent(intent: Intent?): String? {
@@ -324,6 +388,7 @@ data class WidgetLaunchTarget(
 ) {
     fun toRoute(): String {
         return when (target) {
+            WidgetConstants.TARGET_ALL -> Routes.Tasks
             WidgetConstants.TARGET_ADD -> Routes.Editor
             WidgetConstants.TARGET_TASK -> localId?.let { Routes.taskDetail(it) } ?: Routes.Today
             else -> Routes.Today

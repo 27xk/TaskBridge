@@ -88,17 +88,17 @@ private class RefreshTokenAuthenticator(
             tokenDataStore.saveTokens(tokenPair.accessToken, tokenPair.refreshToken)
         }
 
-        return response.request.newBuilder()
+        return response.request().newBuilder()
             .header("Authorization", "Bearer ${tokenPair.accessToken}")
             .build()
     }
 
     private fun responseCount(response: Response): Int {
         var count = 1
-        var priorResponse = response.priorResponse
+        var priorResponse = response.priorResponse()
         while (priorResponse != null) {
             count++
-            priorResponse = priorResponse.priorResponse
+            priorResponse = priorResponse.priorResponse()
         }
         return count
     }

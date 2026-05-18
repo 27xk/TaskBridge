@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { parseQuickTask, shanghaiDayBounds, todayLocalDate } from "../shared/quick-add-parser";
+import { getSettings } from "./state";
 
 export type SyncStatus = "synced" | "pending_create" | "pending_update" | "pending_delete" | "conflict";
 export type SyncAction = "create" | "update" | "delete" | "complete" | "restore";
@@ -275,8 +276,9 @@ export function listTasks(includeDeleted: boolean, limit = 300, offset = 0): Tas
 }
 
 export function listTodayTasks(limit = 120): TaskRecord[] {
-  const today = todayLocalDate();
-  const { startTime, endTime } = shanghaiDayBounds(today);
+  const timeZone = getSettings().displayTimeZone;
+  const today = todayLocalDate(new Date(), timeZone);
+  const { startTime, endTime } = shanghaiDayBounds(today, timeZone);
   const rows = database()
     .prepare(
       `
@@ -300,8 +302,9 @@ export function listTodayTasks(limit = 120): TaskRecord[] {
 }
 
 export function listTodayFloatingTasks(limit = 8): TaskRecord[] {
-  const today = todayLocalDate();
-  const { startTime, endTime } = shanghaiDayBounds(today);
+  const timeZone = getSettings().displayTimeZone;
+  const today = todayLocalDate(new Date(), timeZone);
+  const { startTime, endTime } = shanghaiDayBounds(today, timeZone);
   const rows = database()
     .prepare(
       `
@@ -477,8 +480,9 @@ export function createLocalTask(title: string): TaskRecord | null {
   if (!trimmed) return null;
 
   const now = new Date().toISOString();
-  const parsed = parseQuickTask(trimmed);
-  const plannedDate = parsed.plannedDate ?? todayLocalDate();
+  const timeZone = getSettings().displayTimeZone;
+  const parsed = parseQuickTask(trimmed, new Date(), timeZone);
+  const plannedDate = parsed.plannedDate ?? todayLocalDate(new Date(), timeZone);
   const task: TaskRecord = {
     localId: `local-${randomUUID()}`,
     serverId: null,

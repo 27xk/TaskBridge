@@ -29,6 +29,9 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
             R.id.widgetTaskRow3,
             R.id.widgetTaskRow4,
             R.id.widgetTaskRow5,
+            R.id.widgetTaskRow6,
+            R.id.widgetTaskRow7,
+            R.id.widgetTaskRow8,
         )
         private val statusIds = intArrayOf(
             R.id.widgetTaskStatus1,
@@ -36,6 +39,9 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
             R.id.widgetTaskStatus3,
             R.id.widgetTaskStatus4,
             R.id.widgetTaskStatus5,
+            R.id.widgetTaskStatus6,
+            R.id.widgetTaskStatus7,
+            R.id.widgetTaskStatus8,
         )
         private val titleIds = intArrayOf(
             R.id.widgetTaskTitle1,
@@ -43,6 +49,9 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
             R.id.widgetTaskTitle3,
             R.id.widgetTaskTitle4,
             R.id.widgetTaskTitle5,
+            R.id.widgetTaskTitle6,
+            R.id.widgetTaskTitle7,
+            R.id.widgetTaskTitle8,
         )
         private val metaIds = intArrayOf(
             R.id.widgetTaskMeta1,
@@ -50,31 +59,42 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
             R.id.widgetTaskMeta3,
             R.id.widgetTaskMeta4,
             R.id.widgetTaskMeta5,
+            R.id.widgetTaskMeta6,
+            R.id.widgetTaskMeta7,
+            R.id.widgetTaskMeta8,
         )
 
         fun updateAll(context: Context, state: TodayTaskWidgetState) {
             val manager = AppWidgetManager.getInstance(context)
             val component = ComponentName(context, TodayTaskWidgetProvider::class.java)
-            val ids = manager.getAppWidgetIds(component)
-            ids.forEach { id ->
+            manager.getAppWidgetIds(component).forEach { id ->
                 manager.updateAppWidget(id, buildViews(context, state))
             }
         }
 
         private fun buildViews(context: Context, state: TodayTaskWidgetState): RemoteViews {
             return RemoteViews(context.packageName, R.layout.widget_today_task).apply {
-                setOnClickPendingIntent(R.id.widgetRoot, openAppIntent(context, WidgetConstants.TARGET_TODAY))
-                setOnClickPendingIntent(R.id.widgetAddButton, openAppIntent(context, WidgetConstants.TARGET_ADD))
-                setOnClickPendingIntent(R.id.widgetRefreshButton, refreshIntent(context))
+                setFloat(
+                    R.id.widgetBackground,
+                    "setAlpha",
+                    state.opacityPercent.coerceIn(0, 100) / 100f,
+                )
+                val openTarget = if (state.taskScope == WidgetConstants.TASK_SCOPE_ALL) {
+                    WidgetConstants.TARGET_ALL
+                } else {
+                    WidgetConstants.TARGET_TODAY
+                }
+                setOnClickPendingIntent(R.id.widgetRoot, openAppIntent(context, openTarget))
 
                 val message = when {
                     !state.isLoggedIn -> "请登录 TaskBridge"
+                    state.taskScope == WidgetConstants.TASK_SCOPE_ALL && state.tasks.isEmpty() -> "暂无任务"
                     state.tasks.isEmpty() -> "今天暂无待办"
                     else -> null
                 }
                 setViewVisibility(R.id.widgetMessage, if (message == null) View.GONE else View.VISIBLE)
                 setViewVisibility(R.id.widgetSpacer, if (message == null) View.VISIBLE else View.GONE)
-                setTextViewText(R.id.widgetMessage, message ?: "")
+                setTextViewText(R.id.widgetMessage, message.orEmpty())
 
                 rowIds.forEachIndexed { index, rowId ->
                     val item = state.tasks.getOrNull(index)
@@ -93,14 +113,20 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
             index: Int,
             item: TodayTaskWidgetItem,
         ) {
-            val titleColor = if (item.isCompleted) Color.rgb(124, 133, 137) else Color.rgb(28, 36, 40)
-            val metaColor = if (item.isCompleted) Color.rgb(145, 153, 157) else Color.rgb(89, 102, 107)
+            val titleColor = if (item.isCompleted) Color.argb(178, 255, 255, 255) else Color.WHITE
+            val metaColor = if (item.isCompleted) Color.argb(140, 255, 255, 255) else Color.argb(216, 255, 255, 255)
+            val meta = buildString {
+                append(item.dueLabel)
+                append(" / ")
+                append(item.priorityLabel)
+                if (item.isCompleted) append(" / 已完成")
+            }
 
             views.setViewVisibility(rowIds[index], View.VISIBLE)
-            views.setTextViewText(statusIds[index], if (item.isCompleted) "✓" else "•")
+            views.setTextViewText(statusIds[index], if (item.isCompleted) "✓" else "○")
             views.setTextViewText(titleIds[index], item.title)
             views.setTextColor(titleIds[index], titleColor)
-            views.setTextViewText(metaIds[index], "${item.dueLabel}  ·  ${item.priorityLabel}")
+            views.setTextViewText(metaIds[index], meta)
             views.setTextColor(metaIds[index], metaColor)
             views.setOnClickPendingIntent(
                 rowIds[index],
@@ -138,18 +164,6 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
             return PendingIntent.getActivity(
                 context,
                 10_000 + index,
-                intent,
-                pendingIntentFlags(),
-            )
-        }
-
-        private fun refreshIntent(context: Context): PendingIntent {
-            val intent = Intent(context, WidgetActionReceiver::class.java).apply {
-                action = WidgetConstants.ACTION_REFRESH
-            }
-            return PendingIntent.getBroadcast(
-                context,
-                WidgetConstants.ACTION_REFRESH.hashCode(),
                 intent,
                 pendingIntentFlags(),
             )

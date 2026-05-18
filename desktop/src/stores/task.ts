@@ -5,6 +5,7 @@ import { createEmptyTask, nowIso } from "../db/sqlite";
 import { enqueueChange, removeQueueByLocalId } from "../db/sync-queue.dao";
 import { listTasks, listTodayTasks, saveTask } from "../db/task.dao";
 import { parseQuickTask, parseTaskBridgeDate, shanghaiDateTimeInputToIso, todayLocalDate } from "../../shared/quick-add-parser";
+import { useSettingsStore } from "./settings";
 import { useSyncStore } from "./sync";
 
 export interface TaskDraft {
@@ -27,6 +28,7 @@ export const useTaskStore = defineStore("task", () => {
   const tasks = shallowRef<TaskRecord[]>([]);
   const todayTasks = shallowRef<TaskRecord[]>([]);
   const loading = ref(false);
+  const settingsStore = useSettingsStore();
 
   const activeTasks = computed(() => tasks.value.filter((task) => !task.isDeleted));
   const openTasks = computed(() => activeTasks.value.filter((task) => task.status !== "completed"));
@@ -45,7 +47,7 @@ export const useTaskStore = defineStore("task", () => {
   }
 
   async function addTask(draft: TaskDraft): Promise<TaskRecord> {
-    const parsed = parseQuickTask(draft.title);
+    const parsed = parseQuickTask(draft.title, new Date(), settingsStore.displayTimeZone);
     const dueTime = draft.dueTime || parsed.dueTime;
     const plannedDate = draft.plannedDate || parsed.plannedDate;
     const task = {
@@ -165,11 +167,11 @@ export const useTaskStore = defineStore("task", () => {
   }
 
   async function postponeTomorrow(task: TaskRecord): Promise<void> {
-    const plannedDate = todayLocalDate(new Date(Date.now() + 86_400_000));
+    const plannedDate = todayLocalDate(new Date(Date.now() + 86_400_000), settingsStore.displayTimeZone);
     const now = nowIso();
     const next = {
       ...task,
-      dueTime: shanghaiDateTimeInputToIso(`${plannedDate}T09:00`),
+      dueTime: shanghaiDateTimeInputToIso(`${plannedDate}T09:00`, settingsStore.displayTimeZone),
       plannedDate,
       snoozedUntil: null,
       syncStatus: task.serverId ? "pending_update" : "pending_create",
@@ -199,7 +201,7 @@ export const useTaskStore = defineStore("task", () => {
     const next = {
       ...task,
       listType: "today",
-      plannedDate: todayLocalDate(),
+      plannedDate: todayLocalDate(new Date(), settingsStore.displayTimeZone),
       syncStatus: task.serverId ? "pending_update" : "pending_create",
       updatedAt: now,
     } satisfies TaskRecord;
@@ -218,7 +220,7 @@ export const useTaskStore = defineStore("task", () => {
       status: "todo",
       dueTime: shiftIso(task.dueTime, days),
       remindTime: shiftIso(task.remindTime, days),
-      plannedDate: shiftDate(task.plannedDate, days),
+      plannedDate: shiftDate(task.plannedDate, days, settingsStore.displayTimeZone),
       completedAt: null,
       snoozedUntil: null,
       parentServerId: task.serverId,
@@ -403,12 +405,12 @@ function shiftIso(value: string | null, days: number): string | null {
   return date.toISOString();
 }
 
-function shiftDate(value: string | null, days: number): string | null {
+function shiftDate(value: string | null, days: number, timeZone: string): string | null {
   if (!value) return null;
   const date = parseTaskBridgeDate(`${value}T00:00:00Z`);
   if (!date) return null;
   date.setUTCDate(date.getUTCDate() + days);
-  return todayLocalDate(date);
+  return todayLocalDate(date, timeZone);
 }
 
 function uniqueSorted(values: Array<string | null>): string[] {

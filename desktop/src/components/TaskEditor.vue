@@ -11,6 +11,12 @@ const props = defineProps<{
 }>();
 const settingsStore = useSettingsStore();
 const detailsOpen = ref(false);
+const repeatOptions = [
+  { value: "", zh: "不重复", en: "No repeat" },
+  { value: "daily", zh: "每天", en: "Daily" },
+  { value: "weekly", zh: "每周", en: "Weekly" },
+  { value: "monthly", zh: "每月", en: "Monthly" },
+];
 
 const emit = defineEmits<{
   save: [draft: TaskDraft];
@@ -86,11 +92,11 @@ function submit(): void {
 }
 
 function toDateTimeInput(value?: string | null): string {
-  return isoToShanghaiDateTimeInput(value);
+  return isoToShanghaiDateTimeInput(value, settingsStore.displayTimeZone);
 }
 
 function fromDateTimeInput(value?: string | null): string | null {
-  return shanghaiDateTimeInputToIso(value);
+  return shanghaiDateTimeInputToIso(value, settingsStore.displayTimeZone);
 }
 
 function checklistJsonToText(value?: string | null): string {
@@ -189,7 +195,11 @@ function hasAdvancedFields(task: TaskRecord): boolean {
 
       <label>
         <span>{{ settingsStore.t("task.repeat") }}</span>
-        <input v-model="form.repeatRule" type="text" placeholder="daily / weekly / monthly" />
+        <select v-model="form.repeatRule">
+          <option v-for="option in repeatOptions" :key="option.value" :value="option.value">
+            {{ settingsStore.language === "zh-CN" ? option.zh : option.en }}
+          </option>
+        </select>
       </label>
 
       <label>

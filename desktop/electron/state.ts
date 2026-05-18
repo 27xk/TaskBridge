@@ -1,16 +1,19 @@
 import { safeStorage, type BrowserWindow } from "electron";
 import Store from "electron-store";
 import { randomUUID } from "node:crypto";
+import { getSystemTimeZone, normalizeTimeZone } from "../shared/quick-add-parser";
 
 export interface TokenState {
   accessToken: string;
   refreshToken: string;
+  userId?: number;
 }
 
 export interface AppSettings {
   baseUrl: string;
   wsUrl: string;
   language: "zh-CN" | "en-US";
+  displayTimeZone: string;
   deviceId: string;
   lastSyncTime: string;
   autoStart: boolean;
@@ -19,14 +22,19 @@ export interface AppSettings {
   floatingMiniMode: boolean;
   floatingX: number | null;
   floatingY: number | null;
+  floatingWidth: number;
+  floatingHeight: number;
 }
 
 export interface StoreSchema {
   accessToken?: string;
   refreshToken?: string;
+  currentUserId?: number;
   baseUrl: string;
   wsUrl: string;
   language: "zh-CN" | "en-US";
+  displayTimeZone: string;
+  displayTimeZoneByUser?: Record<string, string>;
   deviceId?: string;
   lastSyncTime: string;
   autoStart: boolean;
@@ -35,6 +43,8 @@ export interface StoreSchema {
   floatingMiniMode: boolean;
   floatingX?: number;
   floatingY?: number;
+  floatingWidth?: number;
+  floatingHeight?: number;
 }
 
 export const settingsStore = new Store<StoreSchema>({
@@ -42,11 +52,14 @@ export const settingsStore = new Store<StoreSchema>({
     baseUrl: "http://192.168.10.30:8000/api/v1",
     wsUrl: "ws://192.168.10.30:8000/ws/sync",
     language: "zh-CN",
+    displayTimeZone: getSystemTimeZone(),
     lastSyncTime: "1970-01-01T00:00:00Z",
     autoStart: false,
     floatingOpacity: 0.96,
     floatingVisibleOnStart: true,
     floatingMiniMode: false,
+    floatingWidth: 320,
+    floatingHeight: 460,
   },
 });
 
@@ -76,11 +89,15 @@ export function hasTokens(): boolean {
 export function setTokens(tokens: TokenState): void {
   setSecret("accessToken", tokens.accessToken);
   setSecret("refreshToken", tokens.refreshToken);
+  if (typeof tokens.userId === "number" && Number.isFinite(tokens.userId)) {
+    settingsStore.set("currentUserId", tokens.userId);
+  }
 }
 
 export function clearTokens(): void {
   settingsStore.delete("accessToken");
   settingsStore.delete("refreshToken");
+  settingsStore.delete("currentUserId");
 }
 
 export function getDeviceId(): string {
@@ -96,6 +113,10 @@ export function setSetting<Key extends keyof AppSettings>(
   key: Key,
   value: AppSettings[Key],
 ): AppSettings {
+  if (key === "displayTimeZone") {
+    setDisplayTimeZone(value as string);
+    return getSettings();
+  }
   if (value === null) {
     settingsStore.delete(key as keyof StoreSchema);
   } else {
@@ -107,10 +128,17 @@ export function setSetting<Key extends keyof AppSettings>(
 export function getSettings(): AppSettings {
   const floatingX = settingsStore.get("floatingX");
   const floatingY = settingsStore.get("floatingY");
+  const currentUserId = settingsStore.get("currentUserId");
+  const userTimeZones = settingsStore.get("displayTimeZoneByUser") ?? {};
+  const displayTimeZone =
+    typeof currentUserId === "number"
+      ? userTimeZones[String(currentUserId)] ?? settingsStore.get("displayTimeZone")
+      : settingsStore.get("displayTimeZone");
   return {
     baseUrl: settingsStore.get("baseUrl"),
     wsUrl: settingsStore.get("wsUrl"),
     language: normalizeLanguage(settingsStore.get("language")),
+    displayTimeZone: normalizeTimeZone(displayTimeZone),
     deviceId: getDeviceId(),
     lastSyncTime: settingsStore.get("lastSyncTime"),
     autoStart: settingsStore.get("autoStart"),
@@ -119,7 +147,22 @@ export function getSettings(): AppSettings {
     floatingMiniMode: settingsStore.get("floatingMiniMode"),
     floatingX: typeof floatingX === "number" ? floatingX : null,
     floatingY: typeof floatingY === "number" ? floatingY : null,
+    floatingWidth: normalizeFloatingWidth(settingsStore.get("floatingWidth")),
+    floatingHeight: normalizeFloatingHeight(settingsStore.get("floatingHeight")),
   };
+}
+
+function setDisplayTimeZone(timeZoneId: string): void {
+  const normalized = normalizeTimeZone(timeZoneId);
+  const currentUserId = settingsStore.get("currentUserId");
+  if (typeof currentUserId !== "number") {
+    settingsStore.set("displayTimeZone", normalized);
+    return;
+  }
+  settingsStore.set("displayTimeZoneByUser", {
+    ...(settingsStore.get("displayTimeZoneByUser") ?? {}),
+    [String(currentUserId)]: normalized,
+  });
 }
 
 function normalizeLanguage(language: unknown): "zh-CN" | "en-US" {
@@ -150,9 +193,39 @@ export function saveFloatingPosition(x: number, y: number): void {
   settingsStore.set("floatingY", Math.round(y));
 }
 
+export function getFloatingSize(): { width: number; height: number } {
+  return {
+    width: normalizeFloatingWidth(settingsStore.get("floatingWidth")),
+    height: normalizeFloatingHeight(settingsStore.get("floatingHeight")),
+  };
+}
+
+export function saveFloatingSize(width: number, height: number): { width: number; height: number } {
+  const next = {
+    width: normalizeFloatingWidth(width),
+    height: normalizeFloatingHeight(height),
+  };
+  settingsStore.set("floatingWidth", next.width);
+  settingsStore.set("floatingHeight", next.height);
+  return next;
+}
+
 function normalizeFloatingOpacity(opacity: number): number {
   if (!Number.isFinite(opacity)) return 0.96;
   return Math.min(1, Math.max(0.45, Number(opacity.toFixed(2))));
+}
+
+function normalizeFloatingWidth(width: unknown): number {
+  return normalizeDimension(width, 320, 280, 520);
+}
+
+function normalizeFloatingHeight(height: unknown): number {
+  return normalizeDimension(height, 460, 260, 720);
+}
+
+function normalizeDimension(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.round(Math.min(max, Math.max(min, value)));
 }
 
 function getSecret(key: "accessToken" | "refreshToken"): string | undefined {

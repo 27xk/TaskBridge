@@ -11,7 +11,7 @@ import { formatShanghaiDate } from "../../shared/quick-add-parser";
 const floating = useFloatingStore();
 const settingsStore = useSettingsStore();
 
-const dateLabel = computed(() => formatShanghaiDate(new Date(), settingsStore.language));
+const dateLabel = computed(() => formatShanghaiDate(new Date(), settingsStore.language, settingsStore.displayTimeZone));
 const surfaceStyle = computed(() => {
   const alpha = Math.min(0.98, Math.max(0.45, floating.opacity));
   const controlAlpha = Math.min(0.96, alpha + 0.12);
@@ -22,6 +22,8 @@ const surfaceStyle = computed(() => {
 });
 
 let unsubscribe: (() => void) | undefined;
+let resizeStart: { x: number; y: number; width: number; height: number } | null = null;
+let resizeFrame = 0;
 
 onMounted(async () => {
   await floating.init();
@@ -30,7 +32,42 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unsubscribe?.();
+  stopResize();
 });
+
+function startResize(event: PointerEvent): void {
+  event.preventDefault();
+  resizeStart = {
+    x: event.screenX,
+    y: event.screenY,
+    width: floating.width,
+    height: floating.height,
+  };
+  window.addEventListener("pointermove", resizeFloating);
+  window.addEventListener("pointerup", stopResize, { once: true });
+}
+
+function resizeFloating(event: PointerEvent): void {
+  if (!resizeStart) return;
+  const nextWidth = resizeStart.width + event.screenX - resizeStart.x;
+  const nextHeight = resizeStart.height + event.screenY - resizeStart.y;
+  if (resizeFrame) {
+    window.cancelAnimationFrame(resizeFrame);
+  }
+  resizeFrame = window.requestAnimationFrame(() => {
+    resizeFrame = 0;
+    void floating.setSize(nextWidth, nextHeight);
+  });
+}
+
+function stopResize(): void {
+  resizeStart = null;
+  if (resizeFrame) {
+    window.cancelAnimationFrame(resizeFrame);
+    resizeFrame = 0;
+  }
+  window.removeEventListener("pointermove", resizeFloating);
+}
 </script>
 
 <template>
@@ -81,5 +118,11 @@ onBeforeUnmount(() => {
 
     <p v-if="floating.feedback && !floating.miniMode" class="floating-feedback">{{ floating.feedback }}</p>
     <QuickAddTask v-if="floating.authenticated && !floating.miniMode" @submit="floating.quickAdd" />
+    <button
+      type="button"
+      class="floating-resize-handle"
+      :title="settingsStore.t('floating.resize')"
+      @pointerdown="startResize"
+    />
   </main>
 </template>

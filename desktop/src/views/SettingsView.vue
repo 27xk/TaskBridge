@@ -10,6 +10,7 @@ const settings = reactive<TaskBridgeSettings>({
   baseUrl: "",
   wsUrl: "",
   language: "zh-CN",
+  displayTimeZone: "Asia/Shanghai",
   deviceId: "",
   lastSyncTime: "",
   autoStart: false,
@@ -18,11 +19,22 @@ const settings = reactive<TaskBridgeSettings>({
   floatingMiniMode: false,
   floatingX: null,
   floatingY: null,
+  floatingWidth: 320,
+  floatingHeight: 460,
 });
 const saved = ref(false);
 const exportNote = ref("");
 const taskStore = useTaskStore();
 const settingsStore = useSettingsStore();
+const timeZoneOptions = [
+  { value: "Asia/Shanghai", zh: "中国标准时间", en: "China Standard Time" },
+  { value: "Asia/Tokyo", zh: "日本时间", en: "Japan Time" },
+  { value: "Asia/Singapore", zh: "新加坡时间", en: "Singapore Time" },
+  { value: "UTC", zh: "UTC", en: "UTC" },
+  { value: "Europe/London", zh: "伦敦时间", en: "London Time" },
+  { value: "America/New_York", zh: "纽约时间", en: "New York Time" },
+  { value: "America/Los_Angeles", zh: "洛杉矶时间", en: "Los Angeles Time" },
+];
 const metaEdit = reactive({
   projectFrom: "",
   projectTo: "",
@@ -37,6 +49,8 @@ onMounted(async () => {
 async function save(): Promise<void> {
   Object.assign(settings, await bridge().app.setSetting("language", settings.language));
   await settingsStore.setLanguage(settings.language);
+  Object.assign(settings, await bridge().app.setSetting("displayTimeZone", settings.displayTimeZone));
+  await settingsStore.setDisplayTimeZone(settings.displayTimeZone);
   Object.assign(settings, await bridge().app.setSetting("floatingOpacity", settings.floatingOpacity));
   Object.assign(settings, await bridge().app.setSetting("floatingVisibleOnStart", settings.floatingVisibleOnStart));
   Object.assign(settings, await bridge().app.setSetting("floatingMiniMode", settings.floatingMiniMode));
@@ -98,6 +112,16 @@ function updateLanguage(event: Event): void {
           <option value="en-US">{{ settingsStore.t("settings.languageEn") }}</option>
         </select>
       </label>
+      <label>
+        <span>{{ settingsStore.t("settings.displayTimeZone") }}</span>
+        <select v-model="settings.displayTimeZone">
+          <option v-for="zone in timeZoneOptions" :key="zone.value" :value="zone.value">
+            {{ settingsStore.language === "zh-CN" ? zone.zh : zone.en }} · {{ zone.value }}
+          </option>
+        </select>
+        <input v-model.trim="settings.displayTimeZone" type="text" />
+        <small>{{ settingsStore.t("settings.displayTimeZoneHint") }}</small>
+      </label>
       <label class="checkbox-line">
         <input v-model="settings.autoStart" type="checkbox" />
         <span>{{ settingsStore.t("settings.autoStart") }}</span>
@@ -122,7 +146,6 @@ function updateLanguage(event: Event): void {
         />
       </label>
     </div>
-
     <div class="form-actions settings-actions">
       <button class="secondary-button" type="button" @click="exportBackup">{{ settingsStore.t("settings.exportBackup") }}</button>
       <button class="secondary-button" type="button" @click="importBackup">{{ settingsStore.t("settings.importBackup") }}</button>

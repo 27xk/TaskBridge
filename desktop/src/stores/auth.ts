@@ -30,7 +30,7 @@ export const useAuthStore = defineStore("auth", () => {
         username_or_email: usernameOrEmail,
         password,
       });
-      await persistTokens(response.access_token, response.refresh_token);
+      await persistTokens(response.access_token, response.refresh_token, response.user.id);
       user.value = response.user;
     } catch (err) {
       error.value = err instanceof Error ? err.message : "登录失败";
@@ -45,7 +45,7 @@ export const useAuthStore = defineStore("auth", () => {
     error.value = null;
     try {
       const response = await registerApi({ username, email, password });
-      await persistTokens(response.access_token, response.refresh_token);
+      await persistTokens(response.access_token, response.refresh_token, response.user.id);
       user.value = response.user;
     } catch (err) {
       error.value = err instanceof Error ? err.message : "注册失败";
@@ -55,8 +55,8 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  async function persistTokens(accessToken: string, refreshToken: string): Promise<void> {
-    await bridge().auth.setTokens({ accessToken, refreshToken });
+  async function persistTokens(accessToken: string, refreshToken: string, userId?: number): Promise<void> {
+    await bridge().auth.setTokens({ accessToken, refreshToken, userId });
     authenticated.value = true;
   }
 

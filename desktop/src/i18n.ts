@@ -87,6 +87,8 @@ type MessageKey =
   | "settings.floatingVisibleOnStart"
   | "settings.floatingMiniMode"
   | "settings.floatingOpacity"
+  | "settings.displayTimeZone"
+  | "settings.displayTimeZoneHint"
   | "settings.exportBackup"
   | "settings.importBackup"
   | "settings.projectFrom"
@@ -113,6 +115,7 @@ type MessageKey =
   | "floating.opacity"
   | "floating.addTask"
   | "floating.refresh"
+  | "floating.resize"
   | "floating.feedbackAdded"
   | "floating.feedbackCompleted"
   | "floating.placeholder";
@@ -136,9 +139,9 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "nav.all": { "zh-CN": "全部", "en-US": "All" },
   "nav.settings": { "zh-CN": "设置", "en-US": "Settings" },
   "nav.logout": { "zh-CN": "退出登录", "en-US": "Log out" },
-  "task.add": { "zh-CN": "添加任务", "en-US": "Add task" },
-  "task.addToday": { "zh-CN": "添加今日任务", "en-US": "Add today" },
-  "task.edit": { "zh-CN": "编辑任务", "en-US": "Edit task" },
+  "task.add": { "zh-CN": "添加待办", "en-US": "Add task" },
+  "task.addToday": { "zh-CN": "添加今日待办", "en-US": "Add today" },
+  "task.edit": { "zh-CN": "编辑待办", "en-US": "Edit task" },
   "task.save": { "zh-CN": "保存", "en-US": "Save" },
   "task.cancel": { "zh-CN": "取消", "en-US": "Cancel" },
   "task.close": { "zh-CN": "关闭", "en-US": "Close" },
@@ -163,12 +166,12 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.project": { "zh-CN": "项目", "en-US": "Project" },
   "task.list": { "zh-CN": "清单", "en-US": "List" },
   "task.checklist": { "zh-CN": "子清单", "en-US": "Checklist" },
-  "task.noDue": { "zh-CN": "无截止", "en-US": "No due time" },
+  "task.noDue": { "zh-CN": "无截止时间", "en-US": "No due time" },
   "task.search": { "zh-CN": "搜索标题、内容、标签或项目", "en-US": "Search title, content, tag or project" },
-  "task.empty": { "zh-CN": "当前视图暂无任务。", "en-US": "No tasks in this view." },
+  "task.empty": { "zh-CN": "当前视图暂无待办。", "en-US": "No tasks in this view." },
   "task.emptyToday": { "zh-CN": "今天暂无待办。", "en-US": "No tasks due today." },
-  "task.allTitle": { "zh-CN": "全部任务", "en-US": "All tasks" },
-  "task.todayTitle": { "zh-CN": "今日任务", "en-US": "Today" },
+  "task.allTitle": { "zh-CN": "全部待办", "en-US": "All tasks" },
+  "task.todayTitle": { "zh-CN": "今日待办", "en-US": "Today" },
   "task.openCountSuffix": { "zh-CN": "条待办", "en-US": "open tasks" },
   "task.completedCountPrefix": { "zh-CN": "已完成", "en-US": "Completed" },
   "task.inbox": { "zh-CN": "收件箱", "en-US": "Inbox" },
@@ -188,7 +191,7 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.feedbackSaved": { "zh-CN": "已保存", "en-US": "Saved" },
   "task.feedbackCompleted": { "zh-CN": "已完成", "en-US": "Completed" },
   "task.feedbackRestored": { "zh-CN": "已恢复", "en-US": "Restored" },
-  "task.feedbackBatchCompleted": { "zh-CN": "当前视图任务已完成", "en-US": "Current view completed" },
+  "task.feedbackBatchCompleted": { "zh-CN": "当前视图待办已完成", "en-US": "Current view completed" },
   "sync.synced": { "zh-CN": "已同步", "en-US": "Synced" },
   "sync.syncing": { "zh-CN": "同步中", "en-US": "Syncing" },
   "sync.offline": { "zh-CN": "离线", "en-US": "Offline" },
@@ -210,6 +213,11 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "settings.floatingVisibleOnStart": { "zh-CN": "启动后显示悬浮窗", "en-US": "Show floating window on start" },
   "settings.floatingMiniMode": { "zh-CN": "悬浮窗迷你模式", "en-US": "Floating mini mode" },
   "settings.floatingOpacity": { "zh-CN": "悬浮窗透明度", "en-US": "Floating opacity" },
+  "settings.displayTimeZone": { "zh-CN": "显示时区", "en-US": "Display time zone" },
+  "settings.displayTimeZoneHint": {
+    "zh-CN": "任务时间按该时区显示，同步数据仍以 UTC 保存。",
+    "en-US": "Task times use this time zone. Sync data remains stored as UTC.",
+  },
   "settings.exportBackup": { "zh-CN": "导出本地备份", "en-US": "Export local backup" },
   "settings.importBackup": { "zh-CN": "导入本地备份", "en-US": "Import local backup" },
   "settings.projectFrom": { "zh-CN": "项目原名", "en-US": "Current project name" },
@@ -234,8 +242,9 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "floating.miniMode": { "zh-CN": "迷你模式", "en-US": "Mini mode" },
   "floating.hide": { "zh-CN": "隐藏悬浮窗", "en-US": "Hide floating window" },
   "floating.opacity": { "zh-CN": "透明度", "en-US": "Opacity" },
-  "floating.addTask": { "zh-CN": "添加任务", "en-US": "Add task" },
+  "floating.addTask": { "zh-CN": "添加待办", "en-US": "Add task" },
   "floating.refresh": { "zh-CN": "刷新", "en-US": "Refresh" },
+  "floating.resize": { "zh-CN": "调整大小", "en-US": "Resize" },
   "floating.feedbackAdded": { "zh-CN": "已添加", "en-US": "Added" },
   "floating.feedbackCompleted": { "zh-CN": "已完成", "en-US": "Completed" },
   "floating.placeholder": {
@@ -254,10 +263,10 @@ export function translate(key: MessageKey, language: AppLanguage): string {
 
 export function translateSyncMessage(message: string, language: AppLanguage): string {
   const normalized: Record<string, MessageKey> = {
-    "已同步": "sync.synced",
-    "同步中": "sync.syncing",
-    "离线": "sync.offline",
-    "同步异常": "sync.error",
+    已同步: "sync.synced",
+    同步中: "sync.syncing",
+    离线: "sync.offline",
+    同步异常: "sync.error",
     Synced: "sync.synced",
     Syncing: "sync.syncing",
     Offline: "sync.offline",
