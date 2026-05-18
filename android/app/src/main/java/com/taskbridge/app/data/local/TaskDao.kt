@@ -38,15 +38,20 @@ interface TaskDao {
         SELECT * FROM tasks
         WHERE isDeleted = 0
           AND (
-              dueTime LIKE :todayPrefix || '%'
-              OR remindTime LIKE :todayPrefix || '%'
-              OR plannedDate = :todayPrefix
+              (dueTime IS NOT NULL AND datetime(dueTime) >= datetime(:startTime) AND datetime(dueTime) < datetime(:endTime))
+              OR (remindTime IS NOT NULL AND datetime(remindTime) >= datetime(:startTime) AND datetime(remindTime) < datetime(:endTime))
+              OR plannedDate = :today
         )
         ORDER BY sortOrder ASC, dueTime ASC, updatedAt DESC
         LIMIT :limit
         """,
     )
-    fun observeTodayTasks(todayPrefix: String, limit: Int): Flow<List<TaskEntity>>
+    fun observeTodayTasks(
+        today: String,
+        startTime: String,
+        endTime: String,
+        limit: Int,
+    ): Flow<List<TaskEntity>>
 
     @Query(
         """
@@ -72,16 +77,16 @@ interface TaskDao {
         SELECT localId, title, status, priority, dueTime, remindTime, plannedDate FROM tasks
         WHERE isDeleted = 0
           AND (
-              dueTime LIKE :todayPrefix || '%'
-              OR remindTime LIKE :todayPrefix || '%'
-              OR plannedDate = :todayPrefix
+              (dueTime IS NOT NULL AND datetime(dueTime) >= datetime(:startTime) AND datetime(dueTime) < datetime(:endTime))
+              OR (remindTime IS NOT NULL AND datetime(remindTime) >= datetime(:startTime) AND datetime(remindTime) < datetime(:endTime))
+              OR plannedDate = :today
               OR (status = 'todo' AND priority >= :highPriority)
           )
         ORDER BY
             CASE
-                WHEN dueTime LIKE :todayPrefix || '%' THEN 0
-                WHEN remindTime LIKE :todayPrefix || '%' THEN 1
-                WHEN plannedDate = :todayPrefix THEN 2
+                WHEN dueTime IS NOT NULL AND datetime(dueTime) >= datetime(:startTime) AND datetime(dueTime) < datetime(:endTime) THEN 0
+                WHEN remindTime IS NOT NULL AND datetime(remindTime) >= datetime(:startTime) AND datetime(remindTime) < datetime(:endTime) THEN 1
+                WHEN plannedDate = :today THEN 2
                 ELSE 3
             END,
             CASE WHEN dueTime IS NULL THEN 1 ELSE 0 END,
@@ -92,7 +97,9 @@ interface TaskDao {
         """,
     )
     suspend fun getTodayWidgetTasks(
-        todayPrefix: String,
+        today: String,
+        startTime: String,
+        endTime: String,
         highPriority: Int,
         limit: Int,
     ): List<TodayWidgetTaskProjection>

@@ -32,10 +32,16 @@ import com.taskbridge.app.domain.model.SyncStatus
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
 import com.taskbridge.app.ui.components.SyncStatusBar
+import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
+import com.taskbridge.app.ui.i18n.TaskBridgeStrings
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+private val shanghaiZone: ZoneId = ZoneId.of("Asia/Shanghai")
+private val dateTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
 @Composable
 fun TaskListScreen(
@@ -46,6 +52,7 @@ fun TaskListScreen(
     onTodayClick: () -> Unit,
     onAllClick: () -> Unit,
 ) {
+    val strings = LocalTaskBridgeStrings.current
     val taskFlow = if (todayOnly) viewModel.todayTasks else viewModel.tasks
     val sourceTasks by taskFlow.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -69,13 +76,18 @@ fun TaskListScreen(
             ) {
                 Column {
                     Text(
-                        text = if (todayOnly) "今日待办" else "全部任务",
+                        text = if (todayOnly) strings.todayTasks else strings.allTasks,
                         style = MaterialTheme.typography.headlineMedium,
                     )
-                    Text("${tasks.size} 条任务")
+                    Text("${tasks.size} ${strings.taskCountSuffix}")
                 }
-                Button(onClick = onAddClick) {
-                    Text("添加")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { viewModel.refresh() }) {
+                        Text(strings.syncNow)
+                    }
+                    Button(onClick = onAddClick) {
+                        Text(strings.add)
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -84,7 +96,7 @@ fun TaskListScreen(
                 onValueChange = viewModel::updateSearchQuery,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                label = { Text("搜索标题、内容、标签或项目") },
+                label = { Text(strings.searchHint) },
             )
             Spacer(Modifier.height(8.dp))
             Row(
@@ -93,33 +105,35 @@ fun TaskListScreen(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = onTodayClick) { Text("今日") }
-                OutlinedButton(onClick = onAllClick) { Text("全部") }
+                OutlinedButton(onClick = onTodayClick) { Text(strings.today) }
+                OutlinedButton(onClick = onAllClick) { Text(strings.all) }
                 if (!todayOnly) {
                     TaskListFilter.entries.forEach { filter ->
                         OutlinedButton(onClick = { viewModel.setFilter(filter) }) {
-                            Text(if (uiState.filter == filter) "✓ ${filter.label}" else filter.label)
+                            val label = filter.localizedLabel(strings)
+                            Text(if (uiState.filter == filter) "✓ $label" else label)
                         }
                     }
                 }
-                TextButton(onClick = { viewModel.refresh() }) { Text("同步") }
+                TextButton(onClick = { viewModel.refresh() }) { Text(strings.sync) }
                 TextButton(
                     onClick = {
                         viewModel.batchComplete(
                             tasks.filter { it.status != TaskStatus.Completed }.map { it.localId },
                         )
                     },
-                ) { Text("完成当前") }
+                ) { Text(strings.completeCurrent) }
                 TextButton(onClick = { viewModel.batchDelete(tasks.map { it.localId }) }) {
-                    Text("删除当前")
+                    Text(strings.deleteCurrent)
                 }
-                TextButton(onClick = onSettingsClick) { Text("设置") }
+                TextButton(onClick = onSettingsClick) { Text(strings.settings) }
             }
             Spacer(Modifier.height(12.dp))
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(tasks, key = { it.localId }) { task ->
                     TaskRow(
                         task = task,
+                        strings = strings,
                         onComplete = { viewModel.complete(task.localId) },
                         onUndoComplete = { viewModel.undoComplete(task.localId) },
                         onPostpone = { viewModel.postponeToTomorrow(task.localId) },
@@ -139,6 +153,7 @@ fun TaskListScreen(
 @Composable
 private fun TaskRow(
     task: Task,
+    strings: TaskBridgeStrings,
     onComplete: () -> Unit,
     onUndoComplete: () -> Unit,
     onPostpone: () -> Unit,
@@ -179,9 +194,9 @@ private fun TaskRow(
                         TextDecoration.None
                     },
                 )
-                val subtitle = task.subtitle()
+                val subtitle = task.subtitle(strings)
                 Text(
-                    text = subtitle.ifBlank { "暂无截止时间" },
+                    text = subtitle.ifBlank { strings.noDueTime },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (task.syncStatus == SyncStatus.Conflict) {
                         MaterialTheme.colorScheme.error
@@ -191,7 +206,7 @@ private fun TaskRow(
                 )
             }
             TextButton(onClick = onDelete) {
-                Text("删除")
+                Text(strings.delete)
             }
         }
         Row(
@@ -202,23 +217,37 @@ private fun TaskRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (task.status == TaskStatus.Completed) {
-                TextButton(onClick = onUndoComplete) { Text("恢复") }
+                TextButton(onClick = onUndoComplete) { Text(strings.restore) }
             } else {
-                TextButton(onClick = onPlanToday) { Text("今日") }
-                TextButton(onClick = onPostpone) { Text("明天") }
-                TextButton(onClick = onSnooze) { Text("稍后") }
+                TextButton(onClick = onPlanToday) { Text(strings.today) }
+                TextButton(onClick = onPostpone) { Text(strings.tomorrow) }
+                TextButton(onClick = onSnooze) { Text(strings.snooze) }
             }
             if (task.syncStatus == SyncStatus.Conflict) {
-                TextButton(onClick = onUseServer) { Text("采用云端") }
-                TextButton(onClick = onOverwriteServer) { Text("覆盖云端") }
+                TextButton(onClick = onUseServer) { Text(strings.useCloud) }
+                TextButton(onClick = onOverwriteServer) { Text(strings.overwriteCloud) }
             }
         }
     }
 }
 
+private fun TaskListFilter.localizedLabel(strings: TaskBridgeStrings): String {
+    return when (this) {
+        TaskListFilter.All -> strings.all
+        TaskListFilter.Inbox -> strings.inbox
+        TaskListFilter.Overdue -> strings.overdue
+        TaskListFilter.Week -> strings.week
+        TaskListFilter.HighPriority -> strings.highPriority
+        TaskListFilter.Completed -> strings.completed
+        TaskListFilter.PendingSync -> strings.pendingSync
+        TaskListFilter.Conflict -> strings.conflict
+        TaskListFilter.Templates -> strings.templates
+    }
+}
+
 private fun List<Task>.filterByMode(todayOnly: Boolean, filter: TaskListFilter): List<Task> {
     if (todayOnly) return this
-    val today = LocalDate.now()
+    val today = LocalDate.now(shanghaiZone)
     return when (filter) {
         TaskListFilter.All -> this
         TaskListFilter.Inbox -> filter { it.listType == "inbox" && it.status != TaskStatus.Completed }
@@ -244,13 +273,13 @@ private fun List<Task>.filterByQuery(query: String): List<Task> {
     }
 }
 
-private fun Task.subtitle(): String {
+private fun Task.subtitle(strings: TaskBridgeStrings): String {
     return listOfNotNull(
-        project?.takeIf { it.isNotBlank() }?.let { "项目 $it" },
+        project?.takeIf { it.isNotBlank() }?.let { "${strings.project} $it" },
         tag?.takeIf { it.isNotBlank() }?.let { "#$it" },
-        plannedDate?.let { "计划 $it" },
-        dueTime?.let { "截止 ${it.take(16)}" },
-        snoozedUntil?.let { "稍后 ${it.take(16)}" },
+        plannedDate?.let { "${strings.plan} $it" },
+        dueTime?.let { "${strings.due} ${formatShanghaiInstant(it)}" },
+        snoozedUntil?.let { "${strings.snooze} ${formatShanghaiInstant(it)}" },
         if (priority > 0) "P$priority" else null,
         syncStatus.wireName.takeIf { syncStatus != SyncStatus.Synced },
     ).joinToString("  /  ")
@@ -259,7 +288,13 @@ private fun Task.subtitle(): String {
 private fun Task.dueLocalDate(): LocalDate? {
     return dueTime?.let {
         runCatching {
-            Instant.parse(it).atZone(ZoneId.systemDefault()).toLocalDate()
+            Instant.parse(it).atZone(shanghaiZone).toLocalDate()
         }.getOrNull()
     }
+}
+
+private fun formatShanghaiInstant(value: String): String {
+    return runCatching {
+        dateTimeFormatter.format(Instant.parse(value).atZone(shanghaiZone))
+    }.getOrDefault(value)
 }

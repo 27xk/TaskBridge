@@ -165,6 +165,48 @@ def test_sync_push_validates_action_and_server_id(client) -> None:
     assert result["message"] == "server_id is required"
 
 
+def test_sync_push_is_idempotent_for_retried_create(client, db_session: Session) -> None:
+    headers = auth_headers(client, "sync-idempotent-user", "sync-idempotent@example.com")
+    register_test_device(client, headers, "android-idempotent", "android")
+
+    payload = {
+        "device_id": "android-idempotent",
+        "changes": [
+            {
+                "local_id": "retry-create-1",
+                "server_id": None,
+                "action": "create",
+                "title": "Created once",
+                "version": 0,
+                "local_updated_at": "2026-05-17T12:00:00Z",
+            },
+        ],
+    }
+
+    first_response = client.post("/api/v1/sync/push", headers=headers, json=payload)
+    second_response = client.post("/api/v1/sync/push", headers=headers, json=payload)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    first_result = first_response.json()["data"]["results"][0]
+    second_result = second_response.json()["data"]["results"][0]
+    assert first_result["status"] == "applied"
+    assert second_result["status"] == "applied"
+    assert second_result["server_id"] == first_result["server_id"]
+    assert second_result["version"] == first_result["version"]
+
+    pull_response = client.get(
+        "/api/v1/sync/pull",
+        headers=headers,
+        params={"last_sync_time": "1970-01-01T00:00:00Z"},
+    )
+    changed_tasks = pull_response.json()["data"]["changed_tasks"]
+    assert [task["title"] for task in changed_tasks] == ["Created once"]
+
+    logs = list(db_session.scalars(select(SyncLog).order_by(SyncLog.id)))
+    assert [log.action for log in logs] == ["create"]
+
+
 def test_sync_create_rejects_blank_title_without_log(client, db_session: Session) -> None:
     headers = auth_headers(client, "sync-blank-user", "sync-blank@example.com")
     register_test_device(client, headers, "android-blank", "android")

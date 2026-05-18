@@ -29,8 +29,20 @@ python -m venv .venv
 pip install -r requirements-dev.txt
 Copy-Item .env.example .env
 alembic upgrade head
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+`--host 0.0.0.0` 表示监听所有网卡，Android 真机和 Windows 桌面端才能通过局域网 IP 访问后端。如果只监听默认的 `127.0.0.1`，外部设备无法连接。
+
+`backend/.env.example` 面向外部 MySQL / Redis。第一次启动前至少需要修改：
+
+- `DATABASE_URL`：MySQL 连接地址。
+- `REDIS_URL`：Redis 连接地址。
+- `JWT_SECRET`：JWT 签名密钥，生产环境必须使用随机强密钥。
+
+后端应用不会直接读取 `MYSQL_ROOT_PASSWORD`。如果使用外部 MySQL，只要 `DATABASE_URL` 指向正确的数据库用户即可。
+
+外部 MySQL 使用前需要先创建数据库和业务用户。后端连接成功后不会自动创建数据库；表结构由 Alembic 管理，执行 `alembic upgrade head` 后会创建或升级 `users`、`tasks`、`devices`、`sync_logs` 等业务表。
 
 OpenAPI 文档：
 
@@ -43,11 +55,11 @@ http://127.0.0.1:8000/redoc
 
 ```powershell
 cd backend
-Copy-Item .env.example .env
+Copy-Item .env.docker.example .env
 docker compose up --build
 ```
 
-容器启动时会先执行 `alembic upgrade head`，再启动 Uvicorn。
+`backend/.env.docker.example` 才包含 `MYSQL_ROOT_PASSWORD`、`MYSQL_DATABASE`、`MYSQL_USER` 和 `MYSQL_PASSWORD`，这些变量只用于 Docker Compose 初始化内置 MySQL。容器启动时会先执行 `alembic upgrade head`，再启动 Uvicorn。
 
 ## 数据库迁移
 

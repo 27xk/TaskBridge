@@ -10,6 +10,7 @@ export interface TokenState {
 export interface AppSettings {
   baseUrl: string;
   wsUrl: string;
+  language: "zh-CN" | "en-US";
   deviceId: string;
   lastSyncTime: string;
   autoStart: boolean;
@@ -25,6 +26,7 @@ export interface StoreSchema {
   refreshToken?: string;
   baseUrl: string;
   wsUrl: string;
+  language: "zh-CN" | "en-US";
   deviceId?: string;
   lastSyncTime: string;
   autoStart: boolean;
@@ -37,8 +39,9 @@ export interface StoreSchema {
 
 export const settingsStore = new Store<StoreSchema>({
   defaults: {
-    baseUrl: "http://127.0.0.1:8000/api/v1",
-    wsUrl: "ws://127.0.0.1:8000/ws/sync",
+    baseUrl: "http://192.168.10.30:8000/api/v1",
+    wsUrl: "ws://192.168.10.30:8000/ws/sync",
+    language: "zh-CN",
     lastSyncTime: "1970-01-01T00:00:00Z",
     autoStart: false,
     floatingOpacity: 0.96,
@@ -107,6 +110,7 @@ export function getSettings(): AppSettings {
   return {
     baseUrl: settingsStore.get("baseUrl"),
     wsUrl: settingsStore.get("wsUrl"),
+    language: normalizeLanguage(settingsStore.get("language")),
     deviceId: getDeviceId(),
     lastSyncTime: settingsStore.get("lastSyncTime"),
     autoStart: settingsStore.get("autoStart"),
@@ -116,6 +120,10 @@ export function getSettings(): AppSettings {
     floatingX: typeof floatingX === "number" ? floatingX : null,
     floatingY: typeof floatingY === "number" ? floatingY : null,
   };
+}
+
+function normalizeLanguage(language: unknown): "zh-CN" | "en-US" {
+  return language === "en-US" ? "en-US" : "zh-CN";
 }
 
 export function getFloatingOpacity(): number {

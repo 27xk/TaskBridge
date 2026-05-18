@@ -8,6 +8,7 @@ import {
   openTaskDetail,
   quickAddTodayTask,
 } from "../db/task.dao";
+import { useSettingsStore } from "./settings";
 
 type FloatingSyncState = "idle" | "syncing" | "offline" | "error" | "synced";
 
@@ -19,7 +20,9 @@ export const useFloatingStore = defineStore("floating", () => {
   const loading = ref(false);
   const authenticated = ref(false);
   const miniMode = ref(false);
+  const feedback = ref("");
   let refreshTimer: number | null = null;
+  let feedbackTimer: number | null = null;
 
   const openTasks = computed(() => tasks.value.filter((task) => task.status !== "completed"));
 
@@ -65,12 +68,14 @@ export const useFloatingStore = defineStore("floating", () => {
     if (!authenticated.value) return;
     const task = await quickAddTodayTask(title);
     if (!task) return;
+    showFeedback(`${useSettingsStore().t("floating.feedbackAdded")}：${task.title}`);
     await refresh();
   }
 
   async function complete(task: TaskRecord): Promise<void> {
     if (!authenticated.value || task.status === "completed") return;
     await completeFloatingTask(task.localId);
+    showFeedback(`${useSettingsStore().t("floating.feedbackCompleted")}：${task.title}`);
     await refresh();
   }
 
@@ -106,15 +111,34 @@ export const useFloatingStore = defineStore("floating", () => {
       const input = document.querySelector<HTMLInputElement>("[data-floating-quick-add]");
       input?.focus();
     });
+    const unsubscribeOpacity = bridge().floating.onOpacityChanged((value) => {
+      opacity.value = value;
+    });
     return () => {
       unsubscribeTasks();
       unsubscribeStatus();
       unsubscribeQuickAdd();
+      unsubscribeOpacity();
       if (refreshTimer !== null) {
         window.clearTimeout(refreshTimer);
         refreshTimer = null;
       }
+      if (feedbackTimer !== null) {
+        window.clearTimeout(feedbackTimer);
+        feedbackTimer = null;
+      }
     };
+  }
+
+  function showFeedback(message: string): void {
+    feedback.value = message;
+    if (feedbackTimer !== null) {
+      window.clearTimeout(feedbackTimer);
+    }
+    feedbackTimer = window.setTimeout(() => {
+      feedback.value = "";
+      feedbackTimer = null;
+    }, 1800);
   }
 
   return {
@@ -126,6 +150,7 @@ export const useFloatingStore = defineStore("floating", () => {
     loading,
     authenticated,
     miniMode,
+    feedback,
     init,
     refresh,
     quickAdd,

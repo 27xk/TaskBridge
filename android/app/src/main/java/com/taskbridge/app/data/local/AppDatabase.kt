@@ -2,14 +2,16 @@ package com.taskbridge.app.data.local
 
 import android.content.Context
 import androidx.room.Database
+import androidx.room.ExperimentalRoomApi
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import java.util.concurrent.TimeUnit
 
 @Database(
     entities = [TaskEntity::class, SyncQueueEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -20,6 +22,7 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var instance: AppDatabase? = null
 
+        @OptIn(ExperimentalRoomApi::class)
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -27,7 +30,9 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "taskbridge.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+                    .setAutoCloseTimeout(5, TimeUnit.MINUTES)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }
@@ -69,6 +74,15 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_status_priority ON tasks(status, priority)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_queue_createdAt_id ON sync_queue(createdAt, id)")
+            }
+        }
+
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_sync_queue_attemptCount_createdAt " +
+                        "ON sync_queue(attemptCount, createdAt)",
+                )
             }
         }
     }

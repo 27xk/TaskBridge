@@ -19,19 +19,23 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, "electron/preload.ts"),
         },
+        output: {
+          format: "cjs",
+          entryFileNames: "[name].cjs",
+          chunkFileNames: "[name]-[hash].cjs",
+        },
       },
     },
   },
   renderer: {
-    root: ".",
+    root: __dirname,
     plugins: [vue()],
     build: {
       rollupOptions: {
         input: {
-          index: resolve(__dirname, "index.html"),
+          index: "index.html",
         },
       },
     },
   },
 });
-

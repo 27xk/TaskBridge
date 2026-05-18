@@ -16,11 +16,12 @@ data class ParsedQuickTask(
 )
 
 object QuickAddParser {
+    private val shanghaiZone: ZoneId = ZoneId.of("Asia/Shanghai")
     private val priorityRegex = Regex("""(?i)\bP([0-5])\b""")
     private val tagRegex = Regex("""#([\p{L}\p{N}_-]{1,32})""")
     private val timeRegex = Regex("""(?:(上午|下午|晚上|中午)\s*)?(\d{1,2})(?::(\d{2}))?\s*(点|:)?""")
 
-    fun parse(input: String, now: LocalDateTime = LocalDateTime.now()): ParsedQuickTask {
+    fun parse(input: String, now: LocalDateTime = LocalDateTime.now(shanghaiZone)): ParsedQuickTask {
         var working = input.trim()
 
         val priority = priorityRegex.find(working)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
@@ -64,7 +65,7 @@ object QuickAddParser {
             val dueDate = date ?: now.toLocalDate()
             val dueClock = parsedTime ?: LocalTime.of(18, 0)
             LocalDateTime.of(dueDate, dueClock)
-                .atZone(ZoneId.systemDefault())
+                .atZone(shanghaiZone)
                 .toInstant()
                 .toString()
         } else {

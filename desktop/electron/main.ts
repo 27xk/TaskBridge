@@ -1,17 +1,23 @@
 import { app, BrowserWindow } from "electron";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { createFloatingWindow } from "./floating-window";
+import { createFloatingWindow, showFloatingWindow } from "./floating-window";
 import { registerIpcHandlers } from "./ipc";
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "./shortcut";
 import { windows } from "./state";
 import { createAppTray } from "./tray";
+
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("disable-gpu");
+app.commandLine.appendSwitch("disable-gpu-compositing");
 
 function createMainWindow(showOnReady = true): BrowserWindow {
   if (windows.mainWindow && !windows.mainWindow.isDestroyed()) {
     return windows.mainWindow;
   }
 
+  const preloadPath = resolvePreloadPath();
   const mainWindow = new BrowserWindow({
     width: 1120,
     height: 760,
@@ -20,10 +26,14 @@ function createMainWindow(showOnReady = true): BrowserWindow {
     title: "TaskBridge",
     show: false,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  mainWindow.webContents.on("preload-error", (_event, preload, error) => {
+    console.error("[TaskBridge] preload failed", { preload, error });
   });
 
   mainWindow.once("ready-to-show", () => {
@@ -54,6 +64,20 @@ function createMainWindow(showOnReady = true): BrowserWindow {
   return mainWindow;
 }
 
+function resolvePreloadPath(): string {
+  const candidates = [
+    join(__dirname, "../preload/index.cjs"),
+    join(__dirname, "../preload/index.js"),
+    join(__dirname, "../preload/index.mjs"),
+  ];
+  const preloadPath = candidates.find((candidate) => existsSync(candidate));
+  if (!preloadPath) {
+    console.error("[TaskBridge] preload not found", { __dirname, candidates });
+    return candidates[0];
+  }
+  return preloadPath;
+}
+
 function hardenNavigation(window: BrowserWindow): void {
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event, targetUrl) => {
@@ -74,7 +98,22 @@ app.whenReady().then(() => {
 
   registerIpcHandlers();
   const launchedHidden = app.getLoginItemSettings().wasOpenedAsHidden;
-  createMainWindow(!launchedHidden);
+  const mainWindow = createMainWindow(!launchedHidden);
+
+  if (process.env.TASKBRIDGE_SMOKE_TEST === "1") {
+    const floatingWindow = createFloatingWindow();
+    showFloatingWindow();
+    Promise.all([
+      assertBridgeAvailable(mainWindow, "main"),
+      assertBridgeAvailable(floatingWindow, "floating"),
+      assertWindowVisible(floatingWindow, "floating"),
+    ]).finally(() => {
+      windows.isQuitting = true;
+      app.quit();
+    });
+    return;
+  }
+
   createFloatingWindow();
   createAppTray();
   registerGlobalShortcuts();
@@ -83,6 +122,25 @@ app.whenReady().then(() => {
     createMainWindow().show();
   });
 });
+
+async function assertBridgeAvailable(window: BrowserWindow, name: string): Promise<void> {
+  await waitForRendererLoad(window);
+  const hasBridge = await window.webContents.executeJavaScript("Boolean(window.taskBridge)");
+  console.log(`[TaskBridge smoke] ${name} preload bridge available: ${hasBridge}`);
+}
+
+async function assertWindowVisible(window: BrowserWindow, name: string): Promise<void> {
+  await waitForRendererLoad(window);
+  const bounds = window.getBounds();
+  console.log(`[TaskBridge smoke] ${name} visible: ${window.isVisible()} bounds: ${JSON.stringify(bounds)}`);
+}
+
+function waitForRendererLoad(window: BrowserWindow): Promise<void> {
+  if (!window.webContents.isLoading()) return Promise.resolve();
+  return new Promise((resolve) => {
+    window.webContents.once("did-finish-load", () => resolve());
+  });
+}
 
 app.on("will-quit", () => {
   unregisterGlobalShortcuts();

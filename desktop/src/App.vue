@@ -3,12 +3,13 @@ import { onBeforeUnmount, onMounted, ref } from "vue";
 
 import SyncStatus from "./components/SyncStatus.vue";
 import { bridge } from "./db/sqlite";
-import { useAuthStore, useSyncStore, useTaskStore } from "./stores";
+import { useAuthStore, useSettingsStore, useSyncStore, useTaskStore } from "./stores";
 import FloatingView from "./views/FloatingView.vue";
 import LoginView from "./views/LoginView.vue";
 import SettingsView from "./views/SettingsView.vue";
 import TaskView from "./views/TaskView.vue";
 import TodayView from "./views/TodayView.vue";
+import { parseTaskBridgeDate } from "../shared/quick-add-parser";
 
 const isFloating = new URLSearchParams(window.location.search).get("view") === "floating";
 const activeView = ref<"today" | "tasks" | "settings">("today");
@@ -17,15 +18,18 @@ const openTaskRequest = ref<{ localId: string; nonce: number } | null>(null);
 const auth = useAuthStore();
 const taskStore = useTaskStore();
 const syncStore = useSyncStore();
+const settingsStore = useSettingsStore();
 
 let removeQuickAddListener: (() => void) | undefined;
 let removeSettingsListener: (() => void) | undefined;
 let removeTasksChangedListener: (() => void) | undefined;
 let removeOpenTaskDetailListener: (() => void) | undefined;
+let removeSyncNowListener: (() => void) | undefined;
 let reminderTimer: number | undefined;
 const notifiedReminderIds = new Set<string>();
 
 onMounted(async () => {
+  await settingsStore.load();
   if (isFloating) return;
 
   removeQuickAddListener = bridge().window.onQuickAdd(() => {
@@ -47,6 +51,9 @@ onMounted(async () => {
       nonce: Date.now(),
     };
   });
+  removeSyncNowListener = bridge().window.onSyncNow(() => {
+    void manualSync();
+  });
 
   await auth.loadSession();
   if (auth.isAuthenticated) {
@@ -59,6 +66,7 @@ onBeforeUnmount(() => {
   removeSettingsListener?.();
   removeTasksChangedListener?.();
   removeOpenTaskDetailListener?.();
+  removeSyncNowListener?.();
   stopReminderLoop();
   syncStore.stop();
 });
@@ -77,6 +85,11 @@ async function logout(): Promise<void> {
   syncStore.stop();
   stopReminderLoop();
   await auth.logout();
+}
+
+async function manualSync(): Promise<void> {
+  await syncStore.syncNow(true);
+  await taskStore.load();
 }
 
 function startReminderLoop(): void {
@@ -100,12 +113,12 @@ async function scanDueReminders(): Promise<void> {
     if (task.status === "completed" || task.isDeleted) continue;
     const remindAt = task.remindTime ?? task.dueTime;
     if (!remindAt) continue;
-    const timestamp = new Date(remindAt).getTime();
+    const timestamp = parseTaskBridgeDate(remindAt)?.getTime() ?? Number.NaN;
     if (!Number.isFinite(timestamp) || timestamp > now) continue;
     const key = `${task.localId}:${remindAt}`;
     if (notifiedReminderIds.has(key)) continue;
     notifiedReminderIds.add(key);
-    await bridge().app.notify(task.title, task.content || "TaskBridge reminder");
+    await bridge().app.notify(task.title, task.content || settingsStore.t("app.reminder"));
   }
 }
 </script>
@@ -116,7 +129,7 @@ async function scanDueReminders(): Promise<void> {
   <LoginView v-else-if="!auth.isAuthenticated" @authenticated="handleAuthenticated" />
 
   <main v-else class="app-shell">
-    <aside class="sidebar" aria-label="TaskBridge navigation">
+    <aside class="sidebar" :aria-label="settingsStore.t('nav.label')">
       <div class="brand">
         <span class="brand-mark">TB</span>
         <span>TaskBridge</span>
@@ -124,25 +137,33 @@ async function scanDueReminders(): Promise<void> {
 
       <nav class="nav-list">
         <button type="button" :class="{ active: activeView === 'today' }" @click="activeView = 'today'">
-          Today
+          {{ settingsStore.t("nav.today") }}
         </button>
         <button type="button" :class="{ active: activeView === 'tasks' }" @click="activeView = 'tasks'">
-          All tasks
+          {{ settingsStore.t("nav.all") }}
         </button>
         <button
           type="button"
           :class="{ active: activeView === 'settings' }"
           @click="activeView = 'settings'"
         >
-          Settings
+          {{ settingsStore.t("nav.settings") }}
         </button>
       </nav>
 
       <SyncStatus :status="syncStore.status" :message="syncStore.message" />
+      <button
+        type="button"
+        class="sidebar-sync-button"
+        :disabled="syncStore.status === 'syncing'"
+        @click="manualSync"
+      >
+        {{ settingsStore.t("sync.manual") }}
+      </button>
 
       <div class="sidebar-footer">
         <span>{{ auth.user?.username }}</span>
-        <button type="button" class="ghost-button" @click="logout">Logout</button>
+        <button type="button" class="ghost-button" @click="logout">{{ settingsStore.t("nav.logout") }}</button>
       </div>
     </aside>
 

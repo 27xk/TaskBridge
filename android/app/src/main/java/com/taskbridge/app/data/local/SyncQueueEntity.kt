@@ -10,6 +10,7 @@ import androidx.room.PrimaryKey
         Index(value = ["localId"]),
         Index(value = ["serverId"]),
         Index(value = ["createdAt", "id"]),
+        Index(value = ["attemptCount", "createdAt"]),
     ],
 )
 data class SyncQueueEntity(

@@ -1,0 +1,31 @@
+# TaskBridge Android local configuration example.
+# Copy this file to android/local.properties and update backend URLs.
+#
+# Windows PowerShell:
+#   Copy-Item local.properties.example local.properties
+#
+# Do not store accounts, tokens or secrets here.
+
+# HTTP API base URL. It must end with /api/v1/.
+#
+# Android emulator to host machine:
+#   http://10.0.2.2:8000/api/v1/
+#
+# Real device to LAN backend:
+#   http://192.168.1.10:8000/api/v1/
+#
+# Production:
+#   https://api.example.com/api/v1/
+TASKBRIDGE_BASE_URL=http://10.0.2.2:8000/api/v1/
+
+# WebSocket sync URL. This path is /ws/sync, without /api/v1.
+#
+# Android emulator to host machine:
+#   ws://10.0.2.2:8000/ws/sync
+#
+# Real device to LAN backend:
+#   ws://192.168.1.10:8000/ws/sync
+#
+# Production:
+#   wss://api.example.com/ws/sync
+TASKBRIDGE_WS_URL=ws://10.0.2.2:8000/ws/sync

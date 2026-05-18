@@ -30,6 +30,10 @@ class TokenDataStore(context: Context) {
         preferences[LAST_SYNC_TIME]
     }
 
+    val language: Flow<String> = appContext.syncPreferences.data.map { preferences ->
+        preferences[LANGUAGE] ?: DEFAULT_LANGUAGE
+    }
+
     suspend fun hasAccessToken(): Boolean {
         return accessToken.first().isNullOrBlank().not()
     }
@@ -49,6 +53,12 @@ class TokenDataStore(context: Context) {
     suspend fun saveLastSyncTime(serverTime: String) {
         appContext.syncPreferences.edit { preferences ->
             preferences[LAST_SYNC_TIME] = serverTime
+        }
+    }
+
+    suspend fun saveLanguage(language: String) {
+        appContext.syncPreferences.edit { preferences ->
+            preferences[LANGUAGE] = if (language == ENGLISH) ENGLISH else DEFAULT_LANGUAGE
         }
     }
 
@@ -79,6 +89,9 @@ class TokenDataStore(context: Context) {
         const val ACCESS_TOKEN = "access_token"
         const val REFRESH_TOKEN = "refresh_token"
         val LAST_SYNC_TIME = stringPreferencesKey("last_sync_time")
+        val LANGUAGE = stringPreferencesKey("language")
+        const val DEFAULT_LANGUAGE = "zh-CN"
+        const val ENGLISH = "en-US"
         val LEGACY_ACCESS_TOKEN = stringPreferencesKey("access_token")
         val LEGACY_REFRESH_TOKEN = stringPreferencesKey("refresh_token")
         val LEGACY_LAST_SYNC_TIME = stringPreferencesKey("last_sync_time")

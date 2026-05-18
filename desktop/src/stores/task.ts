@@ -1,10 +1,10 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, shallowRef } from "vue";
 
 import { createEmptyTask, nowIso } from "../db/sqlite";
 import { enqueueChange, removeQueueByLocalId } from "../db/sync-queue.dao";
 import { listTasks, listTodayTasks, saveTask } from "../db/task.dao";
-import { parseQuickTask, todayLocalDate } from "../../shared/quick-add-parser";
+import { parseQuickTask, parseTaskBridgeDate, shanghaiDateTimeInputToIso, todayLocalDate } from "../../shared/quick-add-parser";
 import { useSyncStore } from "./sync";
 
 export interface TaskDraft {
@@ -24,8 +24,8 @@ export interface TaskDraft {
 }
 
 export const useTaskStore = defineStore("task", () => {
-  const tasks = ref<TaskRecord[]>([]);
-  const todayTasks = ref<TaskRecord[]>([]);
+  const tasks = shallowRef<TaskRecord[]>([]);
+  const todayTasks = shallowRef<TaskRecord[]>([]);
   const loading = ref(false);
 
   const activeTasks = computed(() => tasks.value.filter((task) => !task.isDeleted));
@@ -165,14 +165,12 @@ export const useTaskStore = defineStore("task", () => {
   }
 
   async function postponeTomorrow(task: TaskRecord): Promise<void> {
-    const nextDate = new Date();
-    nextDate.setDate(nextDate.getDate() + 1);
-    nextDate.setHours(9, 0, 0, 0);
+    const plannedDate = todayLocalDate(new Date(Date.now() + 86_400_000));
     const now = nowIso();
     const next = {
       ...task,
-      dueTime: nextDate.toISOString(),
-      plannedDate: todayLocalDate(nextDate),
+      dueTime: shanghaiDateTimeInputToIso(`${plannedDate}T09:00`),
+      plannedDate,
       snoozedUntil: null,
       syncStatus: task.serverId ? "pending_update" : "pending_create",
       updatedAt: now,
@@ -399,17 +397,17 @@ function repeatDays(rule?: string | null): number | null {
 
 function shiftIso(value: string | null, days: number): string | null {
   if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  date.setDate(date.getDate() + days);
+  const date = parseTaskBridgeDate(value);
+  if (!date) return null;
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString();
 }
 
 function shiftDate(value: string | null, days: number): string | null {
   if (!value) return null;
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return null;
-  date.setDate(date.getDate() + days);
+  const date = parseTaskBridgeDate(`${value}T00:00:00Z`);
+  if (!date) return null;
+  date.setUTCDate(date.getUTCDate() + days);
   return todayLocalDate(date);
 }
 

@@ -2,11 +2,14 @@
 import { onMounted, reactive, ref } from "vue";
 
 import { bridge } from "../db/sqlite";
+import type { AppLanguage } from "../i18n";
+import { useSettingsStore } from "../stores/settings";
 import { useTaskStore } from "../stores/task";
 
 const settings = reactive<TaskBridgeSettings>({
   baseUrl: "",
   wsUrl: "",
+  language: "zh-CN",
   deviceId: "",
   lastSyncTime: "",
   autoStart: false,
@@ -19,6 +22,7 @@ const settings = reactive<TaskBridgeSettings>({
 const saved = ref(false);
 const exportNote = ref("");
 const taskStore = useTaskStore();
+const settingsStore = useSettingsStore();
 const metaEdit = reactive({
   projectFrom: "",
   projectTo: "",
@@ -31,8 +35,9 @@ onMounted(async () => {
 });
 
 async function save(): Promise<void> {
-  Object.assign(settings, await bridge().app.setSetting("baseUrl", settings.baseUrl));
-  Object.assign(settings, await bridge().app.setSetting("wsUrl", settings.wsUrl));
+  Object.assign(settings, await bridge().app.setSetting("language", settings.language));
+  await settingsStore.setLanguage(settings.language);
+  Object.assign(settings, await bridge().app.setSetting("floatingOpacity", settings.floatingOpacity));
   Object.assign(settings, await bridge().app.setSetting("floatingVisibleOnStart", settings.floatingVisibleOnStart));
   Object.assign(settings, await bridge().app.setSetting("floatingMiniMode", settings.floatingMiniMode));
   Object.assign(settings, await bridge().app.setAutoStart(settings.autoStart));
@@ -42,25 +47,36 @@ async function save(): Promise<void> {
   }, 1800);
 }
 
+async function applyFloatingOpacity(): Promise<void> {
+  settings.floatingOpacity = await bridge().floating.setOpacity(settings.floatingOpacity);
+}
+
 async function exportBackup(): Promise<void> {
   const result = await bridge().task.exportJson();
-  exportNote.value = result.canceled ? "已取消导出。" : `已导出：${result.filePath}`;
+  exportNote.value = result.canceled ? settingsStore.t("settings.exportCanceled") : `${settingsStore.t("settings.exported")}${result.filePath}`;
 }
 
 async function importBackup(): Promise<void> {
   const result = await bridge().task.importJson();
-  exportNote.value = result.canceled ? "已取消导入。" : `已导入 ${result.importedCount ?? 0} 条任务。`;
+  exportNote.value = result.canceled
+    ? settingsStore.t("settings.importCanceled")
+    : `${settingsStore.t("settings.imported")}${result.importedCount ?? 0}${settingsStore.t("settings.importedSuffix")}`;
   await taskStore.load();
 }
 
 async function renameProject(): Promise<void> {
   await taskStore.renameProject(metaEdit.projectFrom, metaEdit.projectTo);
-  exportNote.value = "项目已更新。";
+  exportNote.value = settingsStore.t("settings.projectRenamed");
 }
 
 async function renameTag(): Promise<void> {
   await taskStore.renameTag(metaEdit.tagFrom, metaEdit.tagTo);
-  exportNote.value = "标签已更新。";
+  exportNote.value = settingsStore.t("settings.tagRenamed");
+}
+
+function updateLanguage(event: Event): void {
+  settings.language = (event.target as HTMLSelectElement).value as AppLanguage;
+  void settingsStore.setLanguage(settings.language);
 }
 </script>
 
@@ -68,69 +84,71 @@ async function renameTag(): Promise<void> {
   <section class="view-shell">
     <header class="view-header">
       <div>
-        <p class="eyebrow">Settings</p>
-        <h1>Desktop client</h1>
+        <p class="eyebrow">{{ settingsStore.t("settings.title") }}</p>
+        <h1>{{ settingsStore.t("settings.subtitle") }}</h1>
       </div>
-      <button class="primary-button" type="button" @click="save">Save</button>
+      <button class="primary-button" type="button" @click="save">{{ settingsStore.t("settings.save") }}</button>
     </header>
 
     <div class="settings-grid">
       <label>
-        <span>API Base URL</span>
-        <input v-model="settings.baseUrl" type="url" />
-      </label>
-      <label>
-        <span>WebSocket URL</span>
-        <input v-model="settings.wsUrl" type="url" />
-      </label>
-      <label>
-        <span>Device ID</span>
-        <input v-model="settings.deviceId" type="text" readonly />
-      </label>
-      <label>
-        <span>Last sync time</span>
-        <input v-model="settings.lastSyncTime" type="text" readonly />
+        <span>{{ settingsStore.t("settings.language") }}</span>
+        <select v-model="settings.language" @change="updateLanguage">
+          <option value="zh-CN">{{ settingsStore.t("settings.languageZh") }}</option>
+          <option value="en-US">{{ settingsStore.t("settings.languageEn") }}</option>
+        </select>
       </label>
       <label class="checkbox-line">
         <input v-model="settings.autoStart" type="checkbox" />
-        <span>Start TaskBridge when Windows starts</span>
+        <span>{{ settingsStore.t("settings.autoStart") }}</span>
       </label>
       <label class="checkbox-line">
         <input v-model="settings.floatingVisibleOnStart" type="checkbox" />
-        <span>Show floating window when TaskBridge starts</span>
+        <span>{{ settingsStore.t("settings.floatingVisibleOnStart") }}</span>
       </label>
       <label class="checkbox-line">
         <input v-model="settings.floatingMiniMode" type="checkbox" />
-        <span>Floating window mini mode</span>
+        <span>{{ settingsStore.t("settings.floatingMiniMode") }}</span>
+      </label>
+      <label>
+        <span>{{ settingsStore.t("settings.floatingOpacity") }} {{ Math.round(settings.floatingOpacity * 100) }}%</span>
+        <input
+          v-model.number="settings.floatingOpacity"
+          type="range"
+          min="0.45"
+          max="1"
+          step="0.05"
+          @input="applyFloatingOpacity"
+        />
       </label>
     </div>
 
     <div class="form-actions settings-actions">
-      <button class="secondary-button" type="button" @click="exportBackup">Export local backup</button>
-      <button class="secondary-button" type="button" @click="importBackup">Import local backup</button>
+      <button class="secondary-button" type="button" @click="exportBackup">{{ settingsStore.t("settings.exportBackup") }}</button>
+      <button class="secondary-button" type="button" @click="importBackup">{{ settingsStore.t("settings.importBackup") }}</button>
     </div>
 
     <div class="settings-grid meta-tools">
       <label>
-        <span>项目原名</span>
+        <span>{{ settingsStore.t("settings.projectFrom") }}</span>
         <input v-model="metaEdit.projectFrom" type="text" list="project-options" />
       </label>
       <label>
-        <span>项目新名</span>
+        <span>{{ settingsStore.t("settings.projectTo") }}</span>
         <input v-model="metaEdit.projectTo" type="text" />
       </label>
       <label>
-        <span>标签原名</span>
+        <span>{{ settingsStore.t("settings.tagFrom") }}</span>
         <input v-model="metaEdit.tagFrom" type="text" list="tag-options" />
       </label>
       <label>
-        <span>标签新名</span>
+        <span>{{ settingsStore.t("settings.tagTo") }}</span>
         <input v-model="metaEdit.tagTo" type="text" />
       </label>
     </div>
     <div class="form-actions settings-actions">
-      <button class="secondary-button" type="button" @click="renameProject">Rename project</button>
-      <button class="secondary-button" type="button" @click="renameTag">Rename tag</button>
+      <button class="secondary-button" type="button" @click="renameProject">{{ settingsStore.t("settings.renameProject") }}</button>
+      <button class="secondary-button" type="button" @click="renameTag">{{ settingsStore.t("settings.renameTag") }}</button>
     </div>
     <datalist id="project-options">
       <option v-for="project in taskStore.projects" :key="project" :value="project" />
@@ -139,7 +157,7 @@ async function renameTag(): Promise<void> {
       <option v-for="tag in taskStore.tags" :key="tag" :value="tag" />
     </datalist>
 
-    <p v-if="saved" class="save-note">Settings saved.</p>
+    <p v-if="saved" class="save-note">{{ settingsStore.t("settings.saved") }}</p>
     <p v-if="exportNote" class="save-note">{{ exportNote }}</p>
   </section>
 </template>

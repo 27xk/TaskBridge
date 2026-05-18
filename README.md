@@ -242,14 +242,16 @@ python -m venv .venv
 pip install -r requirements-dev.txt
 Copy-Item .env.example .env
 alembic upgrade head
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+外部 MySQL 需要先手动创建数据库和业务用户。后端连接 MySQL 后不会仅凭连接自动建表，必须执行 `alembic upgrade head`；该命令会按迁移文件创建和更新业务表。
 
 使用 Docker 启动：
 
 ```powershell
 cd backend
-Copy-Item .env.example .env
+Copy-Item .env.docker.example .env
 docker compose up --build
 ```
 
@@ -299,19 +301,26 @@ npm run dist
 
 后端环境变量写入 `backend/.env`。
 
+- 使用外部 MySQL / Redis：复制 `backend/.env.example`。
+- 使用 `backend/docker-compose.yml` 内置 MySQL / Redis：复制 `backend/.env.docker.example`。
+
 | 变量 | 说明 |
 | --- | --- |
 | `APP_NAME` | 应用名称 |
-| `ENV` | 运行环境，例如 `local`、`test`、`prod` |
-| `DATABASE_URL` | MySQL 连接地址 |
+| `ENVIRONMENT` | 运行环境，例如 `development`、`staging`、`production` |
+| `DATABASE_URL` | MySQL 连接地址；外部 MySQL 场景下只需要正确填写这个连接串 |
 | `REDIS_URL` | Redis 连接地址 |
-| `JWT_SECRET_KEY` | JWT 签名密钥 |
+| `JWT_SECRET` | JWT 签名密钥，生产环境必须改成至少 32 位随机字符串 |
 | `JWT_ALGORITHM` | JWT 算法，默认 `HS256` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access Token 有效期 |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh Token 有效期 |
-| `WEBSOCKET_TICKET_EXPIRE_SECONDS` | WebSocket Ticket 有效期 |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access Token 有效期，单位：分钟 |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh Token 有效期，单位：天 |
+| `WEBSOCKET_TICKET_EXPIRE_SECONDS` | WebSocket Ticket 有效期，单位：秒 |
 
-客户端后端地址通过配置或构建参数传入，不应硬编码生产地址。
+`MYSQL_ROOT_PASSWORD`、`MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD` 只用于 Docker Compose 初始化内置 MySQL。使用外部 MySQL 时不需要这些变量。
+
+Android 后端地址可写入 `android/local.properties`，示例见 `android/local.properties.example`。Windows 桌面端后端地址可在应用设置页修改，不应硬编码生产地址。
+
+Android 的后端地址会写入 APK 的 `BuildConfig`，修改 `android/local.properties` 后需要重新打包安装 APK。Windows 桌面端默认地址在 `desktop/electron/state.ts`，已安装应用可在「Settings」页修改 `API Base URL` 和 `WebSocket URL`。
 
 ## API 接口说明
 

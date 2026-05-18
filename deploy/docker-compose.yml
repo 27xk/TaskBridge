@@ -2,11 +2,13 @@ services:
   mysql:
     image: mysql:8.4
     container_name: taskbridge-mysql
+    env_file:
+      - .env
     environment:
-      MYSQL_ROOT_PASSWORD: taskbridge_root
-      MYSQL_DATABASE: taskbridge
-      MYSQL_USER: taskbridge
-      MYSQL_PASSWORD: taskbridge_password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "3306:3306"
     volumes:
@@ -16,7 +18,7 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-utaskbridge", "-ptaskbridge_password"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$${MYSQL_USER} -p$${MYSQL_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -38,4 +40,3 @@ services:
 volumes:
   taskbridge_mysql:
   taskbridge_redis:
-

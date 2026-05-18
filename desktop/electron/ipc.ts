@@ -12,6 +12,7 @@ import {
   incrementAttempt,
   listQueue,
   listTasks,
+  listTasksByServerIds,
   listTodayFloatingTasks,
   listTodayTasks,
   removeQueueItem,
@@ -43,7 +44,10 @@ import {
   type TokenState,
   windows,
 } from "./state";
-import { getTraySyncStatus, setTraySyncStatus } from "./tray";
+import { getTraySyncStatus, refreshTrayMenu, setTraySyncStatus } from "./tray";
+
+const MAX_IMPORT_BYTES = 1_000_000;
+const MAX_IMPORT_TASKS = 500;
 
 export function registerIpcHandlers(): void {
   ipcMain.handle("app:get-settings", () => getSettings());
@@ -72,10 +76,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("auth:clear-tokens", () => clearTokens());
   ipcMain.handle("api:request", (_, payload: ApiRequestPayload) => performApiRequest(payload));
 
-  ipcMain.handle("db:tasks:list", (_, limit?: number, offset?: number) => listTasks(false, limit, offset));
+  ipcMain.handle("db:tasks:list", (_, limit?: number, offset?: number, includeDeleted?: boolean) => {
+    return listTasks(Boolean(includeDeleted), limit, offset);
+  });
   ipcMain.handle("db:tasks:today", (_, limit?: number) => listTodayTasks(limit));
   ipcMain.handle("db:tasks:floating-today", (_, limit?: number) => listTodayFloatingTasks(limit));
   ipcMain.handle("db:tasks:get", (_, localId: string) => getTask(localId));
+  ipcMain.handle("db:tasks:get-by-server-ids", (_, serverIds: number[]) => listTasksByServerIds(serverIds));
   ipcMain.handle("db:tasks:upsert", (_, task: TaskRecord) => {
     const saved = upsertTask(task);
     notifyFloatingTasksChanged();
@@ -90,7 +97,7 @@ export function registerIpcHandlers(): void {
     notifyFloatingTasksChanged();
     return task;
   });
-  ipcMain.handle("db:queue:list", (_, limit?: number) => listQueue(limit));
+  ipcMain.handle("db:queue:list", (_, limit?: number, includeExhausted?: boolean) => listQueue(limit, Boolean(includeExhausted)));
   ipcMain.handle("db:queue:enqueue", (_, change: SyncQueueRecord) => enqueueChange(change));
   ipcMain.handle("db:queue:remove", (_, id: number) => removeQueueItem(id));
   ipcMain.handle("db:queue:remove-by-local", (_, localId: string) => removeQueueByLocalId(localId));
@@ -130,7 +137,12 @@ function setAppSetting(key: string, value: unknown): AppSettings {
     if (key === "wsUrl" && !isAllowedWebSocketUrl(value)) {
       return getSettings();
     }
-    return setSetting(key, value);
+    if (key === "language" && value !== "zh-CN" && value !== "en-US") {
+      return getSettings();
+    }
+    const settings = setSetting(key, value);
+    if (key === "language") refreshTrayMenu();
+    return settings;
   }
   if (key === "autoStart" && typeof value === "boolean") {
     return setSetting(key, value);
@@ -142,13 +154,14 @@ function setAppSetting(key: string, value: unknown): AppSettings {
     return setSetting(key, value);
   }
   if (key === "floatingOpacity" && typeof value === "number") {
-    return setSetting(key, value);
+    setFloatingWindowOpacity(value);
+    return getSettings();
   }
   return getSettings();
 }
 
-function isStringSetting(key: string): key is "baseUrl" | "wsUrl" | "deviceId" | "lastSyncTime" {
-  return key === "baseUrl" || key === "wsUrl" || key === "deviceId" || key === "lastSyncTime";
+function isStringSetting(key: string): key is "baseUrl" | "wsUrl" | "deviceId" | "lastSyncTime" | "language" {
+  return key === "baseUrl" || key === "wsUrl" || key === "deviceId" || key === "lastSyncTime" || key === "language";
 }
 
 function isTokenState(value: unknown): value is TokenState {
@@ -199,8 +212,9 @@ function openTaskDetail(localId: string): void {
 }
 
 async function exportTasksJson(): Promise<{ canceled: boolean; filePath?: string }> {
+  const english = getSettings().language === "en-US";
   const options: SaveDialogOptions = {
-    title: "导出 TaskBridge 本地备份",
+    title: english ? "Export TaskBridge local backup" : "导出 TaskBridge 本地备份",
     defaultPath: "taskbridge-backup.json",
     filters: [{ name: "JSON", extensions: ["json"] }],
   };
@@ -220,8 +234,9 @@ async function exportTasksJson(): Promise<{ canceled: boolean; filePath?: string
 }
 
 async function importTasksJson(): Promise<{ canceled: boolean; importedCount?: number }> {
+  const english = getSettings().language === "en-US";
   const options: OpenDialogOptions = {
-    title: "导入 TaskBridge 本地备份",
+    title: english ? "Import TaskBridge local backup" : "导入 TaskBridge 本地备份",
     properties: ["openFile"],
     filters: [{ name: "JSON", extensions: ["json"] }],
   };
@@ -231,9 +246,13 @@ async function importTasksJson(): Promise<{ canceled: boolean; importedCount?: n
   const filePath = result.filePaths[0];
   if (result.canceled || !filePath) return { canceled: true };
 
-  const raw = JSON.parse(await readFile(filePath, "utf-8")) as { tasks?: unknown[] };
+  const content = await readFile(filePath, "utf-8");
+  if (content.length > MAX_IMPORT_BYTES) {
+    return { canceled: false, importedCount: 0 };
+  }
+  const raw = JSON.parse(content) as { tasks?: unknown[] };
   const now = new Date().toISOString();
-  const tasks = Array.isArray(raw.tasks) ? raw.tasks : [];
+  const tasks = Array.isArray(raw.tasks) ? raw.tasks.slice(0, MAX_IMPORT_TASKS) : [];
   let importedCount = 0;
   for (const item of tasks) {
     if (!item || typeof item !== "object") continue;

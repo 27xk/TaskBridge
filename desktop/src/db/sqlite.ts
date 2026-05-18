@@ -1,6 +1,10 @@
 export function bridge() {
   if (!window.taskBridge) {
-    throw new Error("TaskBridge preload bridge is not available");
+    const isElectron = Boolean(navigator.userAgent.includes("Electron"));
+    const hint = isElectron
+      ? "Preload script did not expose window.taskBridge. Rebuild and restart the Electron app, then check the main-process console for preload-error."
+      : "This renderer is running outside Electron. Start the desktop app with npm run dev/preview, or install the package from npm run dist.";
+    throw new Error(`TaskBridge preload bridge is not available. ${hint}`);
   }
   return window.taskBridge;
 }

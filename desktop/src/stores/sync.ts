@@ -5,7 +5,7 @@ import { SyncManager } from "../sync/SyncManager";
 
 export const useSyncStore = defineStore("sync", () => {
   const status = ref<"idle" | "syncing" | "offline" | "error" | "synced">("idle");
-  const message = ref("Sync idle");
+  const message = ref("已同步");
   const manager = ref<SyncManager | null>(null);
 
   function init(onTasksChanged: () => Promise<void>): void {
@@ -29,8 +29,8 @@ export const useSyncStore = defineStore("sync", () => {
     manager.value = null;
   }
 
-  async function syncNow(): Promise<void> {
-    await manager.value?.syncNow();
+  async function syncNow(forceRetry = false): Promise<void> {
+    await manager.value?.syncNow(forceRetry);
   }
 
   return {

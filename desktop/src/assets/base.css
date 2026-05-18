@@ -31,7 +31,8 @@ body:has(.floating-shell) {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -200,9 +201,12 @@ p {
 .toolbar input,
 .toolbar select,
 .auth-form input,
+.language-select select,
 .task-editor input,
+.task-editor select,
 .task-editor textarea,
-.settings-grid input {
+.settings-grid input,
+.settings-grid select {
   width: 100%;
   min-height: 38px;
   padding: 8px 10px;
@@ -402,6 +406,22 @@ p {
   resize: vertical;
 }
 
+.editor-hint {
+  margin: -6px 0 0;
+  color: #6d7a80;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.advanced-toggle {
+  width: fit-content;
+}
+
+.advanced-fields {
+  display: grid;
+  gap: 14px;
+}
+
 .editor-grid,
 .settings-grid {
   display: grid;
@@ -452,6 +472,21 @@ p {
   background: #f06d64;
 }
 
+.sidebar-sync-button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #315e57;
+  border-radius: 6px;
+  color: #edf5f3;
+  background: #24544c;
+  font-weight: 800;
+  text-align: center;
+}
+
+.sidebar-sync-button:hover {
+  background: #2f665d;
+}
+
 .login-shell {
   display: grid;
   min-height: 100vh;
@@ -494,6 +529,14 @@ p {
   gap: 14px;
 }
 
+.language-select {
+  display: grid;
+  gap: 6px;
+  color: #536268;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .form-error {
   color: #bf382f;
   font-size: 13px;
@@ -526,7 +569,25 @@ p {
   margin-top: 18px;
 }
 
+.action-feedback,
+.floating-feedback {
+  color: #167c70;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.action-feedback {
+  margin: 12px 0;
+}
+
+.floating-feedback {
+  min-height: 18px;
+  padding: 0 2px;
+}
+
 .floating-shell {
+  --floating-surface-opacity: 0.96;
+  --floating-control-opacity: 0.92;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
@@ -536,7 +597,7 @@ p {
   border: 1px solid rgba(38, 52, 57, 0.16);
   border-radius: 16px;
   color: #192226;
-  background: rgba(248, 250, 249, 0.96);
+  background: rgba(248, 250, 249, var(--floating-surface-opacity));
   box-shadow: 0 18px 44px rgba(8, 18, 22, 0.24);
   user-select: none;
 }
@@ -558,7 +619,7 @@ p {
   border: 1px solid rgba(22, 124, 112, 0.24);
   border-radius: 10px;
   color: #12322d;
-  background: rgba(224, 244, 239, 0.82);
+  background: rgba(224, 244, 239, var(--floating-control-opacity));
   font-weight: 900;
 }
 
@@ -641,7 +702,7 @@ p {
   border: 1px solid rgba(46, 63, 69, 0.12);
   border-radius: 7px;
   color: #1c2b30;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, var(--floating-control-opacity));
   font-weight: 800;
 }
 

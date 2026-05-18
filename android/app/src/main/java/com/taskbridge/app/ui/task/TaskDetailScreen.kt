@@ -28,13 +28,17 @@ import com.google.gson.reflect.TypeToken
 import com.taskbridge.app.data.repository.TaskRepository
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
+import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 private val detailGson = Gson()
 private val detailChecklistType = object : TypeToken<List<UiChecklistItem>>() {}.type
+private val shanghaiZone: ZoneId = ZoneId.of("Asia/Shanghai")
+private val dateTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
 private data class UiChecklistItem(
     val id: String,
@@ -53,6 +57,7 @@ fun TaskDetailScreen(
     var task by remember(localId) { mutableStateOf<Task?>(null) }
     var newChecklistTitle by remember(localId) { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val strings = LocalTaskBridgeStrings.current
 
     LaunchedEffect(localId) {
         task = taskRepository.getTask(localId)
@@ -64,16 +69,16 @@ fun TaskDetailScreen(
             .padding(24.dp),
     ) {
         TextButton(onClick = onBack) {
-            Text("Back")
+            Text(strings.back)
         }
         Spacer(Modifier.height(8.dp))
 
         val current = task
         if (current == null) {
-            Text("Task not found", style = MaterialTheme.typography.headlineSmall)
+            Text(strings.taskNotFound, style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(16.dp))
             Button(onClick = onAddClick, modifier = Modifier.fillMaxWidth()) {
-                Text("Add task")
+                Text(strings.addTask)
             }
         } else {
             Text(
@@ -84,30 +89,30 @@ fun TaskDetailScreen(
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                text = if (current.status == TaskStatus.Completed) "Completed" else "Todo",
+                text = if (current.status == TaskStatus.Completed) strings.completed else strings.todo,
                 color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.labelLarge,
             )
             Spacer(Modifier.height(16.dp))
-            Text(current.content ?: "No content", style = MaterialTheme.typography.bodyLarge)
+            Text(current.content ?: strings.noContent, style = MaterialTheme.typography.bodyLarge)
             Spacer(Modifier.height(16.dp))
             Text(
                 text = listOfNotNull(
-                    current.project?.let { "Project $it" },
-                    current.plannedDate?.let { "Plan $it" },
-                    current.dueTime?.let { "Due $it" },
-                    current.remindTime?.let { "Reminder $it" },
-                    current.snoozedUntil?.let { "Snoozed $it" },
-                    current.completedAt?.let { "Completed $it" },
+                    current.project?.let { "${strings.project} $it" },
+                    current.plannedDate?.let { "${strings.plan} $it" },
+                    current.dueTime?.let { "${strings.due} ${formatShanghaiInstant(it)}" },
+                    current.remindTime?.let { "${strings.reminder} ${formatShanghaiInstant(it)}" },
+                    current.snoozedUntil?.let { "${strings.snoozed} ${formatShanghaiInstant(it)}" },
+                    current.completedAt?.let { "${strings.completed} ${formatShanghaiInstant(it)}" },
                     current.tag?.let { "#$it" },
-                    "List ${current.listType}",
-                    "Priority ${current.priority}",
+                    "${strings.list} ${current.listType}",
+                    "${strings.priority} ${current.priority}",
                 ).joinToString("\n"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(16.dp))
-            Text("Checklist", style = MaterialTheme.typography.titleMedium)
+            Text(strings.checklist, style = MaterialTheme.typography.titleMedium)
             val checklist = remember(current.checklistJson) {
                 parseChecklist(current.checklistJson)
             }
@@ -138,7 +143,7 @@ fun TaskDetailScreen(
                             }
                         },
                     ) {
-                        Text("Delete")
+                        Text(strings.delete)
                     }
                 }
             }
@@ -146,7 +151,7 @@ fun TaskDetailScreen(
                 OutlinedTextField(
                     value = newChecklistTitle,
                     onValueChange = { newChecklistTitle = it },
-                    label = { Text("New checklist item") },
+                    label = { Text(strings.newChecklistItem) },
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(
@@ -163,7 +168,7 @@ fun TaskDetailScreen(
                     },
                     modifier = Modifier.padding(top = 8.dp),
                 ) {
-                    Text("Add")
+                    Text(strings.add)
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -181,16 +186,16 @@ fun TaskDetailScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(if (current.status == TaskStatus.Completed) "Restore" else "Complete")
+                Text(if (current.status == TaskStatus.Completed) strings.restore else strings.complete)
             }
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = {
                     scope.launch {
-                        val tomorrow = LocalDate.now().plusDays(1)
+                        val tomorrow = LocalDate.now(shanghaiZone).plusDays(1)
                         val dueTime = tomorrow
                             .atTime(9, 0)
-                            .atZone(ZoneId.systemDefault())
+                            .atZone(shanghaiZone)
                             .toInstant()
                             .toString()
                         taskRepository.postponeTask(current.localId, dueTime, null, tomorrow.toString())
@@ -200,7 +205,7 @@ fun TaskDetailScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Postpone to tomorrow")
+                Text(strings.postponeTomorrow)
             }
             Spacer(Modifier.height(8.dp))
             Button(
@@ -216,7 +221,7 @@ fun TaskDetailScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Snooze 1 hour")
+                Text(strings.snoozeOneHour)
             }
             if (!current.repeatRule.isNullOrBlank()) {
                 Spacer(Modifier.height(8.dp))
@@ -229,7 +234,7 @@ fun TaskDetailScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Create next occurrence")
+                    Text(strings.createNextOccurrence)
                 }
             }
             if (current.isTemplate) {
@@ -243,7 +248,7 @@ fun TaskDetailScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Use template")
+                    Text(strings.useTemplate)
                 }
             }
         }
@@ -255,4 +260,10 @@ private fun parseChecklist(value: String): List<UiChecklistItem> {
     return runCatching {
         detailGson.fromJson<List<UiChecklistItem>>(value, detailChecklistType)
     }.getOrDefault(emptyList())
+}
+
+private fun formatShanghaiInstant(value: String): String {
+    return runCatching {
+        dateTimeFormatter.format(Instant.parse(value).atZone(shanghaiZone))
+    }.getOrDefault(value)
 }

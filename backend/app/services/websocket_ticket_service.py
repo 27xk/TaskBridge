@@ -4,9 +4,9 @@ import time
 
 from redis.exceptions import RedisError
 
+from app.core.config import settings
 from app.core.redis import get_redis_client
 
-WEBSOCKET_TICKET_TTL_SECONDS = 60
 _MEMORY_TICKETS: dict[str, tuple[int, str, float]] = {}
 
 
@@ -15,16 +15,17 @@ def issue_websocket_ticket(user_id: int, device_id: str) -> tuple[str, int]:
     ticket = secrets.token_urlsafe(32)
     ticket_hash = _hash_ticket(ticket)
     payload = f"{user_id}|{device_id}"
-    expires_at = time.time() + WEBSOCKET_TICKET_TTL_SECONDS
+    ttl_seconds = max(10, settings.websocket_ticket_expire_seconds)
+    expires_at = time.time() + ttl_seconds
     try:
         get_redis_client().setex(
             _ticket_key(ticket_hash),
-            WEBSOCKET_TICKET_TTL_SECONDS,
+            ttl_seconds,
             payload,
         )
     except RedisError:
         _MEMORY_TICKETS[ticket_hash] = (user_id, device_id, expires_at)
-    return ticket, WEBSOCKET_TICKET_TTL_SECONDS
+    return ticket, ttl_seconds
 
 
 def consume_websocket_ticket(ticket: str, expected_device_id: str) -> int | None:
@@ -34,7 +35,7 @@ def consume_websocket_ticket(ticket: str, expected_device_id: str) -> int | None
         raw_payload = redis.get(_ticket_key(ticket_hash))
         if raw_payload:
             redis.delete(_ticket_key(ticket_hash))
-            return _parse_payload(str(raw_payload), expected_device_id)
+            return _parse_payload(_to_text(raw_payload), expected_device_id)
     except RedisError:
         pass
 
@@ -59,6 +60,12 @@ def _parse_payload(payload: str, expected_device_id: str) -> int | None:
 
 def _hash_ticket(ticket: str) -> str:
     return hashlib.sha256(ticket.encode("utf-8")).hexdigest()
+
+
+def _to_text(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return str(value)
 
 
 def _ticket_key(ticket_hash: str) -> str:

@@ -3,7 +3,7 @@ import { createWebSocketTicket } from "../api/auth";
 import { registerDevice } from "../api/device";
 import { bridge, nowIso } from "../db/sqlite";
 import { enqueueChange, incrementQueueAttempt, listSyncQueue, removeQueueItem } from "../db/sync-queue.dao";
-import { listTasks, saveTask, saveTasks } from "../db/task.dao";
+import { getTask, getTasksByServerIds, saveTask, saveTasks } from "../db/task.dao";
 import { mergePulledTask, serverTaskToLocal, toPushChange } from "./task-mapper";
 import { WebSocketClient, type SyncSocketMessage } from "./WebSocketClient";
 
@@ -12,6 +12,7 @@ type SyncStatus = "idle" | "syncing" | "offline" | "error" | "synced";
 export class SyncManager {
   private running = false;
   private rerunRequested = false;
+  private rerunForceRequested = false;
   private syncTimer: number | null = null;
   private socket: WebSocketClient | null = null;
 
@@ -38,31 +39,38 @@ export class SyncManager {
     this.socket = null;
   }
 
-  async syncNow(): Promise<void> {
+  async syncNow(forceRetry = false): Promise<void> {
     if (!(await bridge().auth.hasTokens())) return;
     if (this.running) {
       this.rerunRequested = true;
+      this.rerunForceRequested = this.rerunForceRequested || forceRetry;
       return;
     }
 
     if (!navigator.onLine) {
-      await this.setStatus("offline", "Offline");
+      await this.setStatus("offline", "离线");
       return;
     }
 
     this.running = true;
+    let forceCurrentRun = forceRetry;
     try {
       do {
+        const currentForceRetry = forceCurrentRun || this.rerunForceRequested;
+        forceCurrentRun = false;
+        this.rerunForceRequested = false;
         this.rerunRequested = false;
-        await this.setStatus("syncing", "Syncing");
+        await this.setStatus("syncing", "同步中");
         await this.ensureDeviceRegistered();
-        await this.pushPendingChanges();
+        await this.pushPendingChanges(currentForceRetry);
         await this.pullRemoteChanges();
-        await this.setStatus("synced", "Synced");
+        await this.setStatus("synced", "已同步");
         await this.onTasksChanged();
       } while (this.rerunRequested && navigator.onLine && (await bridge().auth.hasTokens()));
-    } catch {
-      await this.setStatus("error", "Sync error");
+    } catch (error) {
+      console.error("[TaskBridge] sync failed", error);
+      await this.setStatus("error", "同步异常");
+      await this.onTasksChanged();
     } finally {
       this.running = false;
     }
@@ -99,9 +107,9 @@ export class SyncManager {
     this.scheduleSync();
   }
 
-  private async pushPendingChanges(): Promise<void> {
+  private async pushPendingChanges(forceRetry = false): Promise<void> {
     const settings = await bridge().app.getSettings();
-    const queue = await listSyncQueue();
+    const queue = await listSyncQueue(100, forceRetry);
     if (queue.length === 0) return;
 
     const response = await pushSync(settings.deviceId, queue.map(toPushChange));
@@ -122,14 +130,31 @@ export class SyncManager {
         continue;
       }
 
+      if (result.status === "failed") {
+        await this.markQueueItemFailed(queueItem);
+        await removeQueueItem(queueItem.id);
+        continue;
+      }
+
       await incrementQueueAttempt(queueItem.id);
     }
+  }
+
+  private async markQueueItemFailed(queueItem: SyncQueueRecord): Promise<void> {
+    const task = await getTask(queueItem.localId);
+    if (!task) return;
+    await saveTask({
+      ...task,
+      syncStatus: "conflict",
+      lastSyncAt: nowIso(),
+    });
   }
 
   private async pullRemoteChanges(): Promise<void> {
     const settings = await bridge().app.getSettings();
     const response = await pullSync(settings.lastSyncTime);
-    const localTasks = await listTasks();
+    const pulledTasks = [...response.changed_tasks, ...response.deleted_tasks];
+    const localTasks = await getTasksByServerIds(pulledTasks.map((task) => task.id));
     const localByServerId = new Map(
       localTasks
         .filter((task): task is TaskRecord & { serverId: number } => task.serverId !== null)
@@ -195,13 +220,13 @@ export class SyncManager {
     const settings = await bridge().app.getSettings();
     await registerDevice({
       device_id: deviceId ?? settings.deviceId,
-      device_name: "Windows desktop",
+      device_name: "Windows 桌面端",
       device_type: "windows",
     });
   }
 
   private handleOffline = (): void => {
-    void this.setStatus("offline", "Offline");
+    void this.setStatus("offline", "离线");
   };
 
   private async setStatus(status: SyncStatus, message: string): Promise<void> {

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -9,6 +9,13 @@ from app.utils.time import utc_now
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        Index("ix_tasks_user_deleted_updated", "user_id", "is_deleted", "updated_at"),
+        Index("ix_tasks_user_status", "user_id", "status"),
+        Index("ix_tasks_user_tag", "user_id", "tag"),
+        Index("ix_tasks_user_template", "user_id", "is_template"),
+        Index("ix_tasks_user_planned_status", "user_id", "planned_date", "status"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)

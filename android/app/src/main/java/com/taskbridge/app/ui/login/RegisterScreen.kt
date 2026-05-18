@@ -2,6 +2,7 @@ package com.taskbridge.app.ui.login
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,14 +19,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.taskbridge.app.ui.i18n.AppLanguage
+import com.taskbridge.app.ui.i18n.LocalAppLanguage
+import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
 
 @Composable
 fun RegisterScreen(
     viewModel: RegisterViewModel,
+    onLanguageChange: (AppLanguage) -> Unit,
     onRegisterSuccess: () -> Unit,
     onLoginClick: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val strings = LocalTaskBridgeStrings.current
+    val language = LocalAppLanguage.current
 
     Column(
         modifier = Modifier
@@ -33,14 +40,29 @@ fun RegisterScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("Create account", style = MaterialTheme.typography.headlineLarge)
-        Text("Start with local-first tasks and cloud sync.")
+        Text(strings.createAccount, style = MaterialTheme.typography.headlineLarge)
+        Text(strings.registerSubtitle)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(
+                onClick = { onLanguageChange(AppLanguage.Chinese) },
+                enabled = language != AppLanguage.Chinese,
+            ) {
+                Text(strings.chinese)
+            }
+            TextButton(
+                onClick = { onLanguageChange(AppLanguage.English) },
+                enabled = language != AppLanguage.English,
+            ) {
+                Text(strings.english)
+            }
+        }
         Spacer(Modifier.height(28.dp))
 
         OutlinedTextField(
             value = state.username,
             onValueChange = viewModel::updateUsername,
-            label = { Text("Username") },
+            label = { Text(strings.username) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -48,7 +70,7 @@ fun RegisterScreen(
         OutlinedTextField(
             value = state.email,
             onValueChange = viewModel::updateEmail,
-            label = { Text("Email") },
+            label = { Text(strings.email) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -56,14 +78,14 @@ fun RegisterScreen(
         OutlinedTextField(
             value = state.password,
             onValueChange = viewModel::updatePassword,
-            label = { Text("Password") },
+            label = { Text(strings.password) },
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         state.error?.let {
             Spacer(Modifier.height(10.dp))
-            Text(it, color = MaterialTheme.colorScheme.error)
+            Text(localizeRegisterError(it, strings), color = MaterialTheme.colorScheme.error)
         }
         Spacer(Modifier.height(20.dp))
         Button(
@@ -71,10 +93,18 @@ fun RegisterScreen(
             enabled = !state.isLoading,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(if (state.isLoading) "Creating..." else "Create account")
+            Text(if (state.isLoading) strings.creating else strings.createAccount)
         }
         TextButton(onClick = onLoginClick, modifier = Modifier.fillMaxWidth()) {
-            Text("Back to sign in")
+            Text(strings.backToSignIn)
         }
+    }
+}
+
+private fun localizeRegisterError(error: String, strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings): String {
+    return when (error) {
+        "Enter username, email and an 8+ character password." -> strings.registerRequired
+        "Registration failed." -> strings.registrationFailed
+        else -> error
     }
 }

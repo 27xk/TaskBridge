@@ -1,7 +1,7 @@
 import { app, Menu, nativeImage, Tray, type NativeImage } from "electron";
 
-import { toggleFloatingWindow } from "./floating-window";
-import { windows } from "./state";
+import { hideFloatingWindow, showFloatingWindow } from "./floating-window";
+import { getSettings, windows } from "./state";
 
 let tray: Tray | null = null;
 let latestSyncStatus = "已同步";
@@ -46,20 +46,41 @@ function formatSyncStatus(status: string): string {
   return status || "已同步";
 }
 
+function label(zh: string, en: string): string {
+  return getSettings().language === "en-US" ? en : zh;
+}
+
+function localizedSyncStatus(): string {
+  if (getSettings().language !== "en-US") return latestSyncStatus;
+  const map: Record<string, string> = {
+    同步中: "Syncing",
+    离线: "Offline",
+    同步异常: "Sync error",
+    实时连接: "Connected",
+    等待连接: "Waiting",
+    已同步: "Synced",
+  };
+  return map[latestSyncStatus] ?? latestSyncStatus;
+}
+
 export function refreshTrayMenu(): void {
   if (!tray) return;
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
-        label: "打开主窗口",
+        label: label("打开主窗口", "Open main window"),
         click: () => windows.mainWindow?.show(),
       },
       {
-        label: "显示/隐藏悬浮窗",
-        click: () => toggleFloatingWindow(),
+        label: label("显示悬浮窗", "Show floating window"),
+        click: () => showFloatingWindow(),
       },
       {
-        label: "快速添加任务",
+        label: label("隐藏悬浮窗", "Hide floating window"),
+        click: () => hideFloatingWindow(),
+      },
+      {
+        label: label("快速添加任务", "Quick add task"),
         click: () => {
           windows.mainWindow?.show();
           windows.mainWindow?.webContents.send("taskbridge:quick-add");
@@ -67,11 +88,19 @@ export function refreshTrayMenu(): void {
         },
       },
       {
-        label: `同步状态：${latestSyncStatus}`,
+        label: label("立即同步", "Sync now"),
+        click: () => {
+          windows.mainWindow?.show();
+          windows.mainWindow?.webContents.send("taskbridge:sync-now");
+          windows.floatingWindow?.webContents.send("taskbridge:sync-status-changed");
+        },
+      },
+      {
+        label: `${label("同步状态", "Sync status")}: ${localizedSyncStatus()}`,
         enabled: false,
       },
       {
-        label: "设置",
+        label: label("设置", "Settings"),
         click: () => {
           windows.mainWindow?.show();
           windows.mainWindow?.webContents.send("taskbridge:show-settings");
@@ -79,7 +108,7 @@ export function refreshTrayMenu(): void {
       },
       { type: "separator" },
       {
-        label: "退出",
+        label: label("退出", "Quit"),
         click: () => {
           windows.isQuitting = true;
           app.quit();

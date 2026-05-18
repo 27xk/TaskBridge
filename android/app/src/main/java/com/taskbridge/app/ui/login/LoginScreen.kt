@@ -2,6 +2,7 @@ package com.taskbridge.app.ui.login
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,14 +19,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.taskbridge.app.ui.i18n.AppLanguage
+import com.taskbridge.app.ui.i18n.LocalAppLanguage
+import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
 
 @Composable
 fun LoginScreen(
     viewModel: LoginViewModel,
+    onLanguageChange: (AppLanguage) -> Unit,
     onLoginSuccess: () -> Unit,
     onRegisterClick: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val strings = LocalTaskBridgeStrings.current
+    val language = LocalAppLanguage.current
 
     Column(
         modifier = Modifier
@@ -34,13 +41,28 @@ fun LoginScreen(
         verticalArrangement = Arrangement.Center,
     ) {
         Text("TaskBridge", style = MaterialTheme.typography.headlineLarge)
-        Text("Sign in to sync tasks across Android and Windows.")
+        Text(strings.loginSubtitle)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(
+                onClick = { onLanguageChange(AppLanguage.Chinese) },
+                enabled = language != AppLanguage.Chinese,
+            ) {
+                Text(strings.chinese)
+            }
+            TextButton(
+                onClick = { onLanguageChange(AppLanguage.English) },
+                enabled = language != AppLanguage.English,
+            ) {
+                Text(strings.english)
+            }
+        }
         Spacer(Modifier.height(28.dp))
 
         OutlinedTextField(
             value = state.usernameOrEmail,
             onValueChange = viewModel::updateUsernameOrEmail,
-            label = { Text("Username or email") },
+            label = { Text(strings.usernameOrEmail) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -48,14 +70,14 @@ fun LoginScreen(
         OutlinedTextField(
             value = state.password,
             onValueChange = viewModel::updatePassword,
-            label = { Text("Password") },
+            label = { Text(strings.password) },
             visualTransformation = PasswordVisualTransformation(),
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         state.error?.let {
             Spacer(Modifier.height(10.dp))
-            Text(it, color = MaterialTheme.colorScheme.error)
+            Text(localizeLoginError(it, strings), color = MaterialTheme.colorScheme.error)
         }
         Spacer(Modifier.height(20.dp))
         Button(
@@ -63,10 +85,18 @@ fun LoginScreen(
             enabled = !state.isLoading,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(if (state.isLoading) "Signing in..." else "Sign in")
+            Text(if (state.isLoading) strings.signingIn else strings.signIn)
         }
         TextButton(onClick = onRegisterClick, modifier = Modifier.fillMaxWidth()) {
-            Text("Create an account")
+            Text(strings.createAccount)
         }
+    }
+}
+
+private fun localizeLoginError(error: String, strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings): String {
+    return when (error) {
+        "Enter username/email and password." -> strings.loginRequired
+        "Login failed." -> strings.loginFailed
+        else -> error
     }
 }

@@ -1,7 +1,7 @@
 import { bridge } from "./sqlite";
 
-export async function listTasks(limit = 300, offset = 0): Promise<TaskRecord[]> {
-  return bridge().db.listTasks(limit, offset);
+export async function listTasks(limit = 300, offset = 0, includeDeleted = false): Promise<TaskRecord[]> {
+  return bridge().db.listTasks(limit, offset, includeDeleted);
 }
 
 export async function listTodayTasks(limit = 120): Promise<TaskRecord[]> {
@@ -14,6 +14,10 @@ export async function listFloatingTodayTasks(limit = 8): Promise<TaskRecord[]> {
 
 export async function getTask(localId: string): Promise<TaskRecord | null> {
   return bridge().db.getTask(localId);
+}
+
+export async function getTasksByServerIds(serverIds: number[]): Promise<TaskRecord[]> {
+  return bridge().db.getTasksByServerIds(serverIds);
 }
 
 export async function saveTask(task: TaskRecord): Promise<TaskRecord> {

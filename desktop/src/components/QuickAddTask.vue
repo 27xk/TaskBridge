@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
+import { useSettingsStore } from "../stores/settings";
+
 const emit = defineEmits<{
   submit: [title: string];
 }>();
 
+const settingsStore = useSettingsStore();
 const title = ref("");
 
 function submit(): void {
@@ -22,8 +25,8 @@ function submit(): void {
       data-floating-quick-add
       type="text"
       maxlength="120"
-      placeholder="例如：明天下午3点 写周报 #工作 P3"
+      :placeholder="settingsStore.t('floating.placeholder')"
     />
-    <button type="submit" title="添加任务">+</button>
+    <button type="submit" :title="settingsStore.t('floating.addTask')">+</button>
   </form>
 </template>

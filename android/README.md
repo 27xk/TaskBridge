@@ -21,6 +21,17 @@ cd android
 .\gradlew.bat :app:assembleDebug
 ```
 
+如需固定 Android App 连接的后端地址，请复制本地配置示例：
+
+```powershell
+cd android
+Copy-Item local.properties.example local.properties
+```
+
+然后按注释修改 `TASKBRIDGE_BASE_URL` 和 `TASKBRIDGE_WS_URL`。`local.properties` 已加入 `.gitignore`，适合保存每台开发机自己的后端地址。
+
+注意：这两个地址会在构建时写入 APK 的 `BuildConfig`。修改 `local.properties` 后，需要重新执行 `.\gradlew.bat :app:assembleDebug` 并重新安装 APK。
+
 ## 版本配置
 
 Android 模块使用以下版本：
@@ -119,5 +130,5 @@ $gradle89 = Get-ChildItem "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.9-bin
 ## 注意事项
 
 - `GRADLE_HOME` 可能指向旧目录或无效目录，不要依赖它。
-- Gradle 8.9 与 Android Gradle Plugin 8.7.x、JDK 21 兼容。
+- Gradle 8.9 与 Android Gradle Plugin 8.7.3、JDK 21 兼容。
 - 小组件不直接请求网络；同步仍由 WorkManager 或 App 主流程完成。

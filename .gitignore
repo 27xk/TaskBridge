@@ -24,12 +24,15 @@ $RECYCLE.BIN/
 .env.*
 !.env.example
 !**/.env.example
+!*.env.example
+!**/*.env.example
 *.local
 *.local.*
 local.properties
 backend/.env
 backend/.env.*
 !backend/.env.example
+!backend/.env.docker.example
 
 # 密钥、证书与签名文件
 *.pem
@@ -118,6 +121,7 @@ desktop/release/
 desktop/build/
 desktop/coverage/
 desktop/.eslintcache
+desktop/.tmp-electron-user-data/
 
 # Electron 打包产物
 *.AppImage

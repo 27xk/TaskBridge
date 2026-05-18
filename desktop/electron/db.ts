@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { parseQuickTask, todayLocalDate } from "../shared/quick-add-parser";
+import { parseQuickTask, shanghaiDayBounds, todayLocalDate } from "../shared/quick-add-parser";
 
 export type SyncStatus = "synced" | "pending_create" | "pending_update" | "pending_delete" | "conflict";
 export type SyncAction = "create" | "update" | "delete" | "complete" | "restore";
@@ -130,7 +130,7 @@ export function database(): Database.Database {
   if (db) return db;
   const dbPath = join(app.getPath("userData"), "taskbridge.sqlite");
   db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
+  configureDatabase(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
       local_id TEXT PRIMARY KEY,
@@ -193,9 +193,20 @@ export function database(): Database.Database {
     CREATE INDEX IF NOT EXISTS ix_tasks_sync_status ON tasks(sync_status);
     CREATE INDEX IF NOT EXISTS ix_tasks_due_time ON tasks(due_time);
     CREATE INDEX IF NOT EXISTS ix_sync_queue_local_id ON sync_queue(local_id);
+    CREATE INDEX IF NOT EXISTS ix_sync_queue_attempt_created ON sync_queue(attempt_count, created_at);
   `);
   migrateSchema(db);
+  db.pragma("optimize");
   return db;
+}
+
+function configureDatabase(target: Database.Database): void {
+  target.pragma("journal_mode = WAL");
+  target.pragma("synchronous = NORMAL");
+  target.pragma("busy_timeout = 3000");
+  target.pragma("cache_size = -1024");
+  target.pragma("journal_size_limit = 1048576");
+  target.pragma("wal_autocheckpoint = 200");
 }
 
 function migrateSchema(target: Database.Database): void {
@@ -227,7 +238,11 @@ function migrateSchema(target: Database.Database): void {
     CREATE INDEX IF NOT EXISTS ix_tasks_deleted_updated ON tasks(is_deleted, updated_at);
     CREATE INDEX IF NOT EXISTS ix_tasks_status_priority ON tasks(status, priority);
     CREATE INDEX IF NOT EXISTS ix_tasks_today_due ON tasks(is_deleted, due_time, remind_time, planned_date);
+    CREATE INDEX IF NOT EXISTS ix_tasks_project ON tasks(project);
+    CREATE INDEX IF NOT EXISTS ix_tasks_tag ON tasks(tag);
+    CREATE INDEX IF NOT EXISTS ix_tasks_template ON tasks(is_template);
     CREATE INDEX IF NOT EXISTS ix_sync_queue_created ON sync_queue(created_at, id);
+    CREATE INDEX IF NOT EXISTS ix_sync_queue_attempt_created ON sync_queue(attempt_count, created_at);
   `);
 }
 
@@ -261,14 +276,15 @@ export function listTasks(includeDeleted: boolean, limit = 300, offset = 0): Tas
 
 export function listTodayTasks(limit = 120): TaskRecord[] {
   const today = todayLocalDate();
+  const { startTime, endTime } = shanghaiDayBounds(today);
   const rows = database()
     .prepare(
       `
       SELECT * FROM tasks
       WHERE is_deleted = 0
         AND (
-          (due_time IS NOT NULL AND due_time LIKE @today)
-          OR (remind_time IS NOT NULL AND remind_time LIKE @today)
+          (due_time IS NOT NULL AND datetime(due_time) >= datetime(@startTime) AND datetime(due_time) < datetime(@endTime))
+          OR (remind_time IS NOT NULL AND datetime(remind_time) >= datetime(@startTime) AND datetime(remind_time) < datetime(@endTime))
           OR planned_date = @plannedDate
         )
       ORDER BY
@@ -279,20 +295,21 @@ export function listTodayTasks(limit = 120): TaskRecord[] {
       LIMIT @limit
       `,
     )
-    .all({ today: `${today}%`, plannedDate: today, limit: clampLimit(limit, 1, 200) }) as TaskRow[];
+    .all({ startTime, endTime, plannedDate: today, limit: clampLimit(limit, 1, 200) }) as TaskRow[];
   return rows.map(taskFromRow);
 }
 
 export function listTodayFloatingTasks(limit = 8): TaskRecord[] {
   const today = todayLocalDate();
+  const { startTime, endTime } = shanghaiDayBounds(today);
   const rows = database()
     .prepare(
       `
       SELECT * FROM tasks
       WHERE is_deleted = 0
         AND (
-          (due_time IS NOT NULL AND due_time LIKE @today)
-          OR (remind_time IS NOT NULL AND remind_time LIKE @today)
+          (due_time IS NOT NULL AND datetime(due_time) >= datetime(@startTime) AND datetime(due_time) < datetime(@endTime))
+          OR (remind_time IS NOT NULL AND datetime(remind_time) >= datetime(@startTime) AND datetime(remind_time) < datetime(@endTime))
           OR planned_date = @plannedDate
           OR (status = 'todo' AND priority >= @highPriority)
         )
@@ -300,13 +317,14 @@ export function listTodayFloatingTasks(limit = 8): TaskRecord[] {
         CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
         CASE WHEN planned_date = @plannedDate THEN 0 ELSE 1 END,
         CASE WHEN due_time IS NULL THEN 1 ELSE 0 END,
+        CASE WHEN due_time IS NOT NULL THEN datetime(due_time) END ASC,
         due_time ASC,
         priority DESC,
         updated_at DESC
       LIMIT @limit
       `,
     )
-    .all({ today: `${today}%`, plannedDate: today, highPriority: 3, limit: clampLimit(limit, 1, 30) }) as TaskRow[];
+    .all({ startTime, endTime, plannedDate: today, highPriority: 3, limit: clampLimit(limit, 1, 30) }) as TaskRow[];
   return rows.map(taskFromRow);
 }
 
@@ -317,63 +335,113 @@ export function getTask(localId: string): TaskRecord | null {
   return row ? taskFromRow(row) : null;
 }
 
+export function getTaskByServerId(serverId: number): TaskRecord | null {
+  const row = database()
+    .prepare("SELECT * FROM tasks WHERE server_id = ? LIMIT 1")
+    .get(serverId) as TaskRow | undefined;
+  return row ? taskFromRow(row) : null;
+}
+
+export function listTasksByServerIds(serverIds: unknown): TaskRecord[] {
+  if (!Array.isArray(serverIds)) return [];
+  const ids = Array.from(
+    new Set(serverIds.filter((id): id is number => typeof id === "number" && Number.isSafeInteger(id) && id > 0)),
+  ).slice(0, 5_000);
+  if (ids.length === 0) return [];
+
+  const rows: TaskRow[] = [];
+  for (let index = 0; index < ids.length; index += 500) {
+    const chunk = ids.slice(index, index + 500);
+    const placeholders = chunk.map(() => "?").join(",");
+    rows.push(
+      ...(database()
+        .prepare(`SELECT * FROM tasks WHERE server_id IN (${placeholders})`)
+        .all(...chunk) as TaskRow[]),
+    );
+  }
+  return rows.map(taskFromRow);
+}
+
 export function upsertTask(task: TaskRecord): TaskRecord {
-  database()
-    .prepare(
-      `
-      INSERT INTO tasks (
-        local_id, server_id, title, content, status, priority, tag, project, list_type,
-        due_time, remind_time, repeat_rule, planned_date, completed_at, snoozed_until,
-        parent_server_id, checklist_json, is_template, template_name, sort_order,
-        version, is_deleted, sync_status, created_at, updated_at, last_sync_at
-      ) VALUES (
-        @localId, @serverId, @title, @content, @status, @priority, @tag, @project, @listType,
-        @dueTime, @remindTime, @repeatRule, @plannedDate, @completedAt, @snoozedUntil,
-        @parentServerId, @checklistJson, @isTemplateInt, @templateName, @sortOrder,
-        @version, @isDeletedInt, @syncStatus, @createdAt, @updatedAt, @lastSyncAt
+  const existingByServerId = task.serverId === null ? null : getTaskByServerId(task.serverId);
+  const shouldRemoveMergedDuplicate = Boolean(existingByServerId && existingByServerId.localId !== task.localId);
+  const normalizedTask = existingByServerId && existingByServerId.localId !== task.localId
+    ? {
+        ...task,
+        localId: existingByServerId.localId,
+        createdAt: existingByServerId.createdAt,
+      }
+    : task;
+
+  const target = database();
+  const saveNormalizedTask = target.transaction(() => {
+    target
+      .prepare(
+        `
+        INSERT INTO tasks (
+          local_id, server_id, title, content, status, priority, tag, project, list_type,
+          due_time, remind_time, repeat_rule, planned_date, completed_at, snoozed_until,
+          parent_server_id, checklist_json, is_template, template_name, sort_order,
+          version, is_deleted, sync_status, created_at, updated_at, last_sync_at
+        ) VALUES (
+          @localId, @serverId, @title, @content, @status, @priority, @tag, @project, @listType,
+          @dueTime, @remindTime, @repeatRule, @plannedDate, @completedAt, @snoozedUntil,
+          @parentServerId, @checklistJson, @isTemplateInt, @templateName, @sortOrder,
+          @version, @isDeletedInt, @syncStatus, @createdAt, @updatedAt, @lastSyncAt
+        )
+        ON CONFLICT(local_id) DO UPDATE SET
+          server_id = excluded.server_id,
+          title = excluded.title,
+          content = excluded.content,
+          status = excluded.status,
+          priority = excluded.priority,
+          tag = excluded.tag,
+          project = excluded.project,
+          list_type = excluded.list_type,
+          due_time = excluded.due_time,
+          remind_time = excluded.remind_time,
+          repeat_rule = excluded.repeat_rule,
+          planned_date = excluded.planned_date,
+          completed_at = excluded.completed_at,
+          snoozed_until = excluded.snoozed_until,
+          parent_server_id = excluded.parent_server_id,
+          checklist_json = excluded.checklist_json,
+          is_template = excluded.is_template,
+          template_name = excluded.template_name,
+          sort_order = excluded.sort_order,
+          version = excluded.version,
+          is_deleted = excluded.is_deleted,
+          sync_status = excluded.sync_status,
+          updated_at = excluded.updated_at,
+          last_sync_at = excluded.last_sync_at
+        `,
       )
-      ON CONFLICT(local_id) DO UPDATE SET
-        server_id = excluded.server_id,
-        title = excluded.title,
-        content = excluded.content,
-        status = excluded.status,
-        priority = excluded.priority,
-        tag = excluded.tag,
-        project = excluded.project,
-        list_type = excluded.list_type,
-        due_time = excluded.due_time,
-        remind_time = excluded.remind_time,
-        repeat_rule = excluded.repeat_rule,
-        planned_date = excluded.planned_date,
-        completed_at = excluded.completed_at,
-        snoozed_until = excluded.snoozed_until,
-        parent_server_id = excluded.parent_server_id,
-        checklist_json = excluded.checklist_json,
-        is_template = excluded.is_template,
-        template_name = excluded.template_name,
-        sort_order = excluded.sort_order,
-        version = excluded.version,
-        is_deleted = excluded.is_deleted,
-        sync_status = excluded.sync_status,
-        updated_at = excluded.updated_at,
-        last_sync_at = excluded.last_sync_at
-      `,
-    )
-    .run({
-      ...task,
-      project: task.project ?? null,
-      listType: task.listType ?? "inbox",
-      plannedDate: task.plannedDate ?? null,
-      completedAt: task.completedAt ?? null,
-      snoozedUntil: task.snoozedUntil ?? null,
-      parentServerId: task.parentServerId ?? null,
-      checklistJson: task.checklistJson || "[]",
-      isTemplateInt: task.isTemplate ? 1 : 0,
-      templateName: task.templateName ?? null,
-      sortOrder: task.sortOrder ?? 0,
-      isDeletedInt: task.isDeleted ? 1 : 0,
-    });
-  return task;
+      .run({
+        ...normalizedTask,
+        project: normalizedTask.project ?? null,
+        listType: normalizedTask.listType ?? "inbox",
+        plannedDate: normalizedTask.plannedDate ?? null,
+        completedAt: normalizedTask.completedAt ?? null,
+        snoozedUntil: normalizedTask.snoozedUntil ?? null,
+        parentServerId: normalizedTask.parentServerId ?? null,
+        checklistJson: normalizedTask.checklistJson || "[]",
+        isTemplateInt: normalizedTask.isTemplate ? 1 : 0,
+        templateName: normalizedTask.templateName ?? null,
+        sortOrder: normalizedTask.sortOrder ?? 0,
+        isDeletedInt: normalizedTask.isDeleted ? 1 : 0,
+      });
+
+    if (shouldRemoveMergedDuplicate) {
+      target
+        .prepare("DELETE FROM tasks WHERE local_id = ? AND server_id IS NULL")
+        .run(task.localId);
+      target
+        .prepare("DELETE FROM sync_queue WHERE local_id = ?")
+        .run(task.localId);
+    }
+  });
+  saveNormalizedTask();
+  return normalizedTask;
 }
 
 export function softDeleteLocalTask(localId: string): void {
@@ -452,9 +520,16 @@ export function completeLocalTaskWithQueue(localId: string): TaskRecord | null {
   return task;
 }
 
-export function listQueue(limit = 100): SyncQueueRecord[] {
+export function listQueue(limit = 100, includeExhausted = false): SyncQueueRecord[] {
   const rows = database()
-    .prepare("SELECT * FROM sync_queue ORDER BY id ASC LIMIT @limit")
+    .prepare(
+      `
+      SELECT * FROM sync_queue
+      ${includeExhausted ? "" : "WHERE attempt_count < 8"}
+      ORDER BY attempt_count ASC, id ASC
+      LIMIT @limit
+      `,
+    )
     .all({ limit: clampLimit(limit, 1, 100) }) as SyncQueueRow[];
   return rows.map(queueFromRow);
 }

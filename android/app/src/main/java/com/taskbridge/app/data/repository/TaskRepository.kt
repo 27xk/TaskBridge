@@ -16,10 +16,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 
 private val taskRepositoryGson = Gson()
 private val checklistType = object : TypeToken<List<LocalChecklistItem>>() {}.type
+private const val MAX_IMPORT_BYTES = 1_000_000
+private const val MAX_IMPORT_TASKS = 500
+private val taskRepositoryShanghaiZone: ZoneId = ZoneId.of("Asia/Shanghai")
 
 private data class LocalChecklistItem(
     val id: String,
@@ -39,7 +43,9 @@ class TaskRepository(
     }
 
     fun observeTodayTasks(todayPrefix: String): Flow<List<Task>> {
-        return taskDao.observeTodayTasks(todayPrefix, searchLimit).map { tasks -> tasks.map { it.toDomain() } }
+        val (startTime, endTime) = shanghaiDayBounds(todayPrefix)
+        return taskDao.observeTodayTasks(todayPrefix, startTime, endTime, searchLimit)
+            .map { tasks -> tasks.map { it.toDomain() } }
     }
 
     fun observeSearchTasks(keyword: String): Flow<List<Task>> {
@@ -102,10 +108,12 @@ class TaskRepository(
     }
 
     suspend fun importBackupJson(raw: String): Int {
+        if (raw.length > MAX_IMPORT_BYTES) return 0
         val root = runCatching { JsonParser.parseString(raw).asJsonObject }.getOrNull() ?: return 0
         val tasks = root.getAsJsonArray("tasks") ?: return 0
         var imported = 0
         tasks.forEach { element ->
+            if (imported >= MAX_IMPORT_TASKS) return@forEach
             val item = element.asJsonObjectOrNull() ?: return@forEach
             val title = item.stringOrNull("title")?.trim().orEmpty()
             if (title.isBlank()) return@forEach
@@ -495,6 +503,13 @@ private fun shiftLocalDate(value: String?, days: Long): String? {
     return value?.let {
         runCatching { LocalDate.parse(it).plusDays(days).toString() }.getOrNull()
     }
+}
+
+private fun shanghaiDayBounds(day: String): Pair<String, String> {
+    val date = runCatching { LocalDate.parse(day) }.getOrDefault(LocalDate.now(taskRepositoryShanghaiZone))
+    val start = date.atStartOfDay(taskRepositoryShanghaiZone).toInstant().toString()
+    val end = date.plusDays(1).atStartOfDay(taskRepositoryShanghaiZone).toInstant().toString()
+    return start to end
 }
 
 private fun com.google.gson.JsonElement.asJsonObjectOrNull(): JsonObject? {

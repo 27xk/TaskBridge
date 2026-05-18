@@ -2,7 +2,7 @@ import { globalShortcut } from "electron";
 
 import { toggleFloatingWindow } from "./floating-window";
 import { showTaskNotification } from "./notification";
-import { windows } from "./state";
+import { getSettings, windows } from "./state";
 
 export function registerGlobalShortcuts(): void {
   globalShortcut.register("CommandOrControl+Alt+T", () => {
@@ -13,7 +13,7 @@ export function registerGlobalShortcuts(): void {
     windows.mainWindow?.show();
     windows.mainWindow?.webContents.send("taskbridge:quick-add");
     windows.floatingWindow?.webContents.send("taskbridge:quick-add");
-    showTaskNotification("TaskBridge", "Quick add is ready.");
+    showTaskNotification("TaskBridge", getSettings().language === "en-US" ? "Quick add is ready." : "快速添加已就绪。");
   });
 }
 

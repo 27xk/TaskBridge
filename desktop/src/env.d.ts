@@ -11,6 +11,7 @@ declare global {
   interface TaskBridgeSettings {
     baseUrl: string;
     wsUrl: string;
+    language: "zh-CN" | "en-US";
     deviceId: string;
     lastSyncTime: string;
     autoStart: boolean;
@@ -92,8 +93,8 @@ declare global {
         setSetting: (key: keyof TaskBridgeSettings, value: TaskBridgeSettings[keyof TaskBridgeSettings]) => Promise<TaskBridgeSettings>;
         setSyncStatus: (status: string) => Promise<void>;
         notify: (title: string, body: string) => Promise<void>;
-        toggleFloating: () => Promise<void>;
-        showFloating: () => Promise<void>;
+        toggleFloating: () => Promise<boolean>;
+        showFloating: () => Promise<boolean>;
         setAutoStart: (enabled: boolean) => Promise<TaskBridgeSettings>;
       };
       auth: {
@@ -114,14 +115,15 @@ declare global {
         }>;
       };
       db: {
-        listTasks: (limit?: number, offset?: number) => Promise<TaskRecord[]>;
+        listTasks: (limit?: number, offset?: number, includeDeleted?: boolean) => Promise<TaskRecord[]>;
         listTodayTasks: (limit?: number) => Promise<TaskRecord[]>;
         listFloatingTodayTasks: (limit?: number) => Promise<TaskRecord[]>;
         getTask: (localId: string) => Promise<TaskRecord | null>;
+        getTasksByServerIds: (serverIds: number[]) => Promise<TaskRecord[]>;
         upsertTask: (task: TaskRecord) => Promise<TaskRecord>;
         deleteLocalTask: (localId: string) => Promise<void>;
         completeLocalTask: (localId: string) => Promise<TaskRecord | null>;
-        listQueue: (limit?: number) => Promise<SyncQueueRecord[]>;
+        listQueue: (limit?: number, includeExhausted?: boolean) => Promise<SyncQueueRecord[]>;
         enqueueChange: (change: SyncQueueRecord) => Promise<number>;
         removeQueueItem: (id: number) => Promise<void>;
         removeQueueByLocalId: (localId: string) => Promise<void>;
@@ -135,12 +137,14 @@ declare global {
         onTasksChanged: (callback: () => void) => () => void;
         onSyncStatusChanged: (callback: () => void) => () => void;
         onOpenTaskDetail: (callback: (localId: string) => void) => () => void;
+        onSyncNow: (callback: () => void) => () => void;
       };
       floating: {
-        show: () => Promise<void>;
-        hide: () => Promise<void>;
-        toggle: () => Promise<void>;
+        show: () => Promise<boolean>;
+        hide: () => Promise<boolean>;
+        toggle: () => Promise<boolean>;
         setOpacity: (opacity: number) => Promise<number>;
+        onOpacityChanged: (callback: (opacity: number) => void) => () => void;
         getPosition: () => Promise<{ x: number | null; y: number | null }>;
         savePosition: (x?: number, y?: number) => Promise<{ x: number | null; y: number | null }>;
       };

@@ -1,7 +1,7 @@
 import { bridge } from "./sqlite";
 
-export async function listSyncQueue(limit = 100): Promise<SyncQueueRecord[]> {
-  return bridge().db.listQueue(limit);
+export async function listSyncQueue(limit = 100, includeExhausted = false): Promise<SyncQueueRecord[]> {
+  return bridge().db.listQueue(limit, includeExhausted);
 }
 
 export async function enqueueChange(change: SyncQueueRecord): Promise<number> {

@@ -25,6 +25,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.taskbridge.app.ui.editor.EditorScreen
+import com.taskbridge.app.ui.i18n.AppLanguage
+import com.taskbridge.app.ui.i18n.TaskBridgeLanguageProvider
 import com.taskbridge.app.ui.editor.EditorViewModelFactory
 import com.taskbridge.app.ui.login.LoginScreen
 import com.taskbridge.app.ui.login.LoginViewModelFactory
@@ -90,6 +92,8 @@ fun TaskBridgeApp(
     val navController = rememberNavController()
     val appContext = LocalContext.current.applicationContext
     val token by container.tokenDataStore.accessToken.collectAsStateWithLifecycle(initialValue = null)
+    val languageCode by container.tokenDataStore.language.collectAsStateWithLifecycle(initialValue = AppLanguage.Chinese.code)
+    val language = AppLanguage.fromCode(languageCode)
     val widgetLaunchTarget = widgetLaunchState.value
     val sharedText = sharedTextState.value
 
@@ -120,7 +124,9 @@ fun TaskBridgeApp(
         navController.navigate(Routes.Editor)
     }
 
-    TaskBridgeNavHost(container, navController, sharedTextState)
+    TaskBridgeLanguageProvider(language) {
+        TaskBridgeNavHost(container, navController, sharedTextState, language)
+    }
 }
 
 @Composable
@@ -128,6 +134,7 @@ private fun TaskBridgeNavHost(
     container: AppContainer,
     navController: NavHostController,
     sharedTextState: MutableState<String?>,
+    language: AppLanguage,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -139,6 +146,11 @@ private fun TaskBridgeNavHost(
             )
             LoginScreen(
                 viewModel = viewModel,
+                onLanguageChange = { nextLanguage ->
+                    scope.launch {
+                        container.tokenDataStore.saveLanguage(nextLanguage.code)
+                    }
+                },
                 onLoginSuccess = {
                     navController.navigate(Routes.Tasks) {
                         popUpTo(Routes.Login) { inclusive = true }
@@ -154,6 +166,11 @@ private fun TaskBridgeNavHost(
             )
             RegisterScreen(
                 viewModel = viewModel,
+                onLanguageChange = { nextLanguage ->
+                    scope.launch {
+                        container.tokenDataStore.saveLanguage(nextLanguage.code)
+                    }
+                },
                 onRegisterSuccess = {
                     navController.navigate(Routes.Tasks) {
                         popUpTo(Routes.Login) { inclusive = true }
@@ -242,6 +259,12 @@ private fun TaskBridgeNavHost(
         composable(Routes.Settings) {
             SettingsScreen(
                 taskRepository = container.taskRepository,
+                language = language,
+                onLanguageChange = { nextLanguage ->
+                    scope.launch {
+                        container.tokenDataStore.saveLanguage(nextLanguage.code)
+                    }
+                },
                 onBack = { navController.popBackStack() },
                 onLogout = {
                     scope.launch {

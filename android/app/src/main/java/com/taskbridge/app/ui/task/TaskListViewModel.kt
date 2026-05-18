@@ -43,7 +43,8 @@ class TaskListViewModel(
     private val taskRepository: TaskRepository,
     private val syncManager: SyncManager,
 ) : ViewModel() {
-    private val todayPrefix = LocalDate.now().toString()
+    private val shanghaiZone = ZoneId.of("Asia/Shanghai")
+    private val todayPrefix = LocalDate.now(shanghaiZone).toString()
     private val reminderManager = ReminderManager(appContext)
 
     val tasks: StateFlow<List<Task>> = taskRepository.observeTasks()
@@ -125,10 +126,10 @@ class TaskListViewModel(
 
     fun postponeToTomorrow(localId: String) {
         viewModelScope.launch {
-            val tomorrow = LocalDate.now().plusDays(1)
+            val tomorrow = LocalDate.now(shanghaiZone).plusDays(1)
             val dueTime = tomorrow
                 .atTime(9, 0)
-                .atZone(ZoneId.systemDefault())
+                .atZone(shanghaiZone)
                 .toInstant()
                 .toString()
             taskRepository.postponeTask(
@@ -154,7 +155,7 @@ class TaskListViewModel(
 
     fun planToday(localId: String) {
         viewModelScope.launch {
-            taskRepository.planTaskForToday(localId, LocalDate.now().toString())
+            taskRepository.planTaskForToday(localId, LocalDate.now(shanghaiZone).toString())
             taskRepository.getTask(localId)?.let(reminderManager::schedule)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync("已加入今日计划")

@@ -21,11 +21,15 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default=DEFAULT_DATABASE_URL,
     )
+    database_pool_size: int = 3
+    database_max_overflow: int = 2
+    database_pool_recycle_seconds: int = 1800
     redis_url: str = "redis://127.0.0.1:6379/0"
     jwt_secret: str = DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
+    websocket_ticket_expire_seconds: int = 60
 
     @property
     def is_production(self) -> bool:

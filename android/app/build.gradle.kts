@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -9,12 +11,19 @@ android {
     namespace = "com.taskbridge.app"
     compileSdk = 35
 
-    val taskBridgeBaseUrl = providers.gradleProperty("TASKBRIDGE_BASE_URL")
-        .orElse("http://10.0.2.2:8000/api/v1/")
-        .get()
-    val taskBridgeWebSocketUrl = providers.gradleProperty("TASKBRIDGE_WS_URL")
-        .orElse("ws://10.0.2.2:8000/ws/sync")
-        .get()
+    val localProperties = Properties().apply {
+        val localPropertiesFile = rootProject.file("local.properties")
+        if (localPropertiesFile.isFile) {
+            localPropertiesFile.inputStream().use(::load)
+        }
+    }
+    fun taskBridgeProperty(name: String, defaultValue: String): String =
+        providers.gradleProperty(name).orNull
+            ?: localProperties.getProperty(name)
+            ?: defaultValue
+
+    val taskBridgeBaseUrl = taskBridgeProperty("TASKBRIDGE_BASE_URL", "http://10.0.2.2:8000/api/v1/")
+    val taskBridgeWebSocketUrl = taskBridgeProperty("TASKBRIDGE_WS_URL", "ws://10.0.2.2:8000/ws/sync")
 
     defaultConfig {
         applicationId = "com.taskbridge.app"
@@ -42,6 +51,22 @@ android {
     buildFeatures {
         buildConfig = true
         compose = true
+    }
+
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1",
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+            )
+        }
     }
 
     buildTypes {

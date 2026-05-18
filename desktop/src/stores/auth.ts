@@ -33,7 +33,7 @@ export const useAuthStore = defineStore("auth", () => {
       await persistTokens(response.access_token, response.refresh_token);
       user.value = response.user;
     } catch (err) {
-      error.value = err instanceof Error ? err.message : "Login failed";
+      error.value = err instanceof Error ? err.message : "登录失败";
       throw err;
     } finally {
       loading.value = false;
@@ -48,7 +48,7 @@ export const useAuthStore = defineStore("auth", () => {
       await persistTokens(response.access_token, response.refresh_token);
       user.value = response.user;
     } catch (err) {
-      error.value = err instanceof Error ? err.message : "Register failed";
+      error.value = err instanceof Error ? err.message : "注册失败";
       throw err;
     } finally {
       loading.value = false;

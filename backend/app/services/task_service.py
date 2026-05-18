@@ -26,7 +26,7 @@ from app.schemas.task import (
     TaskUpdate,
 )
 from app.services.sync_service import append_sync_log
-from app.utils.time import normalize_to_utc_naive, utc_now
+from app.utils.time import normalize_to_utc_naive, shanghai_day_utc_bounds, shanghai_local_date, utc_now
 
 
 def _get_owned_task(
@@ -142,7 +142,8 @@ def list_tasks(
 
 def get_task_meta(db: Session, current_user: User) -> dict[str, Any]:
     now = utc_now()
-    today = now.date()
+    today = shanghai_local_date(now)
+    today_start, today_end = shanghai_day_utc_bounds(today)
     base = [Task.user_id == current_user.id]
     active = base + [Task.is_deleted.is_(False)]
 
@@ -174,7 +175,11 @@ def get_task_meta(db: Session, current_user: User) -> dict[str, Any]:
             active
             + [
                 Task.status != "completed",
-                or_(Task.planned_date == today, and_(Task.due_time.is_not(None), func.date(Task.due_time) == today)),
+                or_(
+                    Task.planned_date == today,
+                    and_(Task.due_time.is_not(None), Task.due_time >= today_start, Task.due_time < today_end),
+                    and_(Task.remind_time.is_not(None), Task.remind_time >= today_start, Task.remind_time < today_end),
+                ),
             ],
         ),
         "overdue": _count_tasks(db, active + [Task.status != "completed", Task.due_time < now]),
@@ -360,7 +365,8 @@ def _apply_view_conditions(
         return
     normalized = view.strip().lower()
     current = normalize_to_utc_naive(now) if now else utc_now()
-    today = current.date()
+    today = shanghai_local_date(current)
+    today_start, today_end = shanghai_day_utc_bounds(today)
 
     if normalized == "inbox":
         conditions.extend([Task.list_type == "inbox", Task.status != "completed"])
@@ -368,18 +374,21 @@ def _apply_view_conditions(
         conditions.append(
             or_(
                 Task.planned_date == today,
-                and_(Task.due_time.is_not(None), func.date(Task.due_time) == today),
-                and_(Task.remind_time.is_not(None), func.date(Task.remind_time) == today),
+                and_(Task.due_time.is_not(None), Task.due_time >= today_start, Task.due_time < today_end),
+                and_(Task.remind_time.is_not(None), Task.remind_time >= today_start, Task.remind_time < today_end),
             ),
         )
     elif normalized == "overdue":
         conditions.extend([Task.status != "completed", Task.due_time.is_not(None), Task.due_time < current])
     elif normalized == "week":
         end_date = today + timedelta(days=7)
+        week_start = today_start
+        _, week_end = shanghai_day_utc_bounds(end_date)
         conditions.append(
             or_(
                 Task.planned_date.between(today, end_date),
-                and_(Task.due_time.is_not(None), func.date(Task.due_time).between(today, end_date)),
+                and_(Task.due_time.is_not(None), Task.due_time >= week_start, Task.due_time < week_end),
+                and_(Task.remind_time.is_not(None), Task.remind_time >= week_start, Task.remind_time < week_end),
             ),
         )
     elif normalized == "high_priority":

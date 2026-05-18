@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { translateSyncMessage } from "../i18n";
+import { useSettingsStore } from "../stores/settings";
+
 const props = defineProps<{
   dateLabel: string;
   syncMessage: string;
   syncState: "idle" | "syncing" | "offline" | "error" | "synced";
   opacity: number;
 }>();
+const settingsStore = useSettingsStore();
 
 const emit = defineEmits<{
   hide: [];
@@ -26,21 +30,21 @@ function updateOpacity(event: Event): void {
         <strong>TaskBridge</strong>
         <span class="floating-status" :data-state="props.syncState">
           <i></i>
-          {{ props.syncMessage }}
+          {{ translateSyncMessage(props.syncMessage, settingsStore.language) }}
         </span>
       </div>
       <time>{{ props.dateLabel }}</time>
     </div>
 
     <div class="floating-window-actions">
-      <button type="button" title="打开主窗口" @click="$emit('openMain')">↗</button>
-      <button type="button" title="迷你模式" @click="$emit('toggleMini')">□</button>
-      <button type="button" title="隐藏悬浮窗" @click="$emit('hide')">−</button>
+      <button type="button" :title="settingsStore.t('floating.openMain')" @click="$emit('openMain')">↗</button>
+      <button type="button" :title="settingsStore.t('floating.miniMode')" @click="$emit('toggleMini')">□</button>
+      <button type="button" :title="settingsStore.t('floating.hide')" @click="$emit('hide')">−</button>
     </div>
   </header>
 
   <label class="floating-opacity">
-    <span>透明度</span>
+    <span>{{ settingsStore.t("floating.opacity") }}</span>
     <input
       type="range"
       min="0.45"

@@ -140,6 +140,10 @@ def _apply_change(
     change: SyncChange,
     server_now: datetime,
 ) -> tuple[SyncChangeResult, SyncNotification | None]:
+    existing_result = _result_from_existing_applied_change(db, current_user, device_id, change)
+    if existing_result is not None:
+        return existing_result, None
+
     if change.action == "create":
         return _create_from_change(db, current_user, device_id, change, server_now)
 
@@ -220,6 +224,73 @@ def _apply_change(
         ),
         _notification_for(change.action, task, server_now),
     )
+
+
+def _result_from_existing_applied_change(
+    db: Session,
+    current_user: User,
+    device_id: str,
+    change: SyncChange,
+) -> SyncChangeResult | None:
+    conditions = [
+        SyncLog.user_id == current_user.id,
+        SyncLog.device_id == device_id,
+        SyncLog.local_id == change.local_id,
+        SyncLog.action == change.action,
+        SyncLog.result == "applied",
+        SyncLog.client_version == change.version,
+    ]
+    if change.server_id is not None:
+        conditions.append(SyncLog.server_id == change.server_id)
+
+    sync_log = db.scalar(
+        select(SyncLog)
+        .where(*conditions)
+        .order_by(SyncLog.id.desc())
+        .limit(1),
+    )
+    if sync_log is None or sync_log.task_id is None:
+        return None
+    if not _change_matches_logged_payload(change, sync_log.payload):
+        return None
+
+    task = get_owned_task(
+        db,
+        user_id=current_user.id,
+        task_id=sync_log.task_id,
+        include_deleted=True,
+    )
+    if task is None:
+        return None
+
+    return SyncChangeResult(
+        local_id=change.local_id,
+        server_id=task.id,
+        action=change.action,
+        status="applied",
+        version=task.version,
+        task=TaskRead.model_validate(task),
+    )
+
+
+def _change_matches_logged_payload(change: SyncChange, payload: dict[str, Any] | None) -> bool:
+    if not payload:
+        return False
+    fields_to_compare = set(change.model_fields_set).intersection(TASK_SYNC_FIELDS)
+    for field in fields_to_compare:
+        change_value = getattr(change, field)
+        payload_value = payload.get(field)
+        if field in {"due_time", "remind_time", "completed_at", "snoozed_until"}:
+            change_value = utc_iso(normalize_to_utc_naive(change_value)) if change_value else None
+        elif field == "planned_date":
+            change_value = _normalize_date(change_value).isoformat() if change_value else None
+        elif field == "checklist":
+            change_value = _normalize_checklist(change_value)
+        elif field == "title" and change_value is not None:
+            change_value = change_value.strip()
+        if change_value != payload_value:
+            return False
+    return True
 
 
 def _create_repeat_from_sync(db: Session, user_id: int, task: Task) -> Task | None:
@@ -364,16 +435,26 @@ def _task_payload(task: Task) -> dict[str, Any]:
     return {
         "id": task.id,
         "title": task.title,
+        "content": task.content,
         "status": task.status,
+        "priority": task.priority,
+        "tag": task.tag,
         "version": task.version,
         "is_deleted": task.is_deleted,
         "updated_at": utc_iso(task.updated_at),
         "project": task.project,
         "list_type": task.list_type,
+        "due_time": utc_iso(task.due_time) if task.due_time else None,
+        "remind_time": utc_iso(task.remind_time) if task.remind_time else None,
+        "repeat_rule": task.repeat_rule,
         "planned_date": task.planned_date.isoformat() if task.planned_date else None,
         "completed_at": utc_iso(task.completed_at) if task.completed_at else None,
         "snoozed_until": utc_iso(task.snoozed_until) if task.snoozed_until else None,
+        "parent_task_id": task.parent_task_id,
         "checklist": task.checklist or [],
+        "is_template": task.is_template,
+        "template_name": task.template_name,
+        "sort_order": task.sort_order,
     }
 
 

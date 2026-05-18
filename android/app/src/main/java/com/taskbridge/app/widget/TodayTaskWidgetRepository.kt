@@ -5,7 +5,13 @@ import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.local.AppDatabase
 import com.taskbridge.app.data.local.TodayWidgetTaskProjection
 import kotlinx.coroutines.flow.first
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+private val shanghaiZone: ZoneId = ZoneId.of("Asia/Shanghai")
+private val widgetTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 data class TodayTaskWidgetState(
     val isLoggedIn: Boolean,
@@ -33,9 +39,14 @@ class TodayTaskWidgetRepository(
             return TodayTaskWidgetState(isLoggedIn = false, tasks = emptyList())
         }
 
-        val today = LocalDate.now().toString()
+        val todayDate = LocalDate.now(shanghaiZone)
+        val today = todayDate.toString()
+        val startTime = todayDate.atStartOfDay(shanghaiZone).toInstant().toString()
+        val endTime = todayDate.plusDays(1).atStartOfDay(shanghaiZone).toInstant().toString()
         val tasks = taskDao.getTodayWidgetTasks(
-            todayPrefix = today,
+            today = today,
+            startTime = startTime,
+            endTime = endTime,
             highPriority = WidgetConstants.HIGH_PRIORITY,
             limit = WidgetConstants.MAX_TASKS,
         )
@@ -80,10 +91,17 @@ private fun TodayWidgetTaskProjection.dueLabel(today: String): String {
 }
 
 private fun String?.isToday(today: String): Boolean {
-    return this?.startsWith(today) == true
+    return this?.let {
+        runCatching {
+            Instant.parse(it).atZone(shanghaiZone).toLocalDate().toString() == today
+        }.getOrDefault(false)
+    } == true
 }
 
 private fun String?.timePart(): String {
-    if (this == null || length < 16) return "--:--"
-    return substring(11, 16)
+    return this?.let {
+        runCatching {
+            widgetTimeFormatter.format(Instant.parse(it).atZone(shanghaiZone))
+        }.getOrDefault("--:--")
+    } ?: "--:--"
 }
