@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, Menu } from "electron";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -25,12 +25,14 @@ function createMainWindow(showOnReady = true): BrowserWindow {
     minHeight: 600,
     title: "TaskBridge",
     show: false,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+  mainWindow.setMenuBarVisibility(false);
 
   mainWindow.webContents.on("preload-error", (_event, preload, error) => {
     console.error("[TaskBridge] preload failed", { preload, error });
@@ -92,6 +94,8 @@ app.on("before-quit", () => {
 });
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
+
   if (process.platform === "win32") {
     app.setAppUserModelId("com.taskbridge.desktop");
   }

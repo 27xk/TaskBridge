@@ -24,6 +24,16 @@ android {
 
     val taskBridgeBaseUrl = taskBridgeProperty("TASKBRIDGE_BASE_URL", "http://10.0.2.2:8000/api/v1/")
     val taskBridgeWebSocketUrl = taskBridgeProperty("TASKBRIDGE_WS_URL", "ws://10.0.2.2:8000/ws/sync")
+    val releaseKeystorePath = taskBridgeProperty("ANDROID_KEYSTORE_PATH", System.getenv("ANDROID_KEYSTORE_PATH") ?: "")
+    val releaseKeystorePassword = taskBridgeProperty("ANDROID_KEYSTORE_PASSWORD", System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "")
+    val releaseKeyAlias = taskBridgeProperty("ANDROID_KEY_ALIAS", System.getenv("ANDROID_KEY_ALIAS") ?: "")
+    val releaseKeyPassword = taskBridgeProperty("ANDROID_KEY_PASSWORD", System.getenv("ANDROID_KEY_PASSWORD") ?: "")
+    val hasReleaseSigning = listOf(
+        releaseKeystorePath,
+        releaseKeystorePassword,
+        releaseKeyAlias,
+        releaseKeyPassword,
+    ).all(String::isNotBlank)
 
     defaultConfig {
         applicationId = "com.taskbridge.app"
@@ -69,6 +79,17 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         debug {
             manifestPlaceholders["allowBackup"] = true
@@ -77,6 +98,11 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             manifestPlaceholders["allowBackup"] = false
             manifestPlaceholders["usesCleartextTraffic"] = false
             proguardFiles(
