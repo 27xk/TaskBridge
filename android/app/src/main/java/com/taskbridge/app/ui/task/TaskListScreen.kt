@@ -15,7 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,6 +31,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.Instant
+import java.time.LocalDate
 import com.taskbridge.app.domain.model.SyncStatus
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
@@ -46,8 +47,6 @@ import com.taskbridge.app.ui.components.SyncStatusBar
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
 import com.taskbridge.app.ui.i18n.TaskBridgeStrings
 import com.taskbridge.app.utils.ShanghaiTime
-import java.time.Instant
-import java.time.LocalDate
 
 @Composable
 fun TaskListScreen(
@@ -72,6 +71,8 @@ fun TaskListScreen(
             .sortedByTaskTimeline(now, displayTimeZone)
     }
     val openTasks = remember(tasks) { tasks.filter { it.status != TaskStatus.Completed } }
+    val overdueTasks = remember(openTasks, now, displayTimeZone) { openTasks.filter { it.isOverdueAt(now, displayTimeZone) } }
+    val pendingOpenTasks = remember(openTasks, now, displayTimeZone) { openTasks.filterNot { it.isOverdueAt(now, displayTimeZone) } }
     val completedTasks = remember(tasks) { tasks.filter { it.status == TaskStatus.Completed } }
     var viewMenuExpanded by remember { mutableStateOf(false) }
     var filterMenuExpanded by remember { mutableStateOf(false) }
@@ -82,24 +83,32 @@ fun TaskListScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             AppHeader(
                 title = if (todayOnly) strings.todayTasks else strings.allTasks,
                 subtitle = "${tasks.size} ${strings.taskCountSuffix}",
                 trailing = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { viewModel.refresh() }) {
-                            Text(strings.syncNow, maxLines = 1)
-                        }
-                        Button(onClick = onAddClick) {
-                            Text(strings.add, maxLines = 1)
-                        }
+                    Button(onClick = onAddClick) {
+                        Text(strings.add, maxLines = 1)
                     }
                 },
             )
 
-            AppPanel {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { viewModel.refresh() }, modifier = Modifier.weight(1f)) {
+                    Text(strings.syncNow, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                TextButton(onClick = onSettingsClick, modifier = Modifier.weight(1f)) {
+                    Text(strings.settings, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+
+            AppPanel(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)) {
                 OutlinedTextField(
                     value = uiState.searchQuery,
                     onValueChange = viewModel::updateSearchQuery,
@@ -139,50 +148,6 @@ fun TaskListScreen(
                 }
             }
 
-            AppPanel {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            viewModel.batchComplete(
-                                tasks.filter { it.status != TaskStatus.Completed }.map { it.localId },
-                            )
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = tasks.any { it.status != TaskStatus.Completed },
-                    ) {
-                        Text(
-                            text = strings.completeCurrent,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = { viewModel.batchDelete(tasks.map { it.localId }) },
-                        modifier = Modifier.weight(1f),
-                        enabled = tasks.isNotEmpty(),
-                    ) {
-                        Text(
-                            text = strings.deleteCurrent,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                TextButton(
-                    onClick = onSettingsClick,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = strings.settings,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 18.dp),
@@ -193,9 +158,29 @@ fun TaskListScreen(
                         EmptyTaskState(text = if (todayOnly) strings.emptyToday else strings.emptyTasks)
                     }
                 }
-                if (openTasks.isNotEmpty()) {
-                    item { TaskSectionHeader(title = strings.todo, count = openTasks.size) }
-                    items(openTasks, key = { it.localId }) { task ->
+                if (overdueTasks.isNotEmpty()) {
+                    item { TaskSectionHeader(title = strings.overdue, count = overdueTasks.size, isWarning = true) }
+                    items(overdueTasks, key = { it.localId }) { task ->
+                        TaskRow(
+                            task = task,
+                            strings = strings,
+                            displayTimeZone = displayTimeZone,
+                            onComplete = { viewModel.complete(task.localId) },
+                            onUndoComplete = { viewModel.undoComplete(task.localId) },
+                            onPostpone = { viewModel.postponeToTomorrow(task.localId) },
+                            onSnooze = { viewModel.snoozeOneHour(task.localId) },
+                            onPlanToday = { viewModel.planToday(task.localId) },
+                            onUseServer = { viewModel.resolveConflictUseServer(task.localId) },
+                            onOverwriteServer = { viewModel.forceOverwriteServer(task.localId) },
+                            onDelete = { viewModel.delete(task.localId) },
+                            onEdit = { onEditClick(task.localId) },
+                            now = now,
+                        )
+                    }
+                }
+                if (pendingOpenTasks.isNotEmpty()) {
+                    item { TaskSectionHeader(title = strings.todo, count = pendingOpenTasks.size) }
+                    items(pendingOpenTasks, key = { it.localId }) { task ->
                         TaskRow(
                             task = task,
                             strings = strings,
@@ -239,7 +224,8 @@ fun TaskListScreen(
 }
 
 @Composable
-private fun TaskSectionHeader(title: String, count: Int) {
+private fun TaskSectionHeader(title: String, count: Int, isWarning: Boolean = false) {
+    val color = if (isWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -249,12 +235,12 @@ private fun TaskSectionHeader(title: String, count: Int) {
     ) {
         Text(
             text = title,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = color,
             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
         )
         Text(
             text = count.toString(),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = color,
             style = MaterialTheme.typography.labelMedium,
         )
     }
@@ -287,7 +273,7 @@ private fun TaskRow(
     onEdit: () -> Unit,
     now: Instant,
 ) {
-    val isOverdue = task.isOverdueAt(now)
+    val isOverdue = task.isOverdueAt(now, displayTimeZone)
     val borderColor = if (isOverdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -394,7 +380,7 @@ private fun List<Task>.filterByMode(
     return when (filter) {
         TaskListFilter.All -> this
         TaskListFilter.Inbox -> filter { it.listType == "inbox" && it.status != TaskStatus.Completed }
-        TaskListFilter.Overdue -> filter { it.isOverdueAt(now) }
+        TaskListFilter.Overdue -> filter { it.isOverdueAt(now, displayTimeZone) }
         TaskListFilter.Week -> filter {
             val date = it.plannedDate?.let { value -> runCatching { LocalDate.parse(value) }.getOrNull() }
                 ?: it.dueLocalDate(displayTimeZone)
@@ -419,7 +405,7 @@ private fun List<Task>.filterByQuery(query: String): List<Task> {
 
 private fun Task.subtitle(strings: TaskBridgeStrings, displayTimeZone: String, now: Instant): String {
     return listOfNotNull(
-        strings.overdue.takeIf { isOverdueAt(now) },
+        strings.overdue.takeIf { isOverdueAt(now, displayTimeZone) },
         project?.takeIf { it.isNotBlank() }?.let { "${strings.project} $it" },
         tag?.takeIf { it.isNotBlank() }?.let { "#$it" },
         plannedDate?.let { "${strings.plan} $it" },

@@ -7,8 +7,16 @@ import ts from "typescript";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourcePath = resolve(root, "src/utils/task-order.ts");
 const source = await readFile(sourcePath, "utf8");
+const parserSource = await readFile(resolve(root, "shared/quick-add-parser.ts"), "utf8");
 const dbSource = await readFile(resolve(root, "electron/db.ts"), "utf8");
-const compiled = ts.transpileModule(source, {
+const parserCompiled = ts.transpileModule(parserSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.ES2022,
+    target: ts.ScriptTarget.ES2022,
+  },
+}).outputText;
+const parserUrl = `data:text/javascript;base64,${Buffer.from(parserCompiled).toString("base64")}`;
+const compiled = ts.transpileModule(source.replace('../../shared/quick-add-parser', parserUrl), {
   compilerOptions: {
     module: ts.ModuleKind.ES2022,
     target: ts.ScriptTarget.ES2022,
@@ -42,18 +50,22 @@ assert.deepEqual(
 
 const timelineTasks = [
   task("tomorrow-early", {
+    status: "todo",
     dueTime: "2026-05-21T01:00:00.000Z",
     updatedAt: "2026-05-20T07:00:00.000Z",
   }),
   task("yesterday-late", {
+    status: "todo",
     dueTime: "2026-05-19T23:00:00.000Z",
     updatedAt: "2026-05-20T07:00:00.000Z",
   }),
   task("today-upcoming", {
+    status: "todo",
     dueTime: "2026-05-20T09:00:00.000Z",
     updatedAt: "2026-05-20T07:00:00.000Z",
   }),
   task("planned-today", {
+    status: "todo",
     plannedDate: "2026-05-20",
     updatedAt: "2026-05-20T07:00:00.000Z",
   }),
@@ -74,6 +86,38 @@ assert.deepEqual(
 );
 assert.equal(isTaskOverdue(timelineTasks[1], new Date("2026-05-20T08:00:00.000Z")), true);
 assert.equal(isTaskOverdue(timelineTasks[0], new Date("2026-05-20T08:00:00.000Z")), false);
+assert.equal(
+  isTaskOverdue(
+    task("same-day-morning-upcoming", {
+      status: "todo",
+      dueTime: "2026-05-20T00:00:00.000Z",
+    }),
+    new Date("2026-05-19T19:00:00.000Z"),
+  ),
+  false,
+);
+assert.equal(
+  isTaskOverdue(
+    task("legacy-zone-less-8am-upcoming", {
+      status: "todo",
+      dueTime: "2026-05-21T00:00:00",
+    }),
+    new Date("2026-05-20T19:42:00.000Z"),
+    "Asia/Shanghai",
+  ),
+  false,
+);
+assert.equal(
+  isTaskOverdue(
+    task("legacy-zone-less-10am-upcoming", {
+      status: "todo",
+      dueTime: "2026-05-21T02:00:00",
+    }),
+    new Date("2026-05-20T19:42:00.000Z"),
+    "Asia/Shanghai",
+  ),
+  false,
+);
 
 const completedRecencySqlCount = (
   dbSource.match(/CASE WHEN status = 'completed' THEN COALESCE\(datetime\(completed_at\)/g) ?? []
@@ -89,7 +133,7 @@ assert.match(
   "Desktop today tasks should include overdue open tasks by full due date-time",
 );
 
-console.log("task-order completed recency check passed");
+console.log("task-order timeline check passed");
 
 function task(localId, overrides = {}) {
   return {

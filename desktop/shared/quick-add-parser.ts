@@ -36,10 +36,8 @@ export function parseQuickTask(input: string, now = new Date(), timeZone = DEFAU
   }
 
   const plannedDate = date ? formatLocalDateParts(date) : null;
-  const dueTime =
-    date || time
-      ? buildIsoDateTime(date ?? getZonedDateParts(now, zone), time ?? { hour: 18, minute: 0 }, zone)
-      : null;
+  const resolvedDue = date || time ? resolveDueDateTime(date, time, timeMatch, now, zone) : null;
+  const dueTime = resolvedDue ? buildIsoDateTime(resolvedDue.date, resolvedDue.time, zone) : null;
 
   return {
     title: working || raw,
@@ -48,6 +46,36 @@ export function parseQuickTask(input: string, now = new Date(), timeZone = DEFAU
     dueTime,
     plannedDate,
   };
+}
+
+function resolveDueDateTime(
+  explicitDate: DateParts | null,
+  time: { hour: number; minute: number } | null,
+  timeMatch: RegExpMatchArray | null,
+  now: Date,
+  timeZone: string,
+): { date: DateParts; time: { hour: number; minute: number } } {
+  const today = getZonedDateParts(now, timeZone);
+  const dueTime = time ?? { hour: 18, minute: 0 };
+  if (explicitDate || !time || !isBareSmallHour(timeMatch)) return { date: explicitDate ?? today, time: dueTime };
+
+  const morning = buildIsoDateTime(today, dueTime, timeZone);
+  if (new Date(morning).getTime() >= now.getTime()) return { date: today, time: dueTime };
+
+  const eveningTime = { ...dueTime, hour: dueTime.hour + 12 };
+  if (eveningTime.hour < 24) {
+    const evening = buildIsoDateTime(today, eveningTime, timeZone);
+    if (new Date(evening).getTime() >= now.getTime()) return { date: today, time: eveningTime };
+  }
+
+  return { date: addDays(today, 1), time: dueTime };
+}
+
+function isBareSmallHour(timeMatch: RegExpMatchArray | null): boolean {
+  if (!timeMatch) return false;
+  if ((timeMatch[1] ?? "").trim()) return false;
+  const hour = Number(timeMatch[2]);
+  return Number.isFinite(hour) && hour >= 1 && hour <= 11;
 }
 
 export function getSystemTimeZone(): string {

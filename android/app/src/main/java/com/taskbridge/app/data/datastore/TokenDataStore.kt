@@ -49,6 +49,10 @@ class TokenDataStore(context: Context) {
         normalizeWidgetCompletionScope(preferences[WIDGET_COMPLETION_SCOPE])
     }
 
+    val widgetStyle: Flow<String> = appContext.syncPreferences.data.map { preferences ->
+        normalizeWidgetStyle(preferences[WIDGET_STYLE])
+    }
+
     val displayTimeZone: Flow<String> = appContext.syncPreferences.data.map { preferences ->
         val userId = preferences[CURRENT_USER_ID]
         val userTimeZone = userId?.let { preferences[userDisplayTimeZoneKey(it)] }
@@ -106,6 +110,12 @@ class TokenDataStore(context: Context) {
         }
     }
 
+    suspend fun saveWidgetStyle(style: String) {
+        appContext.syncPreferences.edit { preferences ->
+            preferences[WIDGET_STYLE] = normalizeWidgetStyle(style)
+        }
+    }
+
     suspend fun saveDisplayTimeZone(timeZoneId: String) {
         val userId = appContext.syncPreferences.data.first()[CURRENT_USER_ID]
         val normalized = normalizeTimeZone(timeZoneId)
@@ -150,6 +160,7 @@ class TokenDataStore(context: Context) {
         val WIDGET_OPACITY_PERCENT = intPreferencesKey("widget_opacity_percent")
         val WIDGET_TASK_SCOPE = stringPreferencesKey("widget_task_scope")
         val WIDGET_COMPLETION_SCOPE = stringPreferencesKey("widget_completion_scope")
+        val WIDGET_STYLE = stringPreferencesKey("widget_style")
         val DISPLAY_TIME_ZONE = stringPreferencesKey("display_time_zone")
         val CURRENT_USER_ID = stringPreferencesKey("current_user_id")
         const val DEFAULT_LANGUAGE = "zh-CN"
@@ -175,6 +186,10 @@ private fun normalizeWidgetTaskScope(scope: String?): String {
 
 private fun normalizeWidgetCompletionScope(scope: String?): String {
     return if (scope == "all") "all" else "open"
+}
+
+private fun normalizeWidgetStyle(style: String?): String {
+    return if (style == "transparent") "transparent" else "clear"
 }
 
 private fun createSecurePreferences(context: Context): SharedPreferences {

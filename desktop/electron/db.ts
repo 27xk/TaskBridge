@@ -281,6 +281,7 @@ export function listTodayTasks(limit = 120): TaskRecord[] {
   const timeZone = getSettings().displayTimeZone;
   const today = todayLocalDate(new Date(), timeZone);
   const { startTime, endTime } = shanghaiDayBounds(today, timeZone);
+  const nowTime = new Date().toISOString();
   const rows = database()
     .prepare(
       `
@@ -290,18 +291,28 @@ export function listTodayTasks(limit = 120): TaskRecord[] {
           (due_time IS NOT NULL AND datetime(due_time) >= datetime(@startTime) AND datetime(due_time) < datetime(@endTime))
           OR (remind_time IS NOT NULL AND datetime(remind_time) >= datetime(@startTime) AND datetime(remind_time) < datetime(@endTime))
           OR planned_date = @plannedDate
+          OR (status != 'completed' AND due_time IS NOT NULL AND datetime(due_time) < datetime(@nowTime))
         )
       ORDER BY
         CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
+        CASE
+          WHEN status = 'completed' THEN 4
+          WHEN status != 'completed' AND due_time IS NOT NULL AND datetime(due_time) < datetime(@nowTime) THEN 0
+          WHEN due_time IS NOT NULL THEN 1
+          WHEN planned_date IS NOT NULL THEN 2
+          ELSE 3
+        END,
         CASE WHEN status = 'completed' THEN COALESCE(datetime(completed_at), datetime(updated_at), datetime(due_time), datetime(planned_date), datetime(created_at)) END DESC,
+        CASE WHEN status != 'completed' AND due_time IS NULL THEN 1 ELSE 0 END,
+        CASE WHEN status != 'completed' THEN due_time END ASC,
+        CASE WHEN status != 'completed' THEN planned_date END ASC,
         sort_order ASC,
-        CASE WHEN due_time IS NULL THEN 1 ELSE 0 END,
-        due_time ASC,
+        priority DESC,
         updated_at DESC
       LIMIT @limit
       `,
     )
-    .all({ startTime, endTime, plannedDate: today, limit: clampLimit(limit, 1, 200) }) as TaskRow[];
+    .all({ startTime, endTime, nowTime, plannedDate: today, limit: clampLimit(limit, 1, 200) }) as TaskRow[];
   return rows.map(taskFromRow);
 }
 

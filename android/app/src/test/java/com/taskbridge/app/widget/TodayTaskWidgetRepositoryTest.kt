@@ -45,6 +45,27 @@ class TodayTaskWidgetRepositoryTest {
     }
 
     @Test
+    fun treatsSameDayMorningDueTimesAsUpcomingBeforeTheyPass() {
+        val today = "2026-05-21"
+        val earlyMorning = Instant.parse("2026-05-20T19:10:00Z")
+
+        assertTrue(
+            TodayTaskWidgetRepository.isWidgetCandidate(
+                task = task(dueTime = "2026-05-21T00:00:00Z"),
+                today = today,
+                now = earlyMorning,
+            ),
+        )
+        assertTrue(
+            TodayTaskWidgetRepository.isWidgetCandidate(
+                task = task(dueTime = "2026-05-21T02:00:00Z"),
+                today = today,
+                now = earlyMorning,
+            ),
+        )
+    }
+
+    @Test
     fun excludesLowPriorityOpenTasksWithoutTodayOrOverdueTime() {
         assertFalse(
             TodayTaskWidgetRepository.isWidgetCandidate(

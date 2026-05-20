@@ -1,7 +1,6 @@
 package com.taskbridge.app.domain.usecase
 
 import com.taskbridge.app.utils.ShanghaiTime
-import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -66,9 +65,7 @@ object QuickAddParser {
 
         val plannedDate = date?.format(DateTimeFormatter.ISO_LOCAL_DATE)
         val dueTime = if (date != null || parsedTime != null) {
-            val dueDate = date ?: now.toLocalDate()
-            val dueClock = parsedTime ?: LocalTime.of(18, 0)
-            LocalDateTime.of(dueDate, dueClock)
+            resolveDueDateTime(date, parsedTime, timeMatch, now)
                 .atZone(targetZone)
                 .toInstant()
                 .toString()
@@ -83,5 +80,30 @@ object QuickAddParser {
             dueTime = dueTime,
             plannedDate = plannedDate,
         )
+    }
+
+    private fun resolveDueDateTime(
+        explicitDate: java.time.LocalDate?,
+        parsedTime: LocalTime?,
+        timeMatch: MatchResult?,
+        now: LocalDateTime,
+    ): LocalDateTime {
+        val dueClock = parsedTime ?: LocalTime.of(18, 0)
+        val dueDateTime = LocalDateTime.of(explicitDate ?: now.toLocalDate(), dueClock)
+        if (explicitDate != null || parsedTime == null || !isBareSmallHour(timeMatch)) return dueDateTime
+
+        if (dueDateTime.isBefore(now)) {
+            val eveningDateTime = dueDateTime.plusHours(12)
+            if (eveningDateTime.isAfter(now)) return eveningDateTime
+            return dueDateTime.plusDays(1)
+        }
+        return dueDateTime
+    }
+
+    private fun isBareSmallHour(timeMatch: MatchResult?): Boolean {
+        val match = timeMatch ?: return false
+        if (match.groupValues.getOrNull(1).orEmpty().isNotBlank()) return false
+        val hourRaw = match.groupValues.getOrNull(2)?.toIntOrNull() ?: return false
+        return hourRaw in 1..11
     }
 }

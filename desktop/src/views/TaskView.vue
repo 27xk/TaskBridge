@@ -5,7 +5,7 @@ import TaskEditor from "../components/TaskEditor.vue";
 import TaskItem from "../components/TaskItem.vue";
 import { useSettingsStore } from "../stores/settings";
 import { useTaskStore, type TaskDraft } from "../stores/task";
-import { sortCompletedTasksByRecency } from "../utils/task-order";
+import { isTaskOverdue, sortCompletedTasksByRecency } from "../utils/task-order";
 import { parseTaskBridgeDate, todayLocalDate } from "../../shared/quick-add-parser";
 
 const props = defineProps<{
@@ -50,6 +50,12 @@ const filteredTasks = computed(() => {
   });
 });
 const openFilteredTasks = computed(() => filteredTasks.value.filter((task) => task.status !== "completed"));
+const overdueFilteredTasks = computed(() =>
+  openFilteredTasks.value.filter((task) => isTaskOverdue(task, taskStore.timelineNow, settingsStore.displayTimeZone)),
+);
+const pendingOpenFilteredTasks = computed(() =>
+  openFilteredTasks.value.filter((task) => !isTaskOverdue(task, taskStore.timelineNow, settingsStore.displayTimeZone)),
+);
 const completedFilteredTasks = computed(() =>
   sortCompletedTasksByRecency(filteredTasks.value.filter((task) => task.status === "completed")),
 );
@@ -95,15 +101,6 @@ async function save(draft: TaskDraft): Promise<void> {
   showNotice(settingsStore.t("task.feedbackSaved"));
 }
 
-async function completeCurrentView(): Promise<void> {
-  await taskStore.batchComplete(openFilteredTasks.value);
-  showNotice(settingsStore.t("task.feedbackBatchCompleted"));
-}
-
-async function deleteCurrentView(): Promise<void> {
-  await taskStore.batchDelete(filteredTasks.value);
-}
-
 async function completeTask(task: TaskRecord): Promise<void> {
   await taskStore.completeTask(task);
   showNotice(`${settingsStore.t("task.feedbackCompleted")}：${task.title}`);
@@ -124,7 +121,7 @@ function showNotice(message: string): void {
 }
 
 function matchesFilter(task: TaskRecord, mode: TaskFilter): boolean {
-  const today = todayLocalDate(new Date(), settingsStore.displayTimeZone);
+  const today = todayLocalDate(taskStore.timelineNow, settingsStore.displayTimeZone);
   const taskDate = task.plannedDate ?? isoDate(task.dueTime);
   switch (mode) {
     case "inbox":
@@ -132,9 +129,13 @@ function matchesFilter(task: TaskRecord, mode: TaskFilter): boolean {
     case "today":
       return taskDate === today || task.listType === "today";
     case "overdue":
-      return task.status !== "completed" && Boolean(task.dueTime && (parseTaskBridgeDate(task.dueTime)?.getTime() ?? Number.POSITIVE_INFINITY) < Date.now());
+      return isTaskOverdue(task, taskStore.timelineNow, settingsStore.displayTimeZone);
     case "week":
-      return Boolean(taskDate && taskDate >= today && taskDate <= todayLocalDate(new Date(Date.now() + 7 * 86_400_000), settingsStore.displayTimeZone));
+      return Boolean(
+        taskDate &&
+          taskDate >= today &&
+          taskDate <= todayLocalDate(new Date(taskStore.timelineNow.getTime() + 7 * 86_400_000), settingsStore.displayTimeZone),
+      );
     case "high":
       return task.status !== "completed" && task.priority >= 3;
     case "completed":
@@ -193,8 +194,6 @@ function isoDate(value: string | null): string | null {
           <option value="">{{ settingsStore.t("task.allTags") }}</option>
           <option v-for="tag in taskStore.tags" :key="tag" :value="tag">#{{ tag }}</option>
         </select>
-        <button type="button" class="secondary-button" @click="completeCurrentView">{{ settingsStore.t("task.completeCurrent") }}</button>
-        <button type="button" class="secondary-button" @click="deleteCurrentView">{{ settingsStore.t("task.deleteCurrent") }}</button>
       </div>
     </div>
 
@@ -209,12 +208,31 @@ function isoDate(value: string | null): string | null {
 
     <div class="task-list">
       <template v-if="shouldGroupByCompletion">
-        <div class="task-section-header">
-          <span>{{ settingsStore.t("task.filterOpen") }}</span>
-          <strong>{{ openFilteredTasks.length }}</strong>
+        <div v-if="overdueFilteredTasks.length > 0" class="task-section-header overdue-section">
+          <span>{{ settingsStore.t("task.filterOverdue") }}</span>
+          <strong>{{ overdueFilteredTasks.length }}</strong>
         </div>
         <TaskItem
-          v-for="task in openFilteredTasks"
+          v-for="task in overdueFilteredTasks"
+          :key="task.localId"
+          :task="task"
+          @edit="openEdit"
+          @complete="completeTask"
+          @restore="restoreTask"
+          @postpone="taskStore.postponeTomorrow"
+          @snooze="taskStore.snoozeOneHour"
+          @plan-today="taskStore.planToday"
+          @next-occurrence="taskStore.createNextOccurrence"
+          @instantiate-template="taskStore.instantiateTemplate"
+          @delete="taskStore.deleteTask"
+        />
+
+        <div v-if="pendingOpenFilteredTasks.length > 0" class="task-section-header">
+          <span>{{ settingsStore.t("task.filterOpen") }}</span>
+          <strong>{{ pendingOpenFilteredTasks.length }}</strong>
+        </div>
+        <TaskItem
+          v-for="task in pendingOpenFilteredTasks"
           :key="task.localId"
           :task="task"
           @edit="openEdit"

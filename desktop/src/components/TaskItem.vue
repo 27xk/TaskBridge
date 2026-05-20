@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useSettingsStore } from "../stores/settings";
+import { useTaskStore } from "../stores/task";
 import { formatShanghaiDateTime } from "../../shared/quick-add-parser";
+import { isTaskOverdue } from "../utils/task-order";
 
 defineProps<{
   task: TaskRecord;
@@ -19,6 +21,7 @@ const emit = defineEmits<{
   instantiateTemplate: [task: TaskRecord];
 }>();
 const settingsStore = useSettingsStore();
+const taskStore = useTaskStore();
 
 function toggleCompletion(task: TaskRecord): void {
   if (task.status === "completed") {
@@ -54,10 +57,14 @@ function syncStatusText(status: TaskRecord["syncStatus"]): string {
   }
 }
 
+function isOverdue(task: TaskRecord): boolean {
+  return isTaskOverdue(task, taskStore.timelineNow, settingsStore.displayTimeZone);
+}
+
 </script>
 
 <template>
-  <article class="task-row" :class="{ completed: task.status === 'completed', compact }">
+  <article class="task-row" :class="{ completed: task.status === 'completed', compact, overdue: isOverdue(task) }">
     <button
       class="check-button"
       type="button"
@@ -73,6 +80,7 @@ function syncStatusText(status: TaskRecord["syncStatus"]): string {
       </div>
       <p v-if="task.content">{{ task.content }}</p>
       <div class="task-meta">
+        <span v-if="isOverdue(task)" class="overdue-pill">{{ settingsStore.t("task.filterOverdue") }}</span>
         <span v-if="task.dueTime">{{ settingsStore.t("task.due") }} {{ formatShanghaiDateTime(task.dueTime, settingsStore.language, settingsStore.displayTimeZone) }}</span>
         <span v-if="task.plannedDate">{{ settingsStore.t("task.plan") }} {{ task.plannedDate }}</span>
         <span v-if="task.tag">#{{ task.tag }}</span>

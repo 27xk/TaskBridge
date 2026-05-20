@@ -19,4 +19,6 @@ object WidgetConstants {
     const val TASK_SCOPE_ALL = "all"
     const val COMPLETION_SCOPE_OPEN = "open"
     const val COMPLETION_SCOPE_ALL = "all"
+    const val STYLE_CLEAR = "clear"
+    const val STYLE_TRANSPARENT = "transparent"
 }

@@ -5,12 +5,20 @@
     android:layout_height="match_parent"
     android:clickable="true">
 
-    <TextView
-        android:id="@+id/widgetBackground"
+        <TextView
+            android:id="@+id/widgetBackground"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@drawable/widget_background"
-        android:text="" />
+            android:background="@drawable/widget_background"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/widgetTaskCellBackground"
+            android:layout_width="1dp"
+            android:layout_height="1dp"
+            android:background="@drawable/widget_task_cell_background"
+            android:text=""
+            android:visibility="gone" />
 
     <LinearLayout
         android:id="@+id/widgetContent"
@@ -26,7 +34,7 @@
             android:layout_weight="1"
             android:gravity="center"
             android:text="@string/widget_empty_today"
-            android:textColor="#E6FFFFFF"
+            android:textColor="#4E5C59"
             android:textSize="13sp" />
 
         <LinearLayout style="@style/WidgetTaskPair">
@@ -47,7 +55,7 @@
             </LinearLayout>
 
             <TextView
-                android:layout_width="6dp"
+                android:layout_width="4dp"
                 android:layout_height="1dp"
                 android:text="" />
 
@@ -86,7 +94,7 @@
             </LinearLayout>
 
             <TextView
-                android:layout_width="6dp"
+                android:layout_width="4dp"
                 android:layout_height="1dp"
                 android:text="" />
 
@@ -125,7 +133,7 @@
             </LinearLayout>
 
             <TextView
-                android:layout_width="6dp"
+                android:layout_width="4dp"
                 android:layout_height="1dp"
                 android:text="" />
 
@@ -164,7 +172,7 @@
             </LinearLayout>
 
             <TextView
-                android:layout_width="6dp"
+                android:layout_width="5dp"
                 android:layout_height="1dp"
                 android:text="" />
 

@@ -74,10 +74,11 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
 
         private fun buildViews(context: Context, state: TodayTaskWidgetState): RemoteViews {
             return RemoteViews(context.packageName, R.layout.widget_today_task).apply {
+                val transparentStyle = state.style == WidgetConstants.STYLE_TRANSPARENT
                 setFloat(
                     R.id.widgetBackground,
                     "setAlpha",
-                    state.opacityPercent.coerceIn(0, 100) / 100f,
+                    (state.opacityPercent.coerceIn(0, 100) / 100f) * 0.88f,
                 )
                 val openTarget = if (state.taskScope == WidgetConstants.TASK_SCOPE_ALL) {
                     WidgetConstants.TARGET_ALL
@@ -95,13 +96,14 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
                 setViewVisibility(R.id.widgetMessage, if (message == null) View.GONE else View.VISIBLE)
                 setViewVisibility(R.id.widgetSpacer, if (message == null) View.VISIBLE else View.GONE)
                 setTextViewText(R.id.widgetMessage, message.orEmpty())
+                setTextColor(R.id.widgetMessage, if (transparentStyle) Color.argb(230, 255, 255, 255) else Color.rgb(78, 92, 89))
 
                 rowIds.forEachIndexed { index, rowId ->
                     val item = state.tasks.getOrNull(index)
                     if (item == null || !state.isLoggedIn) {
                         setViewVisibility(rowId, View.GONE)
                     } else {
-                        bindTaskRow(context, this, index, item)
+                        bindTaskRow(context, this, index, item, transparentStyle)
                     }
                 }
             }
@@ -112,12 +114,21 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
             views: RemoteViews,
             index: Int,
             item: TodayTaskWidgetItem,
+            transparentStyle: Boolean,
         ) {
-            val titleColor = if (item.isCompleted) Color.argb(178, 255, 255, 255) else Color.WHITE
+            val titleColor = when {
+                transparentStyle && item.isCompleted -> Color.argb(178, 255, 255, 255)
+                transparentStyle -> Color.WHITE
+                item.isCompleted -> Color.rgb(110, 124, 119)
+                else -> Color.rgb(29, 38, 36)
+            }
             val metaColor = when {
-                item.isOverdue -> Color.rgb(255, 196, 156)
-                item.isCompleted -> Color.argb(140, 255, 255, 255)
-                else -> Color.argb(216, 255, 255, 255)
+                transparentStyle && item.isOverdue -> Color.rgb(255, 196, 156)
+                transparentStyle && item.isCompleted -> Color.argb(140, 255, 255, 255)
+                transparentStyle -> Color.argb(216, 255, 255, 255)
+                item.isOverdue -> Color.rgb(174, 62, 44)
+                item.isCompleted -> Color.rgb(132, 145, 140)
+                else -> Color.rgb(90, 102, 99)
             }
             val meta = buildString {
                 append(item.dueLabel)
@@ -127,6 +138,11 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
             }
 
             views.setViewVisibility(rowIds[index], View.VISIBLE)
+            views.setInt(
+                rowIds[index],
+                "setBackgroundResource",
+                if (transparentStyle) 0 else R.drawable.widget_task_cell_background,
+            )
             views.setTextViewText(
                 statusIds[index],
                 when {

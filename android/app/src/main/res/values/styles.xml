@@ -15,26 +15,29 @@
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:orientation">horizontal</item>
-        <item name="android:paddingTop">1dp</item>
-        <item name="android:paddingBottom">1dp</item>
+        <item name="android:paddingTop">2dp</item>
+        <item name="android:paddingBottom">2dp</item>
     </style>
 
     <style name="WidgetTaskCell">
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_weight">1</item>
+        <item name="android:background">@drawable/widget_task_cell_background</item>
         <item name="android:clickable">true</item>
         <item name="android:gravity">center_vertical</item>
         <item name="android:orientation">horizontal</item>
-        <item name="android:paddingTop">2dp</item>
-        <item name="android:paddingBottom">2dp</item>
+        <item name="android:paddingLeft">6dp</item>
+        <item name="android:paddingRight">6dp</item>
+        <item name="android:paddingTop">5dp</item>
+        <item name="android:paddingBottom">5dp</item>
     </style>
 
     <style name="WidgetTaskStatus">
-        <item name="android:layout_width">18dp</item>
+        <item name="android:layout_width">16dp</item>
         <item name="android:layout_height">32dp</item>
         <item name="android:gravity">center</item>
-        <item name="android:textColor">#FFFFFFFF</item>
+        <item name="android:textColor">#137C6B</item>
         <item name="android:textSize">14sp</item>
         <item name="android:textStyle">bold</item>
     </style>
@@ -52,7 +55,7 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:ellipsize">end</item>
         <item name="android:maxLines">1</item>
-        <item name="android:textColor">#FFFFFFFF</item>
+        <item name="android:textColor">#1D2624</item>
         <item name="android:textSize">12sp</item>
         <item name="android:textStyle">bold</item>
     </style>
@@ -62,7 +65,7 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:ellipsize">end</item>
         <item name="android:maxLines">1</item>
-        <item name="android:textColor">#D8FFFFFF</item>
+        <item name="android:textColor">#5A6663</item>
         <item name="android:textSize">10sp</item>
     </style>
 </resources>

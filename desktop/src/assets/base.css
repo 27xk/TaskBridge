@@ -409,7 +409,8 @@ p {
   font-size: 12px;
 }
 
-.sync-pill {
+.sync-pill,
+.overdue-pill {
   flex: 0 0 auto;
   padding: 2px 6px;
   border-radius: 999px;
@@ -679,11 +680,16 @@ p {
 .app-shell {
   grid-template-columns: 236px minmax(0, 1fr);
   min-width: 1040px;
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
   background: #eef1ec;
 }
 
 .sidebar {
   gap: 24px;
+  height: 100vh;
+  min-height: 0;
   padding: 24px 16px;
   color: #e8eee9;
   background: #101918;
@@ -765,7 +771,10 @@ p {
 }
 
 .view-shell {
+  align-content: start;
   gap: 18px;
+  height: 100vh;
+  overflow: auto;
   width: min(1220px, 100%);
   padding: 34px 40px 46px;
 }
@@ -944,6 +953,15 @@ p {
   background: rgba(255, 255, 255, 0.48);
 }
 
+.task-row.overdue:not(.completed) {
+  border-color: rgba(178, 63, 45, 0.38);
+  background: #fff9f5;
+}
+
+.task-row.overdue:not(.completed) .task-title-line h3 {
+  color: #8a2f25;
+}
+
 .check-button {
   width: 22px;
   height: 22px;
@@ -970,9 +988,15 @@ p {
   color: #6d7a76;
 }
 
-.sync-pill {
+.sync-pill,
+.overdue-pill {
   color: #35526b;
   background: #e0edf4;
+}
+
+.overdue-pill {
+  color: #8a2f25;
+  background: #f6ddd5;
 }
 
 .task-actions {
@@ -1046,6 +1070,50 @@ p {
   background: rgba(255, 255, 255, 0.52);
 }
 
+.today-layout {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.today-summary {
+  position: sticky;
+  top: 30px;
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid rgba(26, 43, 39, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.today-summary span {
+  color: #60706b;
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.today-summary strong {
+  color: #101918;
+  font-size: 46px;
+  line-height: 1;
+}
+
+.today-summary p {
+  color: #8a2f25;
+  font-size: 13px;
+  font-weight: 780;
+}
+
+.today-task-list {
+  min-width: 0;
+}
+
+.task-section-header.overdue-section {
+  color: #8a2f25;
+}
+
 .drawer-layer {
   position: fixed;
   inset: 0;
@@ -1108,6 +1176,13 @@ p {
   background: transparent;
 }
 
+.settings-section > .settings-grid {
+  padding: 14px;
+  border: 1px solid rgba(26, 43, 39, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
 .settings-section + .settings-section {
   padding-top: 4px;
   border-top: 1px solid rgba(26, 43, 39, 0.08);
@@ -1155,6 +1230,178 @@ p {
 
 .settings-side-panel button {
   width: 100%;
+}
+
+.today-view,
+.settings-view {
+  width: min(1160px, 100%);
+}
+
+.today-view {
+  align-content: start;
+  grid-auto-rows: max-content;
+}
+
+.today-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  align-items: stretch;
+  align-self: start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(26, 43, 39, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.today-overview-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.today-overview-main span,
+.today-metric span {
+  color: #60706b;
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.today-overview-main strong {
+  color: #101918;
+  font-size: 44px;
+  line-height: 1;
+}
+
+.today-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.today-metric {
+  display: grid;
+  gap: 8px;
+  min-height: 76px;
+  padding: 12px;
+  border: 1px solid rgba(26, 43, 39, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.today-metric strong {
+  color: #17211f;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.today-metric.overdue span,
+.today-metric.overdue strong {
+  color: #8a2f25;
+}
+
+.today-workspace {
+  display: block;
+  align-self: start;
+  min-height: 0;
+}
+
+.today-workspace .task-section-header {
+  padding-top: 10px;
+}
+
+.today-view .today-task-list {
+  align-content: start;
+}
+
+.today-view .empty-state {
+  margin-top: 0;
+}
+
+.settings-layout {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-layout .settings-section {
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(26, 43, 39, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.settings-layout .settings-section + .settings-section {
+  padding-top: 18px;
+  border-top: 1px solid rgba(26, 43, 39, 0.08);
+}
+
+.settings-primary-grid {
+  grid-template-columns: minmax(170px, 0.7fr) minmax(260px, 1.2fr) minmax(190px, 0.8fr);
+  align-items: start;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.settings-window-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-range {
+  grid-column: 1 / -1;
+}
+
+.settings-range input {
+  padding-inline: 0;
+  accent-color: #167c70;
+}
+
+.settings-data {
+  align-content: start;
+}
+
+.settings-data-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.settings-device-list {
+  display: grid;
+  gap: 10px;
+  margin: 2px 0 0;
+}
+
+.settings-device-list div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(26, 43, 39, 0.08);
+}
+
+.settings-device-list dt {
+  color: #60706b;
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.settings-device-list dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: #263632;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-metadata .settings-actions {
+  padding-top: 2px;
 }
 
 .login-shell {
@@ -1532,11 +1779,17 @@ p {
 
   .editor-grid,
   .settings-grid,
-  .settings-workbench {
+  .settings-workbench,
+  .settings-row,
+  .settings-primary-grid,
+  .settings-window-grid,
+  .today-layout,
+  .today-overview {
     grid-template-columns: 1fr;
   }
 
-  .settings-side {
+  .settings-side,
+  .today-summary {
     position: static;
   }
 }

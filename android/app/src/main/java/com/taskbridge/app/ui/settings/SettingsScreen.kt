@@ -62,6 +62,9 @@ fun SettingsScreen(
     val widgetCompletionScope by tokenDataStore.widgetCompletionScope.collectAsStateWithLifecycle(
         initialValue = WidgetConstants.COMPLETION_SCOPE_OPEN,
     )
+    val widgetStyle by tokenDataStore.widgetStyle.collectAsStateWithLifecycle(
+        initialValue = WidgetConstants.STYLE_CLEAR,
+    )
     val displayTimeZone by tokenDataStore.displayTimeZone.collectAsStateWithLifecycle(
         initialValue = ShanghaiTime.DEFAULT_ZONE_ID,
     )
@@ -71,6 +74,7 @@ fun SettingsScreen(
     var timeZoneMenuOpen by remember { mutableStateOf(false) }
     var widgetScopeMenuOpen by remember { mutableStateOf(false) }
     var widgetCompletionMenuOpen by remember { mutableStateOf(false) }
+    var widgetStyleMenuOpen by remember { mutableStateOf(false) }
     val isEnglish = language == AppLanguage.English
     val timeZoneOptions = remember {
         listOf(
@@ -186,6 +190,22 @@ fun SettingsScreen(
                             }
                         },
                     )
+                    AppDropdownField(
+                        label = if (isEnglish) "Widget style" else "小组件样式",
+                        selectedLabel = widgetStyleLabel(widgetStyle, isEnglish),
+                        expanded = widgetStyleMenuOpen,
+                        options = listOf(
+                            AppUiOption(WidgetConstants.STYLE_CLEAR, widgetStyleLabel(WidgetConstants.STYLE_CLEAR, isEnglish)),
+                            AppUiOption(WidgetConstants.STYLE_TRANSPARENT, widgetStyleLabel(WidgetConstants.STYLE_TRANSPARENT, isEnglish)),
+                        ),
+                        onExpandedChange = { widgetStyleMenuOpen = it },
+                        onSelect = { nextStyle ->
+                            scope.launch {
+                                tokenDataStore.saveWidgetStyle(nextStyle)
+                                TodayTaskWidgetUpdateWorker.enqueue(context)
+                            }
+                        },
+                    )
                     Text(
                         text = if (isEnglish) {
                             "Widget opacity: ${widgetOpacityDraft.roundToInt()}%"
@@ -279,5 +299,12 @@ private fun widgetCompletionScopeLabel(scope: String, isEnglish: Boolean): Strin
     return when (scope) {
         WidgetConstants.COMPLETION_SCOPE_ALL -> if (isEnglish) "Open and completed" else "未完成和已完成"
         else -> if (isEnglish) "Open only" else "只显示未完成"
+    }
+}
+
+private fun widgetStyleLabel(style: String, isEnglish: Boolean): String {
+    return when (style) {
+        WidgetConstants.STYLE_TRANSPARENT -> if (isEnglish) "Transparent, white text" else "透明白字"
+        else -> if (isEnglish) "Clear, dark text" else "清晰黑字"
     }
 }

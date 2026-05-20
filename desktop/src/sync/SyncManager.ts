@@ -1,4 +1,4 @@
-import { pullSync, pushSync } from "../api/sync";
+import { pullSync, pushSync, type SyncPushResult } from "../api/sync";
 import { createWebSocketTicket } from "../api/auth";
 import { registerDevice } from "../api/device";
 import { bridge, nowIso } from "../db/sqlite";
@@ -118,14 +118,14 @@ export class SyncManager {
       const queueItem = queueByLocalId.get(result.local_id);
       if (!queueItem?.id) continue;
 
-      if (result.status === "applied" && result.task) {
-        await saveTask(serverTaskToLocal(result.task, queueItem.localId, "synced"));
+      if (result.status === "applied") {
+        await this.markQueueItemApplied(queueItem, result);
         await removeQueueItem(queueItem.id);
         continue;
       }
 
-      if (result.status === "conflict" && result.server_task) {
-        await saveTask(serverTaskToLocal(result.server_task, queueItem.localId, "conflict"));
+      if (result.status === "conflict") {
+        await this.markQueueItemConflict(queueItem, result);
         await removeQueueItem(queueItem.id);
         continue;
       }
@@ -138,6 +138,31 @@ export class SyncManager {
 
       await incrementQueueAttempt(queueItem.id);
     }
+  }
+
+  private async markQueueItemApplied(queueItem: SyncQueueRecord, result: SyncPushResult): Promise<void> {
+    if (result.task) {
+      await saveTask(serverTaskToLocal(result.task, queueItem.localId, "synced"));
+      return;
+    }
+
+    const task = await getTask(queueItem.localId);
+    if (!task) return;
+    await saveTask({
+      ...task,
+      serverId: result.server_id ?? task.serverId,
+      version: result.version ?? task.version,
+      syncStatus: "synced",
+      lastSyncAt: nowIso(),
+    });
+  }
+
+  private async markQueueItemConflict(queueItem: SyncQueueRecord, result: SyncPushResult): Promise<void> {
+    if (result.server_task) {
+      await saveTask(serverTaskToLocal(result.server_task, queueItem.localId, "conflict"));
+      return;
+    }
+    await this.markQueueItemFailed(queueItem);
   }
 
   private async markQueueItemFailed(queueItem: SyncQueueRecord): Promise<void> {

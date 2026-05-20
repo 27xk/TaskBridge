@@ -191,7 +191,7 @@ interface TaskDao {
     @Query(
         """
         UPDATE tasks
-        SET serverId = :serverId,
+        SET serverId = COALESCE(:serverId, serverId),
             version = :version,
             syncStatus = 'synced',
             updatedAt = :updatedAt,

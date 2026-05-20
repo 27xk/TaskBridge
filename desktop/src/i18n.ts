@@ -54,6 +54,9 @@ type MessageKey =
   | "task.allTitle"
   | "task.todayTitle"
   | "task.todayCountSuffix"
+  | "task.todayOverview"
+  | "task.overdueCountSuffix"
+  | "task.upcomingToday"
   | "task.openCountSuffix"
   | "task.completedCountPrefix"
   | "task.inbox"
@@ -65,8 +68,6 @@ type MessageKey =
   | "task.statusFilters"
   | "task.allProjects"
   | "task.allTags"
-  | "task.completeCurrent"
-  | "task.deleteCurrent"
   | "task.templateName"
   | "task.checklistPlaceholder"
   | "task.quickPlaceholder"
@@ -104,6 +105,8 @@ type MessageKey =
   | "settings.floatingOpacity"
   | "settings.displayTimeZone"
   | "settings.displayTimeZoneHint"
+  | "settings.accountDisplay"
+  | "settings.dataSession"
   | "settings.general"
   | "settings.window"
   | "settings.backup"
@@ -193,6 +196,9 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.allTitle": { "zh-CN": "全部待办", "en-US": "All tasks" },
   "task.todayTitle": { "zh-CN": "今日待办", "en-US": "Today" },
   "task.todayCountSuffix": { "zh-CN": "条今日待办", "en-US": "tasks today" },
+  "task.todayOverview": { "zh-CN": "今日概览", "en-US": "Today overview" },
+  "task.overdueCountSuffix": { "zh-CN": "条逾期", "en-US": "overdue" },
+  "task.upcomingToday": { "zh-CN": "稍后处理", "en-US": "Upcoming" },
   "task.openCountSuffix": { "zh-CN": "条待办", "en-US": "open tasks" },
   "task.completedCountPrefix": { "zh-CN": "已完成", "en-US": "Completed" },
   "task.inbox": { "zh-CN": "收件箱", "en-US": "Inbox" },
@@ -204,8 +210,6 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.statusFilters": { "zh-CN": "待办状态筛选", "en-US": "Task status filters" },
   "task.allProjects": { "zh-CN": "全部项目", "en-US": "All projects" },
   "task.allTags": { "zh-CN": "全部标签", "en-US": "All tags" },
-  "task.completeCurrent": { "zh-CN": "完成当前", "en-US": "Complete current" },
-  "task.deleteCurrent": { "zh-CN": "删除当前", "en-US": "Delete current" },
   "task.templateName": { "zh-CN": "模板名称", "en-US": "Template name" },
   "task.checklistPlaceholder": { "zh-CN": "每行一个清单项", "en-US": "One checklist item per line" },
   "task.quickPlaceholder": {
@@ -252,6 +256,8 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
     "zh-CN": "任务时间按该时区显示，同步数据仍以 UTC 保存。",
     "en-US": "Task times use this time zone. Sync data remains stored as UTC.",
   },
+  "settings.accountDisplay": { "zh-CN": "账号与显示", "en-US": "Account and display" },
+  "settings.dataSession": { "zh-CN": "数据与会话", "en-US": "Data and session" },
   "settings.general": { "zh-CN": "基础", "en-US": "General" },
   "settings.window": { "zh-CN": "窗口", "en-US": "Window" },
   "settings.backup": { "zh-CN": "备份", "en-US": "Backup" },

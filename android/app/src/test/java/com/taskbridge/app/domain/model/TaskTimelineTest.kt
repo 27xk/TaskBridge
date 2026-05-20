@@ -13,6 +13,27 @@ class TaskTimelineTest {
     fun marksOnlyOpenPastDueTasksAsOverdue() {
         assertTrue(isTaskOverdue(TaskStatus.Todo.wireName, "2026-05-20T07:59:00Z", now))
         assertFalse(isTaskOverdue(TaskStatus.Todo.wireName, "2026-05-20T08:01:00Z", now))
+        assertFalse(
+            isTaskOverdue(
+                TaskStatus.Todo.wireName,
+                "2026-05-20T00:00:00Z",
+                Instant.parse("2026-05-19T19:00:00Z"),
+            ),
+        )
+        assertFalse(
+            isTaskOverdue(
+                TaskStatus.Todo.wireName,
+                "2026-05-21T00:00:00Z",
+                Instant.parse("2026-05-20T19:10:00Z"),
+            ),
+        )
+        assertFalse(
+            isTaskOverdue(
+                TaskStatus.Todo.wireName,
+                "2026-05-21T02:00:00Z",
+                Instant.parse("2026-05-20T19:10:00Z"),
+            ),
+        )
         assertFalse(isTaskOverdue(TaskStatus.Completed.wireName, "2026-05-20T07:59:00Z", now))
         assertFalse(isTaskOverdue("done", "2026-05-20T07:59:00Z", now))
         assertFalse(isTaskOverdue(TaskStatus.Todo.wireName, null, now))

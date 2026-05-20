@@ -1,10 +1,10 @@
 import { defineStore } from "pinia";
-import { computed, ref, shallowRef } from "vue";
+import { computed, onScopeDispose, ref, shallowRef } from "vue";
 
 import { createEmptyTask, nowIso } from "../db/sqlite";
 import { enqueueChange, removeQueueByLocalId } from "../db/sync-queue.dao";
 import { listTasks, listTodayTasks, saveTask } from "../db/task.dao";
-import { sortCompletedTasksByRecency } from "../utils/task-order";
+import { sortCompletedTasksByRecency, sortTasksByTimeline } from "../utils/task-order";
 import { parseQuickTask, parseTaskBridgeDate, shanghaiDateTimeInputToIso, todayLocalDate } from "../../shared/quick-add-parser";
 import { useSettingsStore } from "./settings";
 import { useSyncStore } from "./sync";
@@ -34,8 +34,18 @@ export const useTaskStore = defineStore("task", () => {
   const todayTasks = shallowRef<TaskRecord[]>([]);
   const loading = ref(false);
   const settingsStore = useSettingsStore();
+  const timelineNow = ref(new Date());
+  const timelineTimer = window.setInterval(() => {
+    timelineNow.value = new Date();
+  }, 60_000);
+  onScopeDispose(() => window.clearInterval(timelineTimer));
 
-  const activeTasks = computed(() => tasks.value.filter((task) => !task.isDeleted));
+  const activeTasks = computed(() =>
+    sortTasksByTimeline(tasks.value.filter((task) => !task.isDeleted), {
+      now: timelineNow.value,
+      displayTimeZone: settingsStore.displayTimeZone,
+    }),
+  );
   const openTasks = computed(() => activeTasks.value.filter((task) => task.status !== "completed"));
   const completedTasks = computed(() => sortCompletedTasksByRecency(activeTasks.value.filter((task) => task.status === "completed")));
   const projects = computed(() => uniqueSorted(activeTasks.value.map((task) => task.project)));
@@ -354,6 +364,7 @@ export const useTaskStore = defineStore("task", () => {
     completedTasks,
     projects,
     tags,
+    timelineNow,
     load,
     addTask,
     updateTask,

@@ -15,9 +15,12 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 
@@ -50,13 +53,24 @@ class TaskListViewModel(
     val displayTimeZone: StateFlow<String> = tokenDataStore.displayTimeZone
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ShanghaiTime.DEFAULT_ZONE_ID)
 
-    val tasks: StateFlow<List<Task>> = taskRepository.observeTasks()
+    private val timelineNow = flow {
+        while (true) {
+            emit(Instant.now())
+            val delayMillis = 60_000L - (System.currentTimeMillis() % 60_000L)
+            delay(delayMillis.coerceAtLeast(1_000L))
+        }
+    }
+
+    val tasks: StateFlow<List<Task>> = timelineNow
+        .flatMapLatest { now -> taskRepository.observeTasks(now) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val todayTasks: StateFlow<List<Task>> = tokenDataStore.displayTimeZone
-        .flatMapLatest { timeZoneId ->
-            val todayPrefix = ShanghaiTime.todayString(timeZoneId)
-            taskRepository.observeTodayTasks(todayPrefix, timeZoneId)
+    val todayTasks: StateFlow<List<Task>> = combine(tokenDataStore.displayTimeZone, timelineNow) { timeZoneId, now ->
+        timeZoneId to now
+    }
+        .flatMapLatest { (timeZoneId, now) ->
+            val todayPrefix = ShanghaiTime.todayDate(timeZoneId).toString()
+            taskRepository.observeTodayTasks(todayPrefix, timeZoneId, now)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

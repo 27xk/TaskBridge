@@ -26,14 +26,20 @@ fun isTaskOverdue(
     statusWire: String,
     dueTime: String?,
     now: Instant,
+    displayTimeZone: String = ShanghaiTime.DEFAULT_ZONE_ID,
 ): Boolean {
     if (TaskStatus.fromWire(statusWire) == TaskStatus.Completed) return false
-    val dueInstant = ShanghaiTime.parseInstant(dueTime) ?: return false
-    return dueInstant.isBefore(now)
+    val dueLocal = ShanghaiTime.localDateTime(dueTime, displayTimeZone) ?: return false
+    val nowLocal = now.atZone(ShanghaiTime.zone(displayTimeZone)).toLocalDateTime()
+    return dueLocal.isBefore(nowLocal)
 }
 
 fun Task.isOverdueAt(now: Instant): Boolean {
     return isTaskOverdue(status.wireName, dueTime, now)
+}
+
+fun Task.isOverdueAt(now: Instant, displayTimeZone: String): Boolean {
+    return isTaskOverdue(status.wireName, dueTime, now, displayTimeZone)
 }
 
 fun taskTimelineSortKey(
@@ -56,9 +62,10 @@ fun taskTimelineSortKey(
         ?: updatedAtMillis
         ?: dueInstant?.toEpochMilli()
         ?: plannedMillis
+    val isOverdue = isTaskOverdue(statusWire, dueTime, now, displayTimeZone)
     val scheduleRank = when {
         isCompleted -> 4
-        dueInstant != null && dueInstant.isBefore(now) -> 0
+        isOverdue -> 0
         dueInstant != null -> 1
         plannedMillis != null -> 2
         else -> 3

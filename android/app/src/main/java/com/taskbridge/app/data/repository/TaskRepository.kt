@@ -38,17 +38,18 @@ class TaskRepository(
     private val taskDao: TaskDao,
     private val syncQueueDao: SyncQueueDao,
 ) {
-    fun observeTasks(): Flow<List<Task>> {
-        return taskDao.observeActiveTasks(ACTIVE_TASK_LIMIT, Instant.now().toString())
+    fun observeTasks(now: Instant = Instant.now()): Flow<List<Task>> {
+        return taskDao.observeActiveTasks(ACTIVE_TASK_LIMIT, now.toString())
             .map { tasks -> tasks.map { it.toDomain() } }
     }
 
     fun observeTodayTasks(
         todayPrefix: String,
         timeZoneId: String = ShanghaiTime.DEFAULT_ZONE_ID,
+        now: Instant = Instant.now(),
     ): Flow<List<Task>> {
         val (startTime, endTime) = ShanghaiTime.dayBounds(todayPrefix, timeZoneId)
-        return taskDao.observeTodayTasks(todayPrefix, startTime, endTime, Instant.now().toString(), TODAY_TASK_LIMIT)
+        return taskDao.observeTodayTasks(todayPrefix, startTime, endTime, now.toString(), TODAY_TASK_LIMIT)
             .map { tasks -> tasks.map { it.toDomain() } }
     }
 

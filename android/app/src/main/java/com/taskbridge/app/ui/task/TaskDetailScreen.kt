@@ -297,7 +297,7 @@ private fun Task.detailMeta(
     now: Instant,
 ): String {
     return listOfNotNull(
-        strings.overdue.takeIf { isOverdueAt(now) },
+        strings.overdue.takeIf { isOverdueAt(now, displayTimeZone) },
         project?.let { "${strings.project} $it" },
         plannedDate?.let { "${strings.plan} $it" },
         dueTime?.let { "${strings.due} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },

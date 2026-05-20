@@ -17,6 +17,7 @@ data class TodayTaskWidgetState(
     val tasks: List<TodayTaskWidgetItem>,
     val opacityPercent: Int,
     val taskScope: String,
+    val style: String,
 )
 
 data class TodayTaskWidgetItem(
@@ -41,6 +42,7 @@ class TodayTaskWidgetRepository(
         val displayTimeZone = tokenDataStore.displayTimeZone.first()
         val taskScope = normalizeScope(tokenDataStore.widgetTaskScope.first())
         val completionScope = normalizeCompletionScope(tokenDataStore.widgetCompletionScope.first())
+        val style = normalizeStyle(tokenDataStore.widgetStyle.first())
         val today = ShanghaiTime.todayDate(displayTimeZone).toString()
         val now = Instant.now()
         if (accessToken.isNullOrBlank()) {
@@ -49,6 +51,7 @@ class TodayTaskWidgetRepository(
                 tasks = emptyList(),
                 opacityPercent = opacityPercent,
                 taskScope = taskScope,
+                style = style,
             )
         }
 
@@ -81,6 +84,7 @@ class TodayTaskWidgetRepository(
             tasks = tasks,
             opacityPercent = opacityPercent,
             taskScope = taskScope,
+            style = style,
         )
     }
 
@@ -92,7 +96,7 @@ class TodayTaskWidgetRepository(
             highPriority: Int = WidgetConstants.HIGH_PRIORITY,
             now: Instant = Instant.now(),
         ): Boolean {
-            if (isTaskOverdue(task.status, task.dueTime, now)) return true
+            if (isTaskOverdue(task.status, task.dueTime, now, displayTimeZone)) return true
             if (task.dueTime.isToday(today, displayTimeZone)) return true
             if (task.remindTime.isToday(today, displayTimeZone)) return true
             if (task.plannedDate == today) return true
@@ -131,12 +135,12 @@ private fun TodayWidgetTaskProjection.toWidgetItem(
         dueLabel = dueLabel(today, displayTimeZone, now),
         priorityLabel = if (priority > 0) "P$priority" else "P0",
         isCompleted = TaskStatus.fromWire(status) == TaskStatus.Completed,
-        isOverdue = isTaskOverdue(status, dueTime, now),
+        isOverdue = isTaskOverdue(status, dueTime, now, displayTimeZone),
     )
 }
 
 private fun TodayWidgetTaskProjection.dueLabel(today: String, displayTimeZone: String, now: Instant): String {
-    val prefix = if (isTaskOverdue(status, dueTime, now)) "\u903E\u671F " else ""
+    val prefix = if (isTaskOverdue(status, dueTime, now, displayTimeZone)) "\u903E\u671F " else ""
     dueTime.dateTimeLabel(today, displayTimeZone)?.let { return prefix + it }
     plannedDate.dateLabel(today)?.let { return it }
     remindTime.dateTimeLabel(today, displayTimeZone)?.let { return it }
@@ -184,5 +188,13 @@ private fun normalizeCompletionScope(scope: String): String {
         WidgetConstants.COMPLETION_SCOPE_ALL
     } else {
         WidgetConstants.COMPLETION_SCOPE_OPEN
+    }
+}
+
+private fun normalizeStyle(style: String): String {
+    return if (style == WidgetConstants.STYLE_TRANSPARENT) {
+        WidgetConstants.STYLE_TRANSPARENT
+    } else {
+        WidgetConstants.STYLE_CLEAR
     }
 }

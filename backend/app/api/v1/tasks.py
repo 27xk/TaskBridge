@@ -396,5 +396,3 @@ def restore(
 ):
     task = restore_task(db, current_user, task_id)
     return api_success(TaskRead.model_validate(task))
-    rename_task_meta,
-    resolve_task_conflict,

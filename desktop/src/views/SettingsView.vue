@@ -95,7 +95,7 @@ function updateLanguage(event: Event): void {
 </script>
 
 <template>
-  <section class="view-shell">
+  <section class="view-shell settings-view">
     <header class="view-header">
       <div>
         <p class="eyebrow">{{ settingsStore.t("settings.title") }}</p>
@@ -104,38 +104,37 @@ function updateLanguage(event: Event): void {
       <button class="primary-button" type="button" @click="save">{{ settingsStore.t("settings.save") }}</button>
     </header>
 
-    <div class="settings-workbench">
-      <div class="settings-main">
-        <section class="settings-section">
-          <h2>{{ settingsStore.t("settings.general") }}</h2>
-          <div class="settings-grid">
-            <label>
-              <span>{{ settingsStore.t("settings.language") }}</span>
-              <select v-model="settings.language" @change="updateLanguage">
-                <option value="zh-CN">{{ settingsStore.t("settings.languageZh") }}</option>
-                <option value="en-US">{{ settingsStore.t("settings.languageEn") }}</option>
-              </select>
-            </label>
-            <label>
-              <span>{{ settingsStore.t("settings.displayTimeZone") }}</span>
-              <select v-model="settings.displayTimeZone">
-                <option v-for="zone in timeZoneOptions" :key="zone.value" :value="zone.value">
-                  {{ settingsStore.language === "zh-CN" ? zone.zh : zone.en }} · {{ zone.value }}
-                </option>
-              </select>
-              <input v-model.trim="settings.displayTimeZone" type="text" />
-              <small>{{ settingsStore.t("settings.displayTimeZoneHint") }}</small>
-            </label>
-            <label class="checkbox-line">
-              <input v-model="settings.autoStart" type="checkbox" />
-              <span>{{ settingsStore.t("settings.autoStart") }}</span>
-            </label>
-          </div>
-        </section>
+    <div class="settings-layout">
+      <section class="settings-section settings-primary">
+        <h2>{{ settingsStore.t("settings.accountDisplay") }}</h2>
+        <div class="settings-grid settings-primary-grid">
+          <label>
+            <span>{{ settingsStore.t("settings.language") }}</span>
+            <select v-model="settings.language" @change="updateLanguage">
+              <option value="zh-CN">{{ settingsStore.t("settings.languageZh") }}</option>
+              <option value="en-US">{{ settingsStore.t("settings.languageEn") }}</option>
+            </select>
+          </label>
+          <label>
+            <span>{{ settingsStore.t("settings.displayTimeZone") }}</span>
+            <select v-model="settings.displayTimeZone">
+              <option v-for="zone in timeZoneOptions" :key="zone.value" :value="zone.value">
+                {{ settingsStore.language === "zh-CN" ? zone.zh : zone.en }} · {{ zone.value }}
+              </option>
+            </select>
+            <small>{{ settingsStore.t("settings.displayTimeZoneHint") }}</small>
+          </label>
+          <label class="checkbox-line">
+            <input v-model="settings.autoStart" type="checkbox" />
+            <span>{{ settingsStore.t("settings.autoStart") }}</span>
+          </label>
+        </div>
+      </section>
 
+      <div class="settings-row">
         <section class="settings-section">
           <h2>{{ settingsStore.t("settings.window") }}</h2>
-          <div class="settings-grid">
+          <div class="settings-grid settings-window-grid">
             <label class="checkbox-line">
               <input v-model="settings.floatingVisibleOnStart" type="checkbox" />
               <span>{{ settingsStore.t("settings.floatingVisibleOnStart") }}</span>
@@ -144,7 +143,7 @@ function updateLanguage(event: Event): void {
               <input v-model="settings.floatingMiniMode" type="checkbox" />
               <span>{{ settingsStore.t("settings.floatingMiniMode") }}</span>
             </label>
-            <label>
+            <label class="settings-range">
               <span>{{ settingsStore.t("settings.floatingOpacity") }} {{ Math.round(settings.floatingOpacity * 100) }}%</span>
               <input
                 v-model.number="settings.floatingOpacity"
@@ -158,56 +157,58 @@ function updateLanguage(event: Event): void {
           </div>
         </section>
 
-        <section class="settings-section">
-          <h2>{{ settingsStore.t("settings.metadata") }}</h2>
-          <div class="settings-grid">
-            <label>
-              <span>{{ settingsStore.t("settings.projectFrom") }}</span>
-              <select v-model="metaEdit.projectFrom">
-                <option value="">{{ settingsStore.t("settings.projectFrom") }}</option>
-                <option v-for="project in taskStore.projects" :key="project" :value="project">{{ project }}</option>
-              </select>
-            </label>
-            <label>
-              <span>{{ settingsStore.t("settings.projectTo") }}</span>
-              <input v-model="metaEdit.projectTo" type="text" />
-            </label>
-            <label>
-              <span>{{ settingsStore.t("settings.tagFrom") }}</span>
-              <select v-model="metaEdit.tagFrom">
-                <option value="">{{ settingsStore.t("settings.tagFrom") }}</option>
-                <option v-for="tag in taskStore.tags" :key="tag" :value="tag">#{{ tag }}</option>
-              </select>
-            </label>
-            <label>
-              <span>{{ settingsStore.t("settings.tagTo") }}</span>
-              <input v-model="metaEdit.tagTo" type="text" />
-            </label>
+        <section class="settings-section settings-data">
+          <h2>{{ settingsStore.t("settings.dataSession") }}</h2>
+          <div class="settings-data-actions">
+            <button class="secondary-button" type="button" @click="exportBackup">{{ settingsStore.t("settings.exportBackup") }}</button>
+            <button class="secondary-button" type="button" @click="importBackup">{{ settingsStore.t("settings.importBackup") }}</button>
           </div>
-          <div class="form-actions settings-actions">
-            <button class="secondary-button" type="button" @click="renameProject">{{ settingsStore.t("settings.renameProject") }}</button>
-            <button class="secondary-button" type="button" @click="renameTag">{{ settingsStore.t("settings.renameTag") }}</button>
-          </div>
+          <dl class="settings-device-list">
+            <div>
+              <dt>{{ settingsStore.t("settings.deviceId") }}</dt>
+              <dd>{{ settings.deviceId || "-" }}</dd>
+            </div>
+            <div>
+              <dt>{{ settingsStore.t("settings.lastSyncTime") }}</dt>
+              <dd>{{ settings.lastSyncTime || "-" }}</dd>
+            </div>
+          </dl>
+          <p v-if="saved" class="save-note">{{ settingsStore.t("settings.saved") }}</p>
+          <p v-if="exportNote" class="save-note">{{ exportNote }}</p>
         </section>
       </div>
 
-      <aside class="settings-side">
-        <section class="settings-side-panel">
-          <h2>{{ settingsStore.t("settings.backup") }}</h2>
-          <button class="secondary-button" type="button" @click="exportBackup">{{ settingsStore.t("settings.exportBackup") }}</button>
-          <button class="secondary-button" type="button" @click="importBackup">{{ settingsStore.t("settings.importBackup") }}</button>
-        </section>
-        <section class="settings-side-panel">
-          <h2>{{ settingsStore.t("settings.deviceId") }}</h2>
-          <p>{{ settings.deviceId || "-" }}</p>
-        </section>
-        <section class="settings-side-panel">
-          <h2>{{ settingsStore.t("settings.lastSyncTime") }}</h2>
-          <p>{{ settings.lastSyncTime || "-" }}</p>
-        </section>
-        <p v-if="saved" class="save-note">{{ settingsStore.t("settings.saved") }}</p>
-        <p v-if="exportNote" class="save-note">{{ exportNote }}</p>
-      </aside>
+      <section class="settings-section settings-metadata">
+        <h2>{{ settingsStore.t("settings.metadata") }}</h2>
+        <div class="settings-grid">
+          <label>
+            <span>{{ settingsStore.t("settings.projectFrom") }}</span>
+            <select v-model="metaEdit.projectFrom">
+              <option value="">{{ settingsStore.t("settings.projectFrom") }}</option>
+              <option v-for="project in taskStore.projects" :key="project" :value="project">{{ project }}</option>
+            </select>
+          </label>
+          <label>
+            <span>{{ settingsStore.t("settings.projectTo") }}</span>
+            <input v-model="metaEdit.projectTo" type="text" />
+          </label>
+          <label>
+            <span>{{ settingsStore.t("settings.tagFrom") }}</span>
+            <select v-model="metaEdit.tagFrom">
+              <option value="">{{ settingsStore.t("settings.tagFrom") }}</option>
+              <option v-for="tag in taskStore.tags" :key="tag" :value="tag">#{{ tag }}</option>
+            </select>
+          </label>
+          <label>
+            <span>{{ settingsStore.t("settings.tagTo") }}</span>
+            <input v-model="metaEdit.tagTo" type="text" />
+          </label>
+        </div>
+        <div class="form-actions settings-actions">
+          <button class="secondary-button" type="button" @click="renameProject">{{ settingsStore.t("settings.renameProject") }}</button>
+          <button class="secondary-button" type="button" @click="renameTag">{{ settingsStore.t("settings.renameTag") }}</button>
+        </div>
+      </section>
     </div>
   </section>
 </template>

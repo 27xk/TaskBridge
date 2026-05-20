@@ -57,6 +57,10 @@ object ShanghaiTime {
         return parseStoredInstant(value)?.atZone(zone(timeZoneId))?.toLocalDate()
     }
 
+    fun localDateTime(value: String?, timeZoneId: String? = DEFAULT_ZONE_ID): LocalDateTime? {
+        return parseStoredInstant(value)?.atZone(zone(timeZoneId))?.toLocalDateTime()
+    }
+
     fun parseInstant(value: String?): Instant? {
         return parseStoredInstant(value)
     }
