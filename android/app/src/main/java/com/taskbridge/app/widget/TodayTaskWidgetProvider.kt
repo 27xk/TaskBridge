@@ -87,9 +87,9 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
                 setOnClickPendingIntent(R.id.widgetRoot, openAppIntent(context, openTarget))
 
                 val message = when {
-                    !state.isLoggedIn -> "请登录 TaskBridge"
-                    state.taskScope == WidgetConstants.TASK_SCOPE_ALL && state.tasks.isEmpty() -> "暂无任务"
-                    state.tasks.isEmpty() -> "今天暂无待办"
+                    !state.isLoggedIn -> "\u8BF7\u767B\u5F55 TaskBridge"
+                    state.taskScope == WidgetConstants.TASK_SCOPE_ALL && state.tasks.isEmpty() -> "\u6682\u65E0\u4EFB\u52A1"
+                    state.tasks.isEmpty() -> "\u4ECA\u5929\u6682\u65E0\u5F85\u529E"
                     else -> null
                 }
                 setViewVisibility(R.id.widgetMessage, if (message == null) View.GONE else View.VISIBLE)
@@ -114,16 +114,28 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
             item: TodayTaskWidgetItem,
         ) {
             val titleColor = if (item.isCompleted) Color.argb(178, 255, 255, 255) else Color.WHITE
-            val metaColor = if (item.isCompleted) Color.argb(140, 255, 255, 255) else Color.argb(216, 255, 255, 255)
+            val metaColor = when {
+                item.isOverdue -> Color.rgb(255, 196, 156)
+                item.isCompleted -> Color.argb(140, 255, 255, 255)
+                else -> Color.argb(216, 255, 255, 255)
+            }
             val meta = buildString {
                 append(item.dueLabel)
                 append(" / ")
                 append(item.priorityLabel)
-                if (item.isCompleted) append(" / 已完成")
+                if (item.isCompleted) append(" / \u5DF2\u5B8C\u6210")
             }
 
             views.setViewVisibility(rowIds[index], View.VISIBLE)
-            views.setTextViewText(statusIds[index], if (item.isCompleted) "✓" else "○")
+            views.setTextViewText(
+                statusIds[index],
+                when {
+                    item.isCompleted -> "\u2713"
+                    item.isOverdue -> "!"
+                    else -> "\u25CB"
+                },
+            )
+            views.setTextColor(statusIds[index], metaColor)
             views.setTextViewText(titleIds[index], item.title)
             views.setTextColor(titleIds[index], titleColor)
             views.setTextViewText(metaIds[index], meta)

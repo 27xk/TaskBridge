@@ -17,6 +17,7 @@ const repeatOptions = [
   { value: "weekly", zh: "每周", en: "Weekly" },
   { value: "monthly", zh: "每月", en: "Monthly" },
 ];
+const priorityOptions = [0, 1, 2, 3, 4, 5];
 
 const emit = defineEmits<{
   save: [draft: TaskDraft];
@@ -170,7 +171,11 @@ function hasAdvancedFields(task: TaskRecord): boolean {
         </label>
         <label>
           <span>{{ settingsStore.t("task.priority") }}</span>
-          <input v-model.number="form.priority" type="number" min="0" max="5" />
+          <select v-model.number="form.priority">
+            <option v-for="priority in priorityOptions" :key="priority" :value="priority">
+              {{ priority }}
+            </option>
+          </select>
         </label>
         <label>
           <span>{{ settingsStore.t("task.tag") }}</span>

@@ -4,6 +4,7 @@ import { computed, ref, shallowRef } from "vue";
 import { createEmptyTask, nowIso } from "../db/sqlite";
 import { enqueueChange, removeQueueByLocalId } from "../db/sync-queue.dao";
 import { listTasks, listTodayTasks, saveTask } from "../db/task.dao";
+import { sortCompletedTasksByRecency } from "../utils/task-order";
 import { parseQuickTask, parseTaskBridgeDate, shanghaiDateTimeInputToIso, todayLocalDate } from "../../shared/quick-add-parser";
 import { useSettingsStore } from "./settings";
 import { useSyncStore } from "./sync";
@@ -24,6 +25,10 @@ export interface TaskDraft {
   templateName?: string | null;
 }
 
+interface MutationOptions {
+  reload?: boolean;
+}
+
 export const useTaskStore = defineStore("task", () => {
   const tasks = shallowRef<TaskRecord[]>([]);
   const todayTasks = shallowRef<TaskRecord[]>([]);
@@ -32,7 +37,7 @@ export const useTaskStore = defineStore("task", () => {
 
   const activeTasks = computed(() => tasks.value.filter((task) => !task.isDeleted));
   const openTasks = computed(() => activeTasks.value.filter((task) => task.status !== "completed"));
-  const completedTasks = computed(() => activeTasks.value.filter((task) => task.status === "completed"));
+  const completedTasks = computed(() => sortCompletedTasksByRecency(activeTasks.value.filter((task) => task.status === "completed")));
   const projects = computed(() => uniqueSorted(activeTasks.value.map((task) => task.project)));
   const tags = computed(() => uniqueSorted(activeTasks.value.map((task) => task.tag)));
 
@@ -99,7 +104,7 @@ export const useTaskStore = defineStore("task", () => {
     return next;
   }
 
-  async function completeTask(task: TaskRecord): Promise<void> {
+  async function completeTask(task: TaskRecord, options: MutationOptions = {}): Promise<void> {
     const now = nowIso();
     const next = {
       ...task,
@@ -111,23 +116,24 @@ export const useTaskStore = defineStore("task", () => {
     await saveTask(next);
     await queueTaskChange(next, task.serverId ? "complete" : "create");
     if (!task.serverId && task.repeatRule) {
-      await createNextOccurrence(task);
+      await createNextOccurrence(task, { reload: false });
     }
-    await load();
+    if (options.reload !== false) await load();
   }
 
   async function batchComplete(selected: TaskRecord[]): Promise<void> {
-    for (const task of selected.filter((item) => item.status !== "completed")) {
-      await completeTask(task);
+    const targets = selected.filter((item) => item.status !== "completed");
+    for (const task of targets) {
+      await completeTask(task, { reload: false });
     }
-    await load();
+    if (targets.length > 0) await load();
   }
 
   async function batchDelete(selected: TaskRecord[]): Promise<void> {
     for (const task of selected) {
-      await deleteTask(task);
+      await deleteTask(task, { reload: false });
     }
-    await load();
+    if (selected.length > 0) await load();
   }
 
   async function resolveConflictUseServer(task: TaskRecord): Promise<void> {
@@ -210,7 +216,7 @@ export const useTaskStore = defineStore("task", () => {
     await load();
   }
 
-  async function createNextOccurrence(task: TaskRecord): Promise<TaskRecord | null> {
+  async function createNextOccurrence(task: TaskRecord, options: MutationOptions = {}): Promise<TaskRecord | null> {
     const days = repeatDays(task.repeatRule);
     if (!days) return null;
     const next = {
@@ -236,7 +242,7 @@ export const useTaskStore = defineStore("task", () => {
     } satisfies TaskRecord;
     await saveTask(next);
     await queueTaskChange(next, "create");
-    await load();
+    if (options.reload !== false) await load();
     return next;
   }
 
@@ -267,7 +273,7 @@ export const useTaskStore = defineStore("task", () => {
     return next;
   }
 
-  async function deleteTask(task: TaskRecord): Promise<void> {
+  async function deleteTask(task: TaskRecord, options: MutationOptions = {}): Promise<void> {
     const next = {
       ...task,
       isDeleted: true,
@@ -280,7 +286,7 @@ export const useTaskStore = defineStore("task", () => {
     } else {
       await removeQueueByLocalId(task.localId);
     }
-    await load();
+    if (options.reload !== false) await load();
   }
 
   async function renameProject(oldValue: string, newValue: string): Promise<void> {

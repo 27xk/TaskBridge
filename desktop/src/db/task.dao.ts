@@ -1,6 +1,6 @@
 import { bridge } from "./sqlite";
 
-export async function listTasks(limit = 300, offset = 0, includeDeleted = false): Promise<TaskRecord[]> {
+export async function listTasks(limit = 200, offset = 0, includeDeleted = false): Promise<TaskRecord[]> {
   return bridge().db.listTasks(limit, offset, includeDeleted);
 }
 

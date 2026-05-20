@@ -16,6 +16,9 @@ data class TodayWidgetTaskProjection(
     val dueTime: String?,
     val remindTime: String?,
     val plannedDate: String?,
+    val completedAt: String?,
+    val sortOrder: Int,
+    val updatedAt: String,
 )
 
 @Dao
@@ -25,13 +28,25 @@ interface TaskDao {
         SELECT * FROM tasks
         WHERE isDeleted = 0
         ORDER BY
-            CASE WHEN dueTime IS NULL THEN 1 ELSE 0 END,
-            dueTime ASC,
+            CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
+            CASE
+                WHEN status IN ('completed', 'done') THEN 4
+                WHEN status NOT IN ('completed', 'done') AND dueTime IS NOT NULL AND datetime(dueTime) < datetime(:nowTime) THEN 0
+                WHEN dueTime IS NOT NULL THEN 1
+                WHEN plannedDate IS NOT NULL THEN 2
+                ELSE 3
+            END,
+            CASE WHEN status IN ('completed', 'done') THEN datetime(COALESCE(completedAt, updatedAt, dueTime, plannedDate)) END DESC,
+            CASE WHEN status NOT IN ('completed', 'done') AND dueTime IS NULL THEN 1 ELSE 0 END,
+            CASE WHEN status NOT IN ('completed', 'done') THEN dueTime END ASC,
+            CASE WHEN status NOT IN ('completed', 'done') THEN plannedDate END ASC,
+            sortOrder ASC,
+            priority DESC,
             updatedAt DESC
         LIMIT :limit
         """,
     )
-    fun observeActiveTasks(limit: Int): Flow<List<TaskEntity>>
+    fun observeActiveTasks(limit: Int, nowTime: String): Flow<List<TaskEntity>>
 
     @Query(
         """
@@ -41,8 +56,23 @@ interface TaskDao {
               (dueTime IS NOT NULL AND datetime(dueTime) >= datetime(:startTime) AND datetime(dueTime) < datetime(:endTime))
               OR (remindTime IS NOT NULL AND datetime(remindTime) >= datetime(:startTime) AND datetime(remindTime) < datetime(:endTime))
               OR plannedDate = :today
+              OR (status NOT IN ('completed', 'done') AND dueTime IS NOT NULL AND datetime(dueTime) < datetime(:nowTime))
         )
-        ORDER BY sortOrder ASC, dueTime ASC, updatedAt DESC
+        ORDER BY
+            CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
+            CASE
+                WHEN status IN ('completed', 'done') THEN 4
+                WHEN status NOT IN ('completed', 'done') AND dueTime IS NOT NULL AND datetime(dueTime) < datetime(:nowTime) THEN 0
+                WHEN dueTime IS NOT NULL THEN 1
+                WHEN plannedDate IS NOT NULL THEN 2
+                ELSE 3
+            END,
+            CASE WHEN status IN ('completed', 'done') THEN datetime(COALESCE(completedAt, updatedAt, dueTime, plannedDate)) END DESC,
+            CASE WHEN status NOT IN ('completed', 'done') THEN dueTime END ASC,
+            CASE WHEN status NOT IN ('completed', 'done') THEN plannedDate END ASC,
+            sortOrder ASC,
+            priority DESC,
+            updatedAt DESC
         LIMIT :limit
         """,
     )
@@ -50,6 +80,7 @@ interface TaskDao {
         today: String,
         startTime: String,
         endTime: String,
+        nowTime: String,
         limit: Int,
     ): Flow<List<TaskEntity>>
 
@@ -74,24 +105,38 @@ interface TaskDao {
 
     @Query(
         """
-        SELECT localId, title, status, priority, dueTime, remindTime, plannedDate FROM tasks
+        SELECT * FROM tasks
+        WHERE isDeleted = 0
+        ORDER BY updatedAt DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun getBackupTasks(limit: Int): List<TaskEntity>
+
+    @Query(
+        """
+        SELECT localId, title, status, priority, dueTime, remindTime, plannedDate, completedAt, sortOrder, updatedAt FROM tasks
         WHERE isDeleted = 0
           AND (
               (dueTime IS NOT NULL AND datetime(dueTime) >= datetime(:startTime) AND datetime(dueTime) < datetime(:endTime))
               OR (remindTime IS NOT NULL AND datetime(remindTime) >= datetime(:startTime) AND datetime(remindTime) < datetime(:endTime))
               OR plannedDate = :today
+              OR (status NOT IN ('completed', 'done') AND dueTime IS NOT NULL AND datetime(dueTime) < datetime(:nowTime))
               OR (status = 'todo' AND priority >= :highPriority)
           )
         ORDER BY
+            CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
             CASE
+                WHEN status IN ('completed', 'done') THEN 4
+                WHEN status NOT IN ('completed', 'done') AND dueTime IS NOT NULL AND datetime(dueTime) < datetime(:nowTime) THEN 0
                 WHEN dueTime IS NOT NULL AND datetime(dueTime) >= datetime(:startTime) AND datetime(dueTime) < datetime(:endTime) THEN 0
                 WHEN remindTime IS NOT NULL AND datetime(remindTime) >= datetime(:startTime) AND datetime(remindTime) < datetime(:endTime) THEN 1
                 WHEN plannedDate = :today THEN 2
                 ELSE 3
             END,
-            CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
-            CASE WHEN dueTime IS NULL THEN 1 ELSE 0 END,
-            dueTime ASC,
+            CASE WHEN status IN ('completed', 'done') THEN datetime(COALESCE(completedAt, updatedAt, dueTime, plannedDate)) END DESC,
+            CASE WHEN status NOT IN ('completed', 'done') AND dueTime IS NULL THEN 1 ELSE 0 END,
+            CASE WHEN status NOT IN ('completed', 'done') THEN dueTime END ASC,
             priority DESC,
             updatedAt DESC
         LIMIT :limit
@@ -101,24 +146,35 @@ interface TaskDao {
         today: String,
         startTime: String,
         endTime: String,
+        nowTime: String,
         highPriority: Int,
         limit: Int,
     ): List<TodayWidgetTaskProjection>
 
     @Query(
         """
-        SELECT localId, title, status, priority, dueTime, remindTime, plannedDate FROM tasks
+        SELECT localId, title, status, priority, dueTime, remindTime, plannedDate, completedAt, sortOrder, updatedAt FROM tasks
         WHERE isDeleted = 0
         ORDER BY
-            CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
-            CASE WHEN dueTime IS NULL THEN 1 ELSE 0 END,
-            dueTime ASC,
+            CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
+            CASE
+                WHEN status IN ('completed', 'done') THEN 4
+                WHEN status NOT IN ('completed', 'done') AND dueTime IS NOT NULL AND datetime(dueTime) < datetime(:nowTime) THEN 0
+                WHEN dueTime IS NOT NULL THEN 1
+                WHEN plannedDate IS NOT NULL THEN 2
+                ELSE 3
+            END,
+            CASE WHEN status IN ('completed', 'done') THEN datetime(COALESCE(completedAt, updatedAt, dueTime, plannedDate)) END DESC,
+            CASE WHEN status NOT IN ('completed', 'done') AND dueTime IS NULL THEN 1 ELSE 0 END,
+            CASE WHEN status NOT IN ('completed', 'done') THEN dueTime END ASC,
+            CASE WHEN status NOT IN ('completed', 'done') THEN plannedDate END ASC,
+            sortOrder ASC,
             priority DESC,
             updatedAt DESC
         LIMIT :limit
         """,
     )
-    suspend fun getAllWidgetTasks(limit: Int): List<TodayWidgetTaskProjection>
+    suspend fun getAllWidgetTasks(limit: Int, nowTime: String): List<TodayWidgetTaskProjection>
 
     @Query("SELECT * FROM tasks WHERE serverId = :serverId LIMIT 1")
     suspend fun getByServerId(serverId: Int): TaskEntity?

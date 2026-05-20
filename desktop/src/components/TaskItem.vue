@@ -53,6 +53,7 @@ function syncStatusText(status: TaskRecord["syncStatus"]): string {
       return settingsStore.t("sync.synced");
   }
 }
+
 </script>
 
 <template>
@@ -84,13 +85,24 @@ function syncStatusText(status: TaskRecord["syncStatus"]): string {
     </div>
 
     <div class="task-actions">
-      <button v-if="task.status !== 'completed'" type="button" :title="settingsStore.t('task.today')" @click="$emit('planToday', task)">{{ settingsStore.t("task.today") }}</button>
-      <button v-if="task.status !== 'completed'" type="button" :title="settingsStore.t('task.tomorrow')" @click="$emit('postpone', task)">{{ settingsStore.t("task.tomorrow") }}</button>
-      <button v-if="task.status !== 'completed'" type="button" :title="settingsStore.t('task.snooze')" @click="$emit('snooze', task)">{{ settingsStore.t("task.snooze") }}</button>
-      <button v-if="task.repeatRule" type="button" :title="settingsStore.t('task.next')" @click="$emit('nextOccurrence', task)">{{ settingsStore.t("task.next") }}</button>
-      <button v-if="task.isTemplate" type="button" :title="settingsStore.t('task.use')" @click="$emit('instantiateTemplate', task)">{{ settingsStore.t("task.use") }}</button>
-      <button type="button" :title="settingsStore.t('task.editAction')" @click="$emit('edit', task)">{{ settingsStore.t("task.editAction") }}</button>
-      <button type="button" :title="settingsStore.t('task.delete')" @click="$emit('delete', task)">{{ settingsStore.t("task.delete") }}</button>
+      <button v-if="task.status === 'completed'" type="button" @click="$emit('restore', task)">
+        {{ settingsStore.t("task.restore") }}
+      </button>
+      <button v-else type="button" @click="$emit('edit', task)">
+        {{ settingsStore.t("task.editAction") }}
+      </button>
+      <details class="task-menu">
+        <summary>{{ settingsStore.t("task.moreActions") }}</summary>
+        <div class="task-menu-panel">
+          <button v-if="task.status !== 'completed'" type="button" @click="$emit('planToday', task)">{{ settingsStore.t("task.today") }}</button>
+          <button v-if="task.status !== 'completed'" type="button" @click="$emit('postpone', task)">{{ settingsStore.t("task.tomorrow") }}</button>
+          <button v-if="task.status !== 'completed'" type="button" @click="$emit('snooze', task)">{{ settingsStore.t("task.snooze") }}</button>
+          <button v-if="task.repeatRule" type="button" @click="$emit('nextOccurrence', task)">{{ settingsStore.t("task.next") }}</button>
+          <button v-if="task.isTemplate" type="button" @click="$emit('instantiateTemplate', task)">{{ settingsStore.t("task.use") }}</button>
+          <button v-if="task.status === 'completed'" type="button" @click="$emit('edit', task)">{{ settingsStore.t("task.editAction") }}</button>
+          <button type="button" @click="$emit('delete', task)">{{ settingsStore.t("task.delete") }}</button>
+        </div>
+      </details>
     </div>
   </article>
 </template>

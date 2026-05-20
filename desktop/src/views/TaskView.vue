@@ -5,6 +5,7 @@ import TaskEditor from "../components/TaskEditor.vue";
 import TaskItem from "../components/TaskItem.vue";
 import { useSettingsStore } from "../stores/settings";
 import { useTaskStore, type TaskDraft } from "../stores/task";
+import { sortCompletedTasksByRecency } from "../utils/task-order";
 import { parseTaskBridgeDate, todayLocalDate } from "../../shared/quick-add-parser";
 
 const props = defineProps<{
@@ -17,11 +18,26 @@ const settingsStore = useSettingsStore();
 const editorOpen = ref(false);
 const editingTask = ref<TaskRecord | null>(null);
 const search = ref("");
-const filter = ref<"all" | "inbox" | "today" | "overdue" | "week" | "high" | "completed" | "pending" | "conflict" | "templates">("all");
+type TaskFilter = "all" | "inbox" | "today" | "overdue" | "week" | "high" | "completed" | "pending" | "conflict" | "templates";
+
+const filter = ref<TaskFilter>("all");
 const selectedProject = ref("");
 const selectedTag = ref("");
 const notice = ref("");
 let noticeTimer: number | undefined;
+
+const filterOptions = computed<Array<{ value: TaskFilter; label: string }>>(() => [
+  { value: "all", label: settingsStore.t("nav.all") },
+  { value: "inbox", label: settingsStore.t("task.inbox") },
+  { value: "today", label: settingsStore.t("nav.today") },
+  { value: "overdue", label: settingsStore.t("task.filterOverdue") },
+  { value: "week", label: settingsStore.t("task.filterWeek") },
+  { value: "high", label: settingsStore.t("task.filterHigh") },
+  { value: "completed", label: settingsStore.t("task.completedCountPrefix") },
+  { value: "pending", label: settingsStore.t("task.filterPending") },
+  { value: "conflict", label: settingsStore.t("sync.conflict") },
+  { value: "templates", label: settingsStore.t("task.template") },
+]);
 
 const filteredTasks = computed(() => {
   const keyword = search.value.trim().toLowerCase();
@@ -34,7 +50,9 @@ const filteredTasks = computed(() => {
   });
 });
 const openFilteredTasks = computed(() => filteredTasks.value.filter((task) => task.status !== "completed"));
-const completedFilteredTasks = computed(() => filteredTasks.value.filter((task) => task.status === "completed"));
+const completedFilteredTasks = computed(() =>
+  sortCompletedTasksByRecency(filteredTasks.value.filter((task) => task.status === "completed")),
+);
 const shouldGroupByCompletion = computed(() => filter.value !== "completed");
 
 watch(
@@ -105,7 +123,7 @@ function showNotice(message: string): void {
   }, 1800);
 }
 
-function matchesFilter(task: TaskRecord, mode: typeof filter.value): boolean {
+function matchesFilter(task: TaskRecord, mode: TaskFilter): boolean {
   const today = todayLocalDate(new Date(), settingsStore.displayTimeZone);
   const taskDate = task.plannedDate ?? isoDate(task.dueTime);
   switch (mode) {
@@ -149,38 +167,42 @@ function isoDate(value: string | null): string | null {
       <button class="primary-button" type="button" @click="openCreate">{{ settingsStore.t("task.add") }}</button>
     </header>
 
-    <div class="toolbar">
+    <div class="toolbar search-toolbar">
       <input v-model="search" type="search" :placeholder="settingsStore.t('task.search')" />
       <span>{{ settingsStore.t("task.completedCountPrefix") }} {{ taskStore.completedTasks.length }}</span>
     </div>
 
-    <div class="toolbar filter-toolbar">
-      <select v-model="filter">
-        <option value="all">{{ settingsStore.t("nav.all") }}</option>
-        <option value="inbox">{{ settingsStore.t("task.inbox") }}</option>
-        <option value="today">{{ settingsStore.t("nav.today") }}</option>
-        <option value="overdue">{{ settingsStore.language === "zh-CN" ? "逾期" : "Overdue" }}</option>
-        <option value="week">{{ settingsStore.language === "zh-CN" ? "本周" : "This week" }}</option>
-        <option value="high">{{ settingsStore.language === "zh-CN" ? "高优先级" : "High priority" }}</option>
-        <option value="completed">{{ settingsStore.language === "zh-CN" ? "已完成" : "Completed" }}</option>
-        <option value="pending">{{ settingsStore.language === "zh-CN" ? "未同步" : "Pending sync" }}</option>
-        <option value="conflict">{{ settingsStore.t("sync.conflict") }}</option>
-        <option value="templates">{{ settingsStore.t("task.template") }}</option>
-      </select>
-      <select v-model="selectedProject">
-        <option value="">{{ settingsStore.language === "zh-CN" ? "全部项目" : "All projects" }}</option>
-        <option v-for="project in taskStore.projects" :key="project" :value="project">{{ project }}</option>
-      </select>
-      <select v-model="selectedTag">
-        <option value="">{{ settingsStore.language === "zh-CN" ? "全部标签" : "All tags" }}</option>
-        <option v-for="tag in taskStore.tags" :key="tag" :value="tag">#{{ tag }}</option>
-      </select>
-      <button type="button" class="secondary-button" @click="completeCurrentView">{{ settingsStore.language === "zh-CN" ? "完成当前" : "Complete current" }}</button>
-      <button type="button" class="secondary-button" @click="deleteCurrentView">{{ settingsStore.language === "zh-CN" ? "删除当前" : "Delete current" }}</button>
+    <div class="filter-toolbar">
+      <div class="filter-strip" role="group" :aria-label="settingsStore.t('task.statusFilters')">
+        <button
+          v-for="option in filterOptions"
+          :key="option.value"
+          type="button"
+          :class="{ active: filter === option.value }"
+          @click="filter = option.value"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+      <div class="filter-selects">
+        <select v-model="selectedProject">
+          <option value="">{{ settingsStore.t("task.allProjects") }}</option>
+          <option v-for="project in taskStore.projects" :key="project" :value="project">{{ project }}</option>
+        </select>
+        <select v-model="selectedTag">
+          <option value="">{{ settingsStore.t("task.allTags") }}</option>
+          <option v-for="tag in taskStore.tags" :key="tag" :value="tag">#{{ tag }}</option>
+        </select>
+        <button type="button" class="secondary-button" @click="completeCurrentView">{{ settingsStore.t("task.completeCurrent") }}</button>
+        <button type="button" class="secondary-button" @click="deleteCurrentView">{{ settingsStore.t("task.deleteCurrent") }}</button>
+      </div>
     </div>
 
-    <div v-if="editorOpen" class="side-panel">
-      <TaskEditor :task="editingTask" @save="save" @cancel="editorOpen = false" />
+    <div v-if="editorOpen" class="drawer-layer">
+      <button class="drawer-scrim" type="button" :aria-label="settingsStore.t('task.close')" @click="editorOpen = false"></button>
+      <aside class="side-panel">
+        <TaskEditor :task="editingTask" @save="save" @cancel="editorOpen = false" />
+      </aside>
     </div>
 
     <p v-if="notice" class="action-feedback">{{ notice }}</p>
@@ -188,7 +210,7 @@ function isoDate(value: string | null): string | null {
     <div class="task-list">
       <template v-if="shouldGroupByCompletion">
         <div class="task-section-header">
-          <span>{{ settingsStore.language === "zh-CN" ? "未完成" : "Open" }}</span>
+          <span>{{ settingsStore.t("task.filterOpen") }}</span>
           <strong>{{ openFilteredTasks.length }}</strong>
         </div>
         <TaskItem
@@ -207,7 +229,7 @@ function isoDate(value: string | null): string | null {
         />
 
         <div v-if="completedFilteredTasks.length > 0" class="task-section-header completed-section">
-          <span>{{ settingsStore.language === "zh-CN" ? "已完成" : "Completed" }}</span>
+          <span>{{ settingsStore.t("task.completedCountPrefix") }}</span>
           <strong>{{ completedFilteredTasks.length }}</strong>
         </div>
         <TaskItem
@@ -246,12 +268,12 @@ function isoDate(value: string | null): string | null {
         :key="`${task.localId}-conflict`"
         class="conflict-actions"
       >
-        <span>{{ task.title }} {{ settingsStore.language === "zh-CN" ? "存在同步冲突" : "has a sync conflict" }}</span>
+        <span>{{ task.title }} {{ settingsStore.t("sync.conflictExists") }}</span>
         <button class="secondary-button" type="button" @click="taskStore.resolveConflictUseServer(task)">
-          {{ settingsStore.language === "zh-CN" ? "采用云端" : "Use cloud" }}
+          {{ settingsStore.t("sync.useCloud") }}
         </button>
         <button class="secondary-button" type="button" @click="taskStore.forceOverwriteServer(task)">
-          {{ settingsStore.language === "zh-CN" ? "覆盖云端" : "Overwrite cloud" }}
+          {{ settingsStore.t("sync.overwriteCloud") }}
         </button>
       </div>
       <p v-if="filteredTasks.length === 0" class="empty-state">{{ settingsStore.t("task.empty") }}</p>

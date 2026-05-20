@@ -68,13 +68,16 @@ function showNotice(message: string): void {
     <header class="view-header">
       <div>
         <p class="eyebrow">{{ settingsStore.t("nav.today") }}</p>
-        <h1>{{ openTodayTasks.length }} {{ settingsStore.t("floating.todayTasks") }}</h1>
+        <h1>{{ openTodayTasks.length }} {{ settingsStore.t("task.todayCountSuffix") }}</h1>
       </div>
       <button class="primary-button" type="button" @click="openCreate">{{ settingsStore.t("task.addToday") }}</button>
     </header>
 
-    <div v-if="editorOpen" class="side-panel">
-      <TaskEditor :task="editingTask" :title="settingsStore.t('task.todayTitle')" @save="save" @cancel="editorOpen = false" />
+    <div v-if="editorOpen" class="drawer-layer">
+      <button class="drawer-scrim" type="button" :aria-label="settingsStore.t('task.close')" @click="editorOpen = false"></button>
+      <aside class="side-panel">
+        <TaskEditor :task="editingTask" :title="settingsStore.t('task.todayTitle')" @save="save" @cancel="editorOpen = false" />
+      </aside>
     </div>
 
     <p v-if="notice" class="action-feedback">{{ notice }}</p>

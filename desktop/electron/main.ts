@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createFloatingWindow, showFloatingWindow } from "./floating-window";
 import { registerIpcHandlers } from "./ipc";
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "./shortcut";
-import { windows } from "./state";
+import { getSettings, windows } from "./state";
 import { createAppTray } from "./tray";
 
 app.disableHardwareAcceleration();
@@ -114,7 +114,9 @@ app.whenReady().then(() => {
     return;
   }
 
-  createFloatingWindow();
+  if (!launchedHidden && getSettings().floatingVisibleOnStart) {
+    showFloatingWindow();
+  }
   createAppTray();
   registerGlobalShortcuts();
 

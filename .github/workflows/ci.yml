@@ -33,6 +33,29 @@ jobs:
       - name: 编译检查
         run: python -m compileall -q app tests
 
+  docker:
+    name: Docker 镜像构建
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 校验 Compose 配置
+        run: |
+          cp backend/.env.docker.example backend/.env
+          docker compose -f backend/docker-compose.yml config
+
+      - name: 构建后端镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: false
+          tags: taskbridge-api:ci
+
   desktop:
     name: Windows 桌面端类型检查
     runs-on: ubuntu-latest
@@ -77,4 +100,4 @@ jobs:
         run: chmod +x gradlew
 
       - name: 构建调试包
-        run: ./gradlew :app:assembleDebug
+        run: ./gradlew :app:assembleDebug -PTASKBRIDGE_USE_CHINA_MIRRORS=false --stacktrace

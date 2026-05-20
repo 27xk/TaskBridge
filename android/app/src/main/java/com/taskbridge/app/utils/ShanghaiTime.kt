@@ -15,7 +15,7 @@ object ShanghaiTime {
 
     private val displayDateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
     private val displayTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-    private val monthDayFormatter = DateTimeFormatter.ofPattern("M月d日", Locale.CHINA)
+    private val monthDayFormatter = DateTimeFormatter.ofPattern("M\u6708d\u65E5", Locale.CHINA)
     private val inputFormatters = listOf(
         DateTimeFormatter.ISO_LOCAL_DATE_TIME,
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm[:ss]"),
@@ -55,6 +55,10 @@ object ShanghaiTime {
 
     fun localDate(value: String?, timeZoneId: String? = DEFAULT_ZONE_ID): LocalDate? {
         return parseStoredInstant(value)?.atZone(zone(timeZoneId))?.toLocalDate()
+    }
+
+    fun parseInstant(value: String?): Instant? {
+        return parseStoredInstant(value)
     }
 
     fun formatMonthDay(date: LocalDate): String {

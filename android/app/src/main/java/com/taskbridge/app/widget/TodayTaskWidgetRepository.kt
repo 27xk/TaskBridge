@@ -4,8 +4,12 @@ import android.content.Context
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.local.AppDatabase
 import com.taskbridge.app.data.local.TodayWidgetTaskProjection
+import com.taskbridge.app.domain.model.TaskStatus
+import com.taskbridge.app.domain.model.isTaskOverdue
+import com.taskbridge.app.domain.model.taskTimelineSortKey
 import com.taskbridge.app.utils.ShanghaiTime
 import kotlinx.coroutines.flow.first
+import java.time.Instant
 import java.time.LocalDate
 
 data class TodayTaskWidgetState(
@@ -21,6 +25,7 @@ data class TodayTaskWidgetItem(
     val dueLabel: String,
     val priorityLabel: String,
     val isCompleted: Boolean,
+    val isOverdue: Boolean,
 )
 
 class TodayTaskWidgetRepository(
@@ -37,6 +42,7 @@ class TodayTaskWidgetRepository(
         val taskScope = normalizeScope(tokenDataStore.widgetTaskScope.first())
         val completionScope = normalizeCompletionScope(tokenDataStore.widgetCompletionScope.first())
         val today = ShanghaiTime.todayDate(displayTimeZone).toString()
+        val now = Instant.now()
         if (accessToken.isNullOrBlank()) {
             return TodayTaskWidgetState(
                 isLoggedIn = false,
@@ -48,22 +54,27 @@ class TodayTaskWidgetRepository(
 
         val queryLimit = WidgetConstants.MAX_TASKS * 3
         val candidates = if (taskScope == WidgetConstants.TASK_SCOPE_ALL) {
-            taskDao.getAllWidgetTasks(queryLimit)
+            taskDao.getAllWidgetTasks(queryLimit, now.toString())
         } else {
             val (startTime, endTime) = ShanghaiTime.dayBounds(today, displayTimeZone)
             taskDao.getTodayWidgetTasks(
                 today = today,
                 startTime = startTime,
                 endTime = endTime,
+                nowTime = now.toString(),
                 highPriority = WidgetConstants.HIGH_PRIORITY,
                 limit = queryLimit,
-            ).filter { isWidgetCandidate(it, today, displayTimeZone) }
+            ).filter { isWidgetCandidate(it, today, displayTimeZone, now = now) }
         }
 
         val tasks = candidates
-            .filter { completionScope == WidgetConstants.COMPLETION_SCOPE_ALL || it.status != "completed" }
+            .filter {
+                completionScope == WidgetConstants.COMPLETION_SCOPE_ALL ||
+                    TaskStatus.fromWire(it.status) != TaskStatus.Completed
+            }
+            .sortedForWidget(now, displayTimeZone)
             .take(WidgetConstants.MAX_TASKS)
-            .map { it.toWidgetItem(today, displayTimeZone) }
+            .map { it.toWidgetItem(today, displayTimeZone, now) }
 
         return TodayTaskWidgetState(
             isLoggedIn = true,
@@ -79,33 +90,57 @@ class TodayTaskWidgetRepository(
             today: String,
             displayTimeZone: String = ShanghaiTime.DEFAULT_ZONE_ID,
             highPriority: Int = WidgetConstants.HIGH_PRIORITY,
+            now: Instant = Instant.now(),
         ): Boolean {
+            if (isTaskOverdue(task.status, task.dueTime, now)) return true
             if (task.dueTime.isToday(today, displayTimeZone)) return true
             if (task.remindTime.isToday(today, displayTimeZone)) return true
             if (task.plannedDate == today) return true
-            return task.status == "todo" && task.priority >= highPriority
+            return task.status == TaskStatus.Todo.wireName && task.priority >= highPriority
         }
     }
+}
+
+fun List<TodayWidgetTaskProjection>.sortedForWidget(
+    now: Instant,
+    displayTimeZone: String,
+): List<TodayWidgetTaskProjection> {
+    return map { task ->
+        task to taskTimelineSortKey(
+            statusWire = task.status,
+            dueTime = task.dueTime,
+            plannedDate = task.plannedDate,
+            completedAt = task.completedAt,
+            priority = task.priority,
+            sortOrder = task.sortOrder,
+            updatedAt = task.updatedAt,
+            now = now,
+            displayTimeZone = displayTimeZone,
+        )
+    }.sortedBy { it.second }.map { it.first }
 }
 
 private fun TodayWidgetTaskProjection.toWidgetItem(
     today: String,
     displayTimeZone: String,
+    now: Instant,
 ): TodayTaskWidgetItem {
     return TodayTaskWidgetItem(
         localId = localId,
         title = title,
-        dueLabel = dueLabel(today, displayTimeZone),
+        dueLabel = dueLabel(today, displayTimeZone, now),
         priorityLabel = if (priority > 0) "P$priority" else "P0",
-        isCompleted = status == "completed",
+        isCompleted = TaskStatus.fromWire(status) == TaskStatus.Completed,
+        isOverdue = isTaskOverdue(status, dueTime, now),
     )
 }
 
-private fun TodayWidgetTaskProjection.dueLabel(today: String, displayTimeZone: String): String {
-    dueTime.dateTimeLabel(today, displayTimeZone)?.let { return it }
+private fun TodayWidgetTaskProjection.dueLabel(today: String, displayTimeZone: String, now: Instant): String {
+    val prefix = if (isTaskOverdue(status, dueTime, now)) "\u903E\u671F " else ""
+    dueTime.dateTimeLabel(today, displayTimeZone)?.let { return prefix + it }
     plannedDate.dateLabel(today)?.let { return it }
     remindTime.dateTimeLabel(today, displayTimeZone)?.let { return it }
-    return "无截止时间"
+    return "\u65E0\u622A\u6B62\u65F6\u95F4"
 }
 
 private fun String?.isToday(today: String, displayTimeZone: String): Boolean {
@@ -133,7 +168,7 @@ private fun String?.dateLabel(today: String): String? {
 }
 
 private fun dateLabel(date: LocalDate, today: String): String {
-    return if (date.toString() == today) "今天" else ShanghaiTime.formatMonthDay(date)
+    return if (date.toString() == today) "\u4ECA\u5929" else ShanghaiTime.formatMonthDay(date)
 }
 
 private fun normalizeScope(scope: String): String {

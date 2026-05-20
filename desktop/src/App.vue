@@ -135,19 +135,15 @@ async function scanDueReminders(): Promise<void> {
         <span>TaskBridge</span>
       </div>
 
-      <nav class="nav-list">
+      <nav class="nav-list" :aria-label="settingsStore.t('nav.label')">
         <button type="button" :class="{ active: activeView === 'today' }" @click="activeView = 'today'">
-          {{ settingsStore.t("nav.today") }}
+          <span>{{ settingsStore.t("nav.today") }}</span>
         </button>
         <button type="button" :class="{ active: activeView === 'tasks' }" @click="activeView = 'tasks'">
-          {{ settingsStore.t("nav.all") }}
+          <span>{{ settingsStore.t("nav.all") }}</span>
         </button>
-        <button
-          type="button"
-          :class="{ active: activeView === 'settings' }"
-          @click="activeView = 'settings'"
-        >
-          {{ settingsStore.t("nav.settings") }}
+        <button type="button" :class="{ active: activeView === 'settings' }" @click="activeView = 'settings'">
+          <span>{{ settingsStore.t("nav.settings") }}</span>
         </button>
       </nav>
 

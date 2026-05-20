@@ -23,6 +23,10 @@ private val taskRepositoryGson = Gson()
 private val checklistType = object : TypeToken<List<LocalChecklistItem>>() {}.type
 private const val MAX_IMPORT_BYTES = 1_000_000
 private const val MAX_IMPORT_TASKS = 500
+private const val ACTIVE_TASK_LIMIT = 200
+private const val TODAY_TASK_LIMIT = 120
+private const val SEARCH_TASK_LIMIT = 100
+private const val BACKUP_EXPORT_LIMIT = 5_000
 
 private data class LocalChecklistItem(
     val id: String,
@@ -34,11 +38,9 @@ class TaskRepository(
     private val taskDao: TaskDao,
     private val syncQueueDao: SyncQueueDao,
 ) {
-    private val listLimit = 300
-    private val searchLimit = 100
-
     fun observeTasks(): Flow<List<Task>> {
-        return taskDao.observeActiveTasks(listLimit).map { tasks -> tasks.map { it.toDomain() } }
+        return taskDao.observeActiveTasks(ACTIVE_TASK_LIMIT, Instant.now().toString())
+            .map { tasks -> tasks.map { it.toDomain() } }
     }
 
     fun observeTodayTasks(
@@ -46,16 +48,20 @@ class TaskRepository(
         timeZoneId: String = ShanghaiTime.DEFAULT_ZONE_ID,
     ): Flow<List<Task>> {
         val (startTime, endTime) = ShanghaiTime.dayBounds(todayPrefix, timeZoneId)
-        return taskDao.observeTodayTasks(todayPrefix, startTime, endTime, searchLimit)
+        return taskDao.observeTodayTasks(todayPrefix, startTime, endTime, Instant.now().toString(), TODAY_TASK_LIMIT)
             .map { tasks -> tasks.map { it.toDomain() } }
     }
 
     fun observeSearchTasks(keyword: String): Flow<List<Task>> {
-        return taskDao.observeSearchTasks(keyword, searchLimit).map { tasks -> tasks.map { it.toDomain() } }
+        return taskDao.observeSearchTasks(keyword, SEARCH_TASK_LIMIT).map { tasks -> tasks.map { it.toDomain() } }
     }
 
     suspend fun getTask(localId: String): Task? {
         return taskDao.getByLocalId(localId)?.toDomain()
+    }
+
+    suspend fun exportBackupTasks(): List<Task> {
+        return taskDao.getBackupTasks(BACKUP_EXPORT_LIMIT).map { it.toDomain() }
     }
 
     suspend fun addTask(

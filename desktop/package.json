@@ -10,7 +10,10 @@
     "build": "vue-tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "dist": "npm run build && electron-builder --config electron-builder.json"
+    "dist": "npm run build && electron-builder --config electron-builder.json",
+    "check:task-order": "node ./scripts/check-task-order.mjs",
+    "clean": "node ./scripts/clean.mjs",
+    "clean:all": "node ./scripts/clean.mjs --all"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

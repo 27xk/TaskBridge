@@ -258,13 +258,15 @@ function clampLimit(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.trunc(value)));
 }
 
-export function listTasks(includeDeleted: boolean, limit = 300, offset = 0): TaskRecord[] {
+export function listTasks(includeDeleted: boolean, limit = 200, offset = 0): TaskRecord[] {
   const rows = database()
     .prepare(
       `
       SELECT * FROM tasks
       ${includeDeleted ? "" : "WHERE is_deleted = 0"}
       ORDER BY
+        CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
+        CASE WHEN status = 'completed' THEN COALESCE(datetime(completed_at), datetime(updated_at), datetime(due_time), datetime(planned_date), datetime(created_at)) END DESC,
         CASE WHEN due_time IS NULL THEN 1 ELSE 0 END,
         due_time ASC,
         updated_at DESC
@@ -290,6 +292,8 @@ export function listTodayTasks(limit = 120): TaskRecord[] {
           OR planned_date = @plannedDate
         )
       ORDER BY
+        CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
+        CASE WHEN status = 'completed' THEN COALESCE(datetime(completed_at), datetime(updated_at), datetime(due_time), datetime(planned_date), datetime(created_at)) END DESC,
         sort_order ASC,
         CASE WHEN due_time IS NULL THEN 1 ELSE 0 END,
         due_time ASC,
@@ -318,6 +322,7 @@ export function listTodayFloatingTasks(limit = 8): TaskRecord[] {
         )
       ORDER BY
         CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
+        CASE WHEN status = 'completed' THEN COALESCE(datetime(completed_at), datetime(updated_at), datetime(due_time), datetime(planned_date), datetime(created_at)) END DESC,
         CASE WHEN planned_date = @plannedDate THEN 0 ELSE 1 END,
         CASE WHEN due_time IS NULL THEN 1 ELSE 0 END,
         CASE WHEN due_time IS NOT NULL THEN datetime(due_time) END ASC,

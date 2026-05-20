@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">TaskBridge</string>
     <string name="widget_label_blank">&#160;</string>
+    <string name="widget_empty_today">&#x4ECA;&#x5929;&#x6682;&#x65E0;&#x5F85;&#x529E;</string>
 
     <style name="Theme.TaskBridge" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>

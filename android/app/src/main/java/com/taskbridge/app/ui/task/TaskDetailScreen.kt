@@ -1,12 +1,13 @@
 package com.taskbridge.app.ui.task
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -21,19 +22,24 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.taskbridge.app.data.repository.TaskRepository
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
+import com.taskbridge.app.domain.model.isOverdueAt
+import com.taskbridge.app.ui.components.AppHeader
+import com.taskbridge.app.ui.components.AppPage
+import com.taskbridge.app.ui.components.AppPanel
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
 import com.taskbridge.app.utils.ShanghaiTime
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.launch
 import java.time.Instant
 
@@ -61,6 +67,7 @@ fun TaskDetailScreen(
     val scope = rememberCoroutineScope()
     val strings = LocalTaskBridgeStrings.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val now = rememberTimelineNow()
 
     LaunchedEffect(localId) {
         task = taskRepository.getTask(localId)
@@ -79,203 +86,228 @@ fun TaskDetailScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-    ) {
-        TextButton(onClick = onBack) {
-            Text(strings.back)
-        }
-        Spacer(Modifier.height(8.dp))
+    AppPage(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            TextButton(onClick = onBack) {
+                Text(strings.back)
+            }
 
-        val current = task
-        if (current == null) {
-            Text(strings.taskNotFound, style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = onAddClick, modifier = Modifier.fillMaxWidth()) {
-                Text(strings.addTask)
-            }
-        } else {
-            Text(
-                text = current.title,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.headlineMedium,
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = if (current.status == TaskStatus.Completed) strings.completed else strings.todo,
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(current.content ?: strings.noContent, style = MaterialTheme.typography.bodyLarge)
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = listOfNotNull(
-                    current.project?.let { "${strings.project} $it" },
-                    current.plannedDate?.let { "${strings.plan} $it" },
-                    current.dueTime?.let { "${strings.due} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
-                    current.remindTime?.let { "${strings.reminder} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
-                    current.snoozedUntil?.let { "${strings.snoozed} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
-                    current.completedAt?.let { "${strings.completed} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
-                    current.tag?.let { "#$it" },
-                    "${strings.list} ${current.listType}",
-                    "${strings.priority} ${current.priority}",
-                ).joinToString("\n"),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Spacer(Modifier.height(16.dp))
-            Button(
-                onClick = { onEditClick(current.localId) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(strings.edit)
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(strings.checklist, style = MaterialTheme.typography.titleMedium)
-            val checklist = remember(current.checklistJson) {
-                parseChecklist(current.checklistJson)
-            }
-            checklist.forEach { item ->
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Checkbox(
-                        checked = item.done,
-                        onCheckedChange = {
-                            scope.launch {
-                                taskRepository.toggleChecklistItem(current.localId, item.id)
-                                onTaskChanged()
-                                task = taskRepository.getTask(localId)
-                            }
-                        },
+            val current = task
+            if (current == null) {
+                AppHeader(title = strings.taskNotFound)
+                AppPanel {
+                    Button(onClick = onAddClick, modifier = Modifier.fillMaxWidth()) {
+                        Text(strings.addTask)
+                    }
+                }
+            } else {
+                AppHeader(
+                    title = current.title,
+                    subtitle = if (current.status == TaskStatus.Completed) strings.completed else strings.todo,
+                )
+                AppPanel {
+                    Text(
+                        text = current.content?.takeIf { it.isNotBlank() } ?: strings.noContent,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.bodyLarge,
                     )
                     Text(
-                        text = item.title,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(top = 12.dp),
+                        text = current.detailMeta(strings, displayTimeZone, now),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
-                    TextButton(
+                }
+
+                AppPanel {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(strings.checklist, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = parseChecklist(current.checklistJson).size.toString(),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                    val checklist = remember(current.checklistJson) {
+                        parseChecklist(current.checklistJson)
+                    }
+                    checklist.forEach { item ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = item.done,
+                                onCheckedChange = {
+                                    scope.launch {
+                                        taskRepository.toggleChecklistItem(current.localId, item.id)
+                                        onTaskChanged()
+                                        task = taskRepository.getTask(localId)
+                                    }
+                                },
+                            )
+                            Text(
+                                text = item.title,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        taskRepository.deleteChecklistItem(current.localId, item.id)
+                                        onTaskChanged()
+                                        task = taskRepository.getTask(localId)
+                                    }
+                                },
+                            ) {
+                                Text(strings.delete)
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedTextField(
+                            value = newChecklistTitle,
+                            onValueChange = { newChecklistTitle = it },
+                            label = { Text(strings.newChecklistItem) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(
+                            onClick = {
+                                val title = newChecklistTitle.trim()
+                                if (title.isNotBlank()) {
+                                    scope.launch {
+                                        taskRepository.addChecklistItem(current.localId, title)
+                                        newChecklistTitle = ""
+                                        onTaskChanged()
+                                        task = taskRepository.getTask(localId)
+                                    }
+                                }
+                            },
+                        ) {
+                            Text(strings.add)
+                        }
+                    }
+                }
+
+                AppPanel {
+                    Button(
+                        onClick = { onEditClick(current.localId) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(strings.edit)
+                    }
+                    Button(
                         onClick = {
                             scope.launch {
-                                taskRepository.deleteChecklistItem(current.localId, item.id)
+                                if (current.status == TaskStatus.Completed) {
+                                    taskRepository.undoCompleteTask(current.localId)
+                                } else {
+                                    taskRepository.completeTask(current.localId)
+                                }
                                 onTaskChanged()
                                 task = taskRepository.getTask(localId)
                             }
                         },
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(strings.delete)
+                        Text(if (current.status == TaskStatus.Completed) strings.restore else strings.complete)
                     }
-                }
-            }
-            Row(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = newChecklistTitle,
-                    onValueChange = { newChecklistTitle = it },
-                    label = { Text(strings.newChecklistItem) },
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    onClick = {
-                        val title = newChecklistTitle.trim()
-                        if (title.isNotBlank()) {
+                    Button(
+                        onClick = {
                             scope.launch {
-                                taskRepository.addChecklistItem(current.localId, title)
-                                newChecklistTitle = ""
+                                val tomorrow = ShanghaiTime.todayDate(displayTimeZone).plusDays(1)
+                                val dueTime = tomorrow
+                                    .atTime(9, 0)
+                                    .atZone(ShanghaiTime.zone(displayTimeZone))
+                                    .toInstant()
+                                    .toString()
+                                taskRepository.postponeTask(current.localId, dueTime, null, tomorrow.toString())
                                 onTaskChanged()
                                 task = taskRepository.getTask(localId)
                             }
-                        }
-                    },
-                    modifier = Modifier.padding(top = 8.dp),
-                ) {
-                    Text(strings.add)
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            Button(
-                onClick = {
-                    scope.launch {
-                        if (current.status == TaskStatus.Completed) {
-                            taskRepository.undoCompleteTask(current.localId)
-                        } else {
-                            taskRepository.completeTask(current.localId)
-                        }
-                        onTaskChanged()
-                        task = taskRepository.getTask(localId)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(strings.postponeTomorrow)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(if (current.status == TaskStatus.Completed) strings.restore else strings.complete)
-            }
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    scope.launch {
-                        val tomorrow = ShanghaiTime.todayDate(displayTimeZone).plusDays(1)
-                        val dueTime = tomorrow
-                            .atTime(9, 0)
-                            .atZone(ShanghaiTime.zone(displayTimeZone))
-                            .toInstant()
-                            .toString()
-                        taskRepository.postponeTask(current.localId, dueTime, null, tomorrow.toString())
-                        onTaskChanged()
-                        task = taskRepository.getTask(localId)
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                taskRepository.snoozeTask(
+                                    current.localId,
+                                    Instant.now().plusSeconds(3_600).toString(),
+                                )
+                                onTaskChanged()
+                                task = taskRepository.getTask(localId)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(strings.snoozeOneHour)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(strings.postponeTomorrow)
-            }
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    scope.launch {
-                        taskRepository.snoozeTask(
-                            current.localId,
-                            Instant.now().plusSeconds(3_600).toString(),
-                        )
-                        onTaskChanged()
-                        task = taskRepository.getTask(localId)
+                    if (!current.repeatRule.isNullOrBlank()) {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    taskRepository.createNextOccurrence(current.localId)
+                                    onTaskChanged()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(strings.createNextOccurrence)
+                        }
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(strings.snoozeOneHour)
-            }
-            if (!current.repeatRule.isNullOrBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        scope.launch {
-                            taskRepository.createNextOccurrence(current.localId)
-                            onTaskChanged()
+                    if (current.isTemplate) {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    taskRepository.instantiateTemplate(current.localId)
+                                    onTaskChanged()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(strings.useTemplate)
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(strings.createNextOccurrence)
-                }
-            }
-            if (current.isTemplate) {
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        scope.launch {
-                            taskRepository.instantiateTemplate(current.localId)
-                            onTaskChanged()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(strings.useTemplate)
+                    }
                 }
             }
         }
     }
+}
+
+private fun Task.detailMeta(
+    strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings,
+    displayTimeZone: String,
+    now: Instant,
+): String {
+    return listOfNotNull(
+        strings.overdue.takeIf { isOverdueAt(now) },
+        project?.let { "${strings.project} $it" },
+        plannedDate?.let { "${strings.plan} $it" },
+        dueTime?.let { "${strings.due} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
+        remindTime?.let { "${strings.reminder} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
+        snoozedUntil?.let { "${strings.snoozed} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
+        completedAt?.let { "${strings.completed} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
+        tag?.let { "#$it" },
+        "${strings.list} $listType",
+        "${strings.priority} $priority",
+    ).joinToString("\n")
 }
 
 private fun parseChecklist(value: String): List<UiChecklistItem> {

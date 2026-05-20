@@ -4,8 +4,11 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Shapes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -14,7 +17,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -373,13 +378,38 @@ private fun ForegroundWebSocketLifecycle(container: AppContainer) {
 @Composable
 private fun TaskBridgeTheme(content: @Composable () -> Unit) {
     val colors = lightColorScheme(
-        primary = Color(0xFF137C6B),
-        secondary = Color(0xFF52645F),
-        surface = Color(0xFFF8FAF9),
-        surfaceVariant = Color(0xFFE2EBE8),
-        background = Color(0xFFF4F7F6),
+        primary = Color(0xFF116C5B),
+        onPrimary = Color.White,
+        primaryContainer = Color(0xFFD8EFE9),
+        onPrimaryContainer = Color(0xFF084A3F),
+        secondary = Color(0xFF5D6F6B),
+        onSecondary = Color.White,
+        tertiary = Color(0xFF8E6B2B),
+        surface = Color(0xFFFFFFFF),
+        surfaceVariant = Color(0xFFE7EEEB),
+        background = Color(0xFFF6F8F7),
+        onSurface = Color(0xFF1D2624),
+        onSurfaceVariant = Color(0xFF5A6663),
+        outline = Color(0xFFB6C4BF),
+        outlineVariant = Color(0xFFD7E0DD),
     )
-    MaterialTheme(colorScheme = colors, content = content)
+    MaterialTheme(
+        colorScheme = colors,
+        shapes = Shapes(
+            extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            small = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+            medium = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            large = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+            extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+        ),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = colors.background,
+        ) {
+            content()
+        }
+    }
 }
 
 data class WidgetLaunchTarget(

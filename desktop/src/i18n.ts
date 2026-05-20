@@ -34,6 +34,7 @@ type MessageKey =
   | "task.snooze"
   | "task.next"
   | "task.use"
+  | "task.moreActions"
   | "task.title"
   | "task.content"
   | "task.priority"
@@ -52,9 +53,20 @@ type MessageKey =
   | "task.emptyToday"
   | "task.allTitle"
   | "task.todayTitle"
+  | "task.todayCountSuffix"
   | "task.openCountSuffix"
   | "task.completedCountPrefix"
   | "task.inbox"
+  | "task.filterOpen"
+  | "task.filterOverdue"
+  | "task.filterWeek"
+  | "task.filterHigh"
+  | "task.filterPending"
+  | "task.statusFilters"
+  | "task.allProjects"
+  | "task.allTags"
+  | "task.completeCurrent"
+  | "task.deleteCurrent"
   | "task.templateName"
   | "task.checklistPlaceholder"
   | "task.quickPlaceholder"
@@ -75,6 +87,9 @@ type MessageKey =
   | "sync.pendingUpdate"
   | "sync.pendingDelete"
   | "sync.conflict"
+  | "sync.conflictExists"
+  | "sync.useCloud"
+  | "sync.overwriteCloud"
   | "settings.title"
   | "settings.subtitle"
   | "settings.save"
@@ -89,6 +104,10 @@ type MessageKey =
   | "settings.floatingOpacity"
   | "settings.displayTimeZone"
   | "settings.displayTimeZoneHint"
+  | "settings.general"
+  | "settings.window"
+  | "settings.backup"
+  | "settings.metadata"
   | "settings.exportBackup"
   | "settings.importBackup"
   | "settings.projectFrom"
@@ -154,6 +173,7 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.snooze": { "zh-CN": "稍后", "en-US": "Snooze" },
   "task.next": { "zh-CN": "下一次", "en-US": "Next" },
   "task.use": { "zh-CN": "使用", "en-US": "Use" },
+  "task.moreActions": { "zh-CN": "更多", "en-US": "More" },
   "task.title": { "zh-CN": "标题", "en-US": "Title" },
   "task.content": { "zh-CN": "内容", "en-US": "Content" },
   "task.priority": { "zh-CN": "优先级", "en-US": "Priority" },
@@ -172,9 +192,20 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.emptyToday": { "zh-CN": "今天暂无待办。", "en-US": "No tasks due today." },
   "task.allTitle": { "zh-CN": "全部待办", "en-US": "All tasks" },
   "task.todayTitle": { "zh-CN": "今日待办", "en-US": "Today" },
+  "task.todayCountSuffix": { "zh-CN": "条今日待办", "en-US": "tasks today" },
   "task.openCountSuffix": { "zh-CN": "条待办", "en-US": "open tasks" },
   "task.completedCountPrefix": { "zh-CN": "已完成", "en-US": "Completed" },
   "task.inbox": { "zh-CN": "收件箱", "en-US": "Inbox" },
+  "task.filterOpen": { "zh-CN": "未完成", "en-US": "Open" },
+  "task.filterOverdue": { "zh-CN": "逾期", "en-US": "Overdue" },
+  "task.filterWeek": { "zh-CN": "本周", "en-US": "This week" },
+  "task.filterHigh": { "zh-CN": "高优先级", "en-US": "High priority" },
+  "task.filterPending": { "zh-CN": "未同步", "en-US": "Pending sync" },
+  "task.statusFilters": { "zh-CN": "待办状态筛选", "en-US": "Task status filters" },
+  "task.allProjects": { "zh-CN": "全部项目", "en-US": "All projects" },
+  "task.allTags": { "zh-CN": "全部标签", "en-US": "All tags" },
+  "task.completeCurrent": { "zh-CN": "完成当前", "en-US": "Complete current" },
+  "task.deleteCurrent": { "zh-CN": "删除当前", "en-US": "Delete current" },
   "task.templateName": { "zh-CN": "模板名称", "en-US": "Template name" },
   "task.checklistPlaceholder": { "zh-CN": "每行一个清单项", "en-US": "One checklist item per line" },
   "task.quickPlaceholder": {
@@ -201,6 +232,9 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "sync.pendingUpdate": { "zh-CN": "待同步", "en-US": "Pending sync" },
   "sync.pendingDelete": { "zh-CN": "待删除", "en-US": "Pending delete" },
   "sync.conflict": { "zh-CN": "冲突", "en-US": "Conflict" },
+  "sync.conflictExists": { "zh-CN": "存在同步冲突", "en-US": "has a sync conflict" },
+  "sync.useCloud": { "zh-CN": "采用云端", "en-US": "Use cloud" },
+  "sync.overwriteCloud": { "zh-CN": "覆盖云端", "en-US": "Overwrite cloud" },
   "settings.title": { "zh-CN": "设置", "en-US": "Settings" },
   "settings.subtitle": { "zh-CN": "桌面端配置", "en-US": "Desktop client" },
   "settings.save": { "zh-CN": "保存", "en-US": "Save" },
@@ -218,6 +252,10 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
     "zh-CN": "任务时间按该时区显示，同步数据仍以 UTC 保存。",
     "en-US": "Task times use this time zone. Sync data remains stored as UTC.",
   },
+  "settings.general": { "zh-CN": "基础", "en-US": "General" },
+  "settings.window": { "zh-CN": "窗口", "en-US": "Window" },
+  "settings.backup": { "zh-CN": "备份", "en-US": "Backup" },
+  "settings.metadata": { "zh-CN": "项目与标签", "en-US": "Projects and tags" },
   "settings.exportBackup": { "zh-CN": "导出本地备份", "en-US": "Export local backup" },
   "settings.importBackup": { "zh-CN": "导入本地备份", "en-US": "Import local backup" },
   "settings.projectFrom": { "zh-CN": "项目原名", "en-US": "Current project name" },
