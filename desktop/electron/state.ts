@@ -19,7 +19,6 @@ export interface AppSettings {
   autoStart: boolean;
   floatingOpacity: number;
   floatingVisibleOnStart: boolean;
-  floatingMiniMode: boolean;
   floatingX: number | null;
   floatingY: number | null;
   floatingWidth: number;
@@ -40,7 +39,6 @@ export interface StoreSchema {
   autoStart: boolean;
   floatingOpacity: number;
   floatingVisibleOnStart: boolean;
-  floatingMiniMode: boolean;
   floatingX?: number;
   floatingY?: number;
   floatingWidth?: number;
@@ -57,7 +55,6 @@ export const settingsStore = new Store<StoreSchema>({
     autoStart: false,
     floatingOpacity: 0.96,
     floatingVisibleOnStart: true,
-    floatingMiniMode: false,
     floatingWidth: 320,
     floatingHeight: 460,
   },
@@ -144,7 +141,6 @@ export function getSettings(): AppSettings {
     autoStart: settingsStore.get("autoStart"),
     floatingOpacity: normalizeFloatingOpacity(settingsStore.get("floatingOpacity")),
     floatingVisibleOnStart: settingsStore.get("floatingVisibleOnStart"),
-    floatingMiniMode: settingsStore.get("floatingMiniMode"),
     floatingX: typeof floatingX === "number" ? floatingX : null,
     floatingY: typeof floatingY === "number" ? floatingY : null,
     floatingWidth: normalizeFloatingWidth(settingsStore.get("floatingWidth")),

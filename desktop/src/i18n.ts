@@ -101,7 +101,6 @@ type MessageKey =
   | "settings.lastSyncTime"
   | "settings.autoStart"
   | "settings.floatingVisibleOnStart"
-  | "settings.floatingMiniMode"
   | "settings.floatingOpacity"
   | "settings.displayTimeZone"
   | "settings.displayTimeZoneHint"
@@ -132,7 +131,6 @@ type MessageKey =
   | "floating.loginRequired"
   | "floating.noToday"
   | "floating.openMain"
-  | "floating.miniMode"
   | "floating.hide"
   | "floating.opacity"
   | "floating.addTask"
@@ -249,7 +247,6 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "settings.lastSyncTime": { "zh-CN": "上次同步时间", "en-US": "Last sync time" },
   "settings.autoStart": { "zh-CN": "开机启动 TaskBridge", "en-US": "Start TaskBridge with Windows" },
   "settings.floatingVisibleOnStart": { "zh-CN": "启动后显示悬浮窗", "en-US": "Show floating window on start" },
-  "settings.floatingMiniMode": { "zh-CN": "悬浮窗迷你模式", "en-US": "Floating mini mode" },
   "settings.floatingOpacity": { "zh-CN": "悬浮窗透明度", "en-US": "Floating opacity" },
   "settings.displayTimeZone": { "zh-CN": "显示时区", "en-US": "Display time zone" },
   "settings.displayTimeZoneHint": {
@@ -283,7 +280,6 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "floating.loginRequired": { "zh-CN": "请先登录 TaskBridge", "en-US": "Please log in to TaskBridge" },
   "floating.noToday": { "zh-CN": "今天暂无待办", "en-US": "No tasks today" },
   "floating.openMain": { "zh-CN": "打开主窗口", "en-US": "Open main window" },
-  "floating.miniMode": { "zh-CN": "迷你模式", "en-US": "Mini mode" },
   "floating.hide": { "zh-CN": "隐藏悬浮窗", "en-US": "Hide floating window" },
   "floating.opacity": { "zh-CN": "透明度", "en-US": "Opacity" },
   "floating.addTask": { "zh-CN": "添加待办", "en-US": "Add task" },

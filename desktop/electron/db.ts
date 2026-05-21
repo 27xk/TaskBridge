@@ -130,7 +130,11 @@ let db: Database.Database | null = null;
 export function database(): Database.Database {
   if (db) return db;
   const dbPath = join(app.getPath("userData"), "taskbridge.sqlite");
-  db = new Database(dbPath);
+  try {
+    db = new Database(dbPath);
+  } catch (error) {
+    throw normalizeDatabaseOpenError(error);
+  }
   configureDatabase(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
@@ -199,6 +203,16 @@ export function database(): Database.Database {
   migrateSchema(db);
   db.pragma("optimize");
   return db;
+}
+
+function normalizeDatabaseOpenError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("Could not locate the bindings file") || message.includes("better_sqlite3.node")) {
+    return new Error(
+      "SQLite native module is not ready. Run `npm run rebuild:native` in the desktop directory, then restart TaskBridge.",
+    );
+  }
+  return error instanceof Error ? error : new Error(message);
 }
 
 function configureDatabase(target: Database.Database): void {

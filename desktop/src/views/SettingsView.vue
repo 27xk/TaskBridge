@@ -16,7 +16,6 @@ const settings = reactive<TaskBridgeSettings>({
   autoStart: false,
   floatingOpacity: 0.96,
   floatingVisibleOnStart: true,
-  floatingMiniMode: false,
   floatingX: null,
   floatingY: null,
   floatingWidth: 320,
@@ -53,7 +52,6 @@ async function save(): Promise<void> {
   await settingsStore.setDisplayTimeZone(settings.displayTimeZone);
   Object.assign(settings, await bridge().app.setSetting("floatingOpacity", settings.floatingOpacity));
   Object.assign(settings, await bridge().app.setSetting("floatingVisibleOnStart", settings.floatingVisibleOnStart));
-  Object.assign(settings, await bridge().app.setSetting("floatingMiniMode", settings.floatingMiniMode));
   Object.assign(settings, await bridge().app.setAutoStart(settings.autoStart));
   saved.value = true;
   window.setTimeout(() => {
@@ -138,10 +136,6 @@ function updateLanguage(event: Event): void {
             <label class="checkbox-line">
               <input v-model="settings.floatingVisibleOnStart" type="checkbox" />
               <span>{{ settingsStore.t("settings.floatingVisibleOnStart") }}</span>
-            </label>
-            <label class="checkbox-line">
-              <input v-model="settings.floatingMiniMode" type="checkbox" />
-              <span>{{ settingsStore.t("settings.floatingMiniMode") }}</span>
             </label>
             <label class="settings-range">
               <span>{{ settingsStore.t("settings.floatingOpacity") }} {{ Math.round(settings.floatingOpacity * 100) }}%</span>

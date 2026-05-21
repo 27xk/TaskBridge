@@ -71,7 +71,7 @@ function stopResize(): void {
 </script>
 
 <template>
-  <main class="floating-shell" :class="{ mini: floating.miniMode }" :style="surfaceStyle">
+  <main class="floating-shell" :style="surfaceStyle">
     <FloatingHeader
       :date-label="dateLabel"
       :sync-message="floating.syncMessage"
@@ -79,19 +79,10 @@ function stopResize(): void {
       :opacity="floating.opacity"
       @hide="floating.hide"
       @open-main="floating.openMain"
-      @toggle-mini="floating.toggleMiniMode"
       @opacity-change="floating.setOpacity"
     />
 
-    <section v-if="floating.miniMode" class="floating-mini-panel">
-      <button type="button" @click="floating.toggleMiniMode">
-        {{ floating.openTasks.length }} {{ settingsStore.t("floating.todayTasks") }}
-      </button>
-      <p v-if="floating.feedback" class="floating-feedback">{{ floating.feedback }}</p>
-      <QuickAddTask v-if="floating.authenticated" @submit="floating.quickAdd" />
-    </section>
-
-    <section v-else class="floating-content" :aria-label="settingsStore.t('floating.todayList')">
+    <section class="floating-content" :aria-label="settingsStore.t('floating.todayList')">
       <div class="floating-section-title">
         <span>{{ settingsStore.t("floating.todayList") }}</span>
         <button type="button" :title="settingsStore.t('floating.refresh')" @click="floating.refresh">{{ settingsStore.t("floating.refresh") }}</button>
@@ -116,8 +107,8 @@ function stopResize(): void {
       </div>
     </section>
 
-    <p v-if="floating.feedback && !floating.miniMode" class="floating-feedback">{{ floating.feedback }}</p>
-    <QuickAddTask v-if="floating.authenticated && !floating.miniMode" @submit="floating.quickAdd" />
+    <p v-if="floating.feedback" class="floating-feedback">{{ floating.feedback }}</p>
+    <QuickAddTask v-if="floating.authenticated" @submit="floating.quickAdd" />
     <button
       type="button"
       class="floating-resize-handle"

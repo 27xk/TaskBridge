@@ -14,11 +14,17 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function loadSession(): Promise<void> {
     authenticated.value = await bridge().auth.hasTokens();
-    if (!authenticated.value) return;
+    if (!authenticated.value) {
+      user.value = null;
+      return;
+    }
     try {
       user.value = await getMe();
     } catch {
-      await logout();
+      authenticated.value = await bridge().auth.hasTokens();
+      if (!authenticated.value) {
+        user.value = null;
+      }
     }
   }
 

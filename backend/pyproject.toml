@@ -1,5 +1,5 @@
 [project]
-name = "taskbridge-backend"
+name = "taskbridge"
 version = "0.1.0"
 description = "FastAPI backend for TaskBridge"
 requires-python = ">=3.11"

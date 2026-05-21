@@ -1808,26 +1808,6 @@ body {
   position: relative;
 }
 
-.floating-shell.mini {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.floating-mini-panel {
-  display: grid;
-  gap: 10px;
-  align-content: center;
-  min-height: 0;
-}
-
-.floating-mini-panel > button {
-  min-height: 48px;
-  border: 1px solid rgba(22, 124, 112, 0.24);
-  border-radius: 10px;
-  color: #12322d;
-  background: rgba(224, 244, 239, var(--floating-control-opacity));
-  font-weight: 900;
-}
-
 .floating-topbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

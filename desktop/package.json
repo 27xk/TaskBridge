@@ -6,6 +6,10 @@
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
+    "postinstall": "node ./scripts/rebuild-native.mjs",
+    "predev": "node ./scripts/ensure-native.mjs",
+    "predist": "node ./scripts/ensure-native.mjs",
+    "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "dev": "electron-vite dev",
     "build": "vue-tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",

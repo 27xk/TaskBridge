@@ -113,6 +113,8 @@ lerna-debug.log*
 coverage/
 desktop/.vite/
 desktop/.cache/
+desktop/.electron-gyp/
+desktop/.npm-cache/
 desktop/.electron-vite/
 desktop/dist/
 desktop/dist-electron/

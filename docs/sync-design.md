@@ -1,17 +1,17 @@
 # 同步设计
 
-## 核心原则
+TaskBridge 使用「HTTP 同步 + WebSocket 通知」的架构。
 
-TaskBridge 采用「HTTP 同步 + WebSocket 通知」的架构：
+## 核心原则
 
 - HTTP API 负责真实数据同步。
 - WebSocket 只负责通知任务发生变化。
 - WebSocket 消息不携带完整任务数据。
-- 客户端收到通知后，调用 `GET /api/v1/sync/pull` 拉取最新增量。
-- Android 后台不长期保持 WebSocket，后台同步使用 WorkManager。
+- 客户端收到通知后，调用 `GET /api/v1/sync/pull` 拉取增量。
+- Android 后台不长期保活 WebSocket，后台同步使用 WorkManager。
 - Windows 桌面端可以常驻 WebSocket。
 
-## 服务端数据模型
+## 服务端任务字段
 
 任务核心字段：
 
@@ -22,6 +22,8 @@ TaskBridge 采用「HTTP 同步 + WebSocket 通知」的架构：
 - `status`
 - `priority`
 - `tag`
+- `project`
+- `planned_date`
 - `due_time`
 - `remind_time`
 - `repeat_rule`
@@ -74,7 +76,7 @@ TaskBridge 采用「HTTP 同步 + WebSocket 通知」的架构：
 5. `restore` 恢复软删除任务。
 6. 服务端统一使用自己的时间写入 `updated_at`。
 7. 每条成功变更都会写入 `sync_logs`。
-8. 处理完成后通知同一用户下除当前设备以外的在线设备。
+8. 处理完成后通知同一用户下除当前设备外的在线设备。
 
 ## 拉取流程
 
@@ -94,51 +96,13 @@ TaskBridge 采用「HTTP 同步 + WebSocket 通知」的架构：
 
 - 客户端 `version` 等于服务端 `version` 时，可以提交修改。
 - 客户端 `version` 小于服务端 `version` 时，服务端返回冲突。
-- 客户端将本地任务标记为 `conflict`，由用户选择「采用云端」或「覆盖云端」。
+- 客户端将本地任务标记为 `conflict`，由用户选择采用云端或覆盖云端。
 
 后续可以扩展字段级合并，例如标题采用最新值、子清单按 item ID 合并。
 
-## WebSocket 通知
-
-连接方式：
-
-```text
-POST /api/v1/auth/ws-ticket
-WS   /ws/sync?ticket=<short_lived_ticket>&device_id=<device_id>
-```
-
-心跳：
-
-```text
-ping
-```
-
-响应：
-
-```json
-{
-  "event": "pong",
-  "server_time": "2026-05-17T12:10:00Z"
-}
-```
-
-任务变化通知：
-
-```json
-{
-  "event": "task_changed",
-  "action": "updated",
-  "task_id": 123,
-  "version": 5,
-  "server_time": "2026-05-17T12:00:00Z"
-}
-```
-
-客户端收到通知后只做一件事：调用增量拉取接口。
-
 ## Android 同步策略
 
-- App 前台可以连接 WebSocket。
+- App 前台可连接 WebSocket。
 - App 后台不要求长期保持 WebSocket。
 - WorkManager 在网络恢复后上传本地同步队列。
 - App 启动后主动执行一次增量拉取。
@@ -149,15 +113,15 @@ ping
 
 - 应用启动后建立 WebSocket 长连接。
 - 断线后自动重连。
-- 本地 SQLite 操作立即更新 UI 和悬浮窗。
+- 本地 SQLite 操作立即更新主窗口和悬浮窗。
 - 网络可用时调用 `POST /api/v1/sync/push` 上传同步队列。
 - 收到 WebSocket 通知后调用 `GET /api/v1/sync/pull`。
 - 同步完成后通知主窗口和悬浮窗刷新。
 
 ## 异常处理
 
-- 网络失败：保留本地同步队列，稍后重试。
-- Token 过期：先刷新 Token，再重试同步。
-- 设备未注册：先调用设备注册接口。
-- 版本冲突：标记为 `conflict`，等待用户处理。
-- 服务端返回失败：增加尝试次数，避免无限快速重试。
+- **网络失败：** 保留本地同步队列，稍后重试。
+- **Token 过期：** 先刷新 Token，再重试同步。
+- **设备未注册：** 先调用设备注册接口。
+- **版本冲突：** 标记为 `conflict`，等待用户处理。
+- **服务端失败：** 增加尝试次数，避免无限快速重试。

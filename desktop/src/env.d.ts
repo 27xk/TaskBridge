@@ -19,7 +19,6 @@ declare global {
     autoStart: boolean;
     floatingOpacity: number;
     floatingVisibleOnStart: boolean;
-    floatingMiniMode: boolean;
     floatingX: number | null;
     floatingY: number | null;
     floatingWidth: number;

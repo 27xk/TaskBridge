@@ -1,0 +1,9 @@
+blank_issues_enabled: true
+contact_links:
+  - name: GitHub Releases
+    url: https://github.com/27xk/TaskBridge/releases
+    about: 下载 Android APK、Windows 安装包和查看发布说明。
+  - name: Roadmap
+    url: https://github.com/27xk/TaskBridge/blob/main/ROADMAP.md
+    about: 查看当前计划和后续方向。
+

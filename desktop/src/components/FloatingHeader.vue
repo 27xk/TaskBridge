@@ -13,7 +13,6 @@ const settingsStore = useSettingsStore();
 const emit = defineEmits<{
   hide: [];
   openMain: [];
-  toggleMini: [];
   opacityChange: [value: number];
 }>();
 
@@ -38,7 +37,6 @@ function updateOpacity(event: Event): void {
 
     <div class="floating-window-actions">
       <button type="button" :title="settingsStore.t('floating.openMain')" @click="$emit('openMain')">↗</button>
-      <button type="button" :title="settingsStore.t('floating.miniMode')" @click="$emit('toggleMini')">□</button>
       <button type="button" :title="settingsStore.t('floating.hide')" @click="$emit('hide')">−</button>
     </div>
   </header>

@@ -23,6 +23,10 @@ class ApiHttpError extends Error {
   }
 }
 
+function isInvalidRefreshTokenError(error: unknown): boolean {
+  return error instanceof ApiHttpError && (error.status === 401 || error.status === 403);
+}
+
 export async function performApiRequest<T = unknown>(
   payload: ApiRequestPayload,
 ): Promise<ApiEnvelope<T>> {
@@ -46,7 +50,9 @@ export async function performApiRequest<T = unknown>(
     tokens = getTokens();
     return await sendApiRequest<T>(payload, safePath, tokens?.accessToken);
   } catch (refreshError) {
-    clearTokens();
+    if (isInvalidRefreshTokenError(refreshError)) {
+      clearTokens();
+    }
     throw refreshError;
   }
 }

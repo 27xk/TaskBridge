@@ -155,9 +155,6 @@ function setAppSetting(key: string, value: unknown): AppSettings {
   if (key === "floatingVisibleOnStart" && typeof value === "boolean") {
     return setSetting(key, value);
   }
-  if (key === "floatingMiniMode" && typeof value === "boolean") {
-    return setSetting(key, value);
-  }
   if (key === "floatingOpacity" && typeof value === "number") {
     setFloatingWindowOpacity(value);
     return getSettings();

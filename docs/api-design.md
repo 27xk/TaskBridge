@@ -1,6 +1,6 @@
 # API 设计
 
-本文档说明 TaskBridge 后端主要 HTTP API 和 WebSocket 入口。所有业务接口默认需要 Bearer Token，注册、登录和刷新 Token 除外。
+本文档说明 TaskBridge 后端主要 HTTP API 和 WebSocket 入口。除注册、登录、刷新 Token 和健康检查外，业务接口默认需要 Bearer Token。
 
 ## 统一响应
 
@@ -38,7 +38,7 @@ POST /api/v1/auth/ws-ticket
 
 - Access Token 使用 JWT。
 - Refresh Token 保存在服务端，支持按设备撤销登录态。
-- WebSocket 建议使用短期 Ticket 建连，避免在 URL 中长期暴露 Access Token。
+- WebSocket 建议使用短期 Ticket 建连，避免在 URL 中暴露长期 Access Token。
 
 ## 设备接口
 
@@ -48,7 +48,7 @@ GET    /api/v1/devices
 DELETE /api/v1/devices/{device_id}
 ```
 
-客户端登录后应注册稳定的 `device_id`。同步和 WebSocket 都会使用 `device_id` 判断变更来源，避免把自己发起的变化再次通知给自己。
+客户端登录后应注册稳定的 `device_id`。同步和 WebSocket 都使用 `device_id` 判断变更来源，避免把自己发起的变更再次通知给自己。
 
 ## 任务接口
 
@@ -79,22 +79,18 @@ POST /api/v1/tasks/{task_id}/plan
 POST /api/v1/tasks/{task_id}/next-occurrence
 GET  /api/v1/tasks/{task_id}/history
 POST /api/v1/tasks/{task_id}/resolve-conflict
-POST /api/v1/tasks/{task_id}/checklist
-PUT  /api/v1/tasks/{task_id}/checklist/{item_id}
-DELETE /api/v1/tasks/{task_id}/checklist/{item_id}
 ```
 
-批量与数据管理：
+批量和数据管理：
 
 ```text
-GET  /api/v1/tasks/meta
-GET  /api/v1/tasks/export?format=json
-GET  /api/v1/tasks/export?format=csv
-POST /api/v1/tasks/import
-POST /api/v1/tasks/batch
-POST /api/v1/tasks/projects/rename
-POST /api/v1/tasks/tags/rename
-GET  /api/v1/tasks/trash
+GET    /api/v1/tasks/meta
+GET    /api/v1/tasks/export
+POST   /api/v1/tasks/import
+POST   /api/v1/tasks/batch
+POST   /api/v1/tasks/projects/rename
+POST   /api/v1/tasks/tags/rename
+GET    /api/v1/tasks/trash
 DELETE /api/v1/tasks/{task_id}/purge
 ```
 
@@ -102,7 +98,7 @@ DELETE /api/v1/tasks/{task_id}/purge
 
 | 参数 | 说明 |
 | --- | --- |
-| `q` | 标题、内容等关键词搜索 |
+| `q` | 标题、内容、项目或标签关键词 |
 | `view` | 任务视图，例如 `today`、`inbox`、`overdue`、`week`、`high`、`completed`、`pending`、`conflict` |
 | `status` | 任务状态 |
 | `tag` | 标签 |
@@ -113,7 +109,7 @@ DELETE /api/v1/tasks/{task_id}/purge
 | `templates_only` | 是否只查询模板 |
 | `offset` / `limit` | 分页参数 |
 
-任务删除默认使用软删除，确保离线设备重新上线后也能收到删除变化。
+任务删除默认使用软删除，确保离线设备重新上线后也能收到删除变更。
 
 ## 同步接口
 
@@ -137,12 +133,6 @@ GET  /api/v1/sync/status
 ```text
 POST /api/v1/auth/ws-ticket
 WS   /ws/sync?ticket=<short_lived_ticket>&device_id=<device_id>
-```
-
-兼容入口：
-
-```text
-WS /ws/v1/notifications
 ```
 
 WebSocket 只发送通知，不同步完整任务内容。客户端收到 `task_changed` 后，应主动调用 `GET /api/v1/sync/pull`。
