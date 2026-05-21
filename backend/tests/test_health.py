@@ -15,6 +15,6 @@ def test_health_endpoint_reports_service_status() -> None:
         "data": {
             "status": "ok",
             "service": "TaskBridge API",
-            "version": "0.1.0",
+            "version": "0.1.3",
         },
     }

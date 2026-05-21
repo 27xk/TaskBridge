@@ -1,7 +1,6 @@
 # TaskBridge
 
 [![CI](https://github.com/27xk/TaskBridge/actions/workflows/ci.yml/badge.svg)](https://github.com/27xk/TaskBridge/actions/workflows/ci.yml)
-[![Release](https://github.com/27xk/TaskBridge/actions/workflows/release.yml/badge.svg)](https://github.com/27xk/TaskBridge/actions/workflows/release.yml)
 [![Docker](https://img.shields.io/badge/docker-GHCR%20%2B%20Docker%20Hub-2496ED)](https://github.com/27xk/TaskBridge/pkgs/container/taskbridge)
 [![Android](https://img.shields.io/badge/android-APK-3DDC84)](https://github.com/27xk/TaskBridge/releases)
 [![Windows](https://img.shields.io/badge/windows-installer-0078D4)](https://github.com/27xk/TaskBridge/releases)
@@ -84,7 +83,6 @@ TaskBridge 是一个本地优先的跨端待办应用。手机、电脑和桌面
 - **Android 小组件：** 支持清晰黑字和透明白字两套样式。
 - **Windows 桌面端：** 提供主窗口、系统托盘、悬浮窗、全局快捷键和本地提醒。
 - **后端服务：** FastAPI、MySQL、Redis、JWT、Alembic、WebSocket 和自动化测试。
-- **自动发布：** GitHub Actions 构建 Android APK、Windows 安装包，并推送后端 Docker 镜像到 GHCR 和 Docker Hub。
 
 ## 快速安装
 
@@ -177,36 +175,6 @@ npm run typecheck
 npm run build
 ```
 
-## 发布
-
-推送 `v*` 标签会触发 GitHub Release：
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-Release 产物包括：
-
-- `TaskBridge-<version>-android.apk`
-- `TaskBridge-<version>-Setup.exe`
-- `ghcr.io/<owner>/taskbridge:<version>`
-- `ghcr.io/<owner>/taskbridge:latest`
-- `27xk/taskbridge:<version>`
-- `27xk/taskbridge:latest`
-
-详见 [GitHub 发布说明](./docs/github-release.md)。
-
-## GitHub Topics 建议
-
-仓库 Topics 建议设置为：
-
-```text
-taskbridge, todo-app, task-manager, offline-first, cross-platform, android, electron, vue, fastapi, mysql, redis, websocket, docker, docker-hub, ghcr, kotlin, jetpack-compose, sqlite
-```
-
-Topics 需要在 GitHub 仓库页面手动设置：仓库首页右侧 `About` -> 设置图标 -> `Topics`。
-
 ## Keywords
 
 TaskBridge, todo app, task manager, offline-first, cross-platform sync, Android task app, Windows task app, Electron desktop app, FastAPI backend, self-hosted productivity app, WebSocket sync, Docker deployment, Docker Hub, GHCR.
@@ -220,6 +188,5 @@ TaskBridge, todo app, task manager, offline-first, cross-platform sync, Android 
 - [API 设计](./docs/api-design.md)
 - [同步设计](./docs/sync-design.md)
 - [Demo 脚本](./docs/demo.md)
-- [GitHub 发布说明](./docs/github-release.md)
 - [部署说明](./deploy/README.md)
 - [开发路线图](./docs/development-roadmap.md)

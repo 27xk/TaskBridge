@@ -41,8 +41,8 @@ android {
         applicationId = "com.taskbridge.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "TASKBRIDGE_BASE_URL", "\"$taskBridgeBaseUrl\"")
