@@ -27,6 +27,8 @@ concurrency:
 env:
   RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
   DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE || '27xk/taskbridge' }}
+  TASKBRIDGE_BASE_URL: ${{ vars.TASKBRIDGE_BASE_URL || 'http://192.168.10.30:8000/api/v1/' }}
+  TASKBRIDGE_WS_URL: ${{ vars.TASKBRIDGE_WS_URL || 'ws://192.168.10.30:8000/ws/sync' }}
 
 jobs:
   prepare:
@@ -107,10 +109,10 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run unit tests
-        run: ./gradlew testReleaseUnitTest -PTASKBRIDGE_USE_CHINA_MIRRORS=false --stacktrace
+        run: ./gradlew testReleaseUnitTest -PTASKBRIDGE_USE_CHINA_MIRRORS=false -PTASKBRIDGE_BASE_URL="${TASKBRIDGE_BASE_URL}" -PTASKBRIDGE_WS_URL="${TASKBRIDGE_WS_URL}" --stacktrace
 
       - name: Build release APK
-        run: ./gradlew :app:assembleRelease -PTASKBRIDGE_USE_CHINA_MIRRORS=false --stacktrace
+        run: ./gradlew :app:assembleRelease -PTASKBRIDGE_USE_CHINA_MIRRORS=false -PTASKBRIDGE_BASE_URL="${TASKBRIDGE_BASE_URL}" -PTASKBRIDGE_WS_URL="${TASKBRIDGE_WS_URL}" --stacktrace
         env:
           ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android/release.keystore
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

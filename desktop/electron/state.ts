@@ -3,6 +3,9 @@ import Store from "electron-store";
 import { randomUUID } from "node:crypto";
 import { getSystemTimeZone, normalizeTimeZone } from "../shared/quick-add-parser";
 
+const DEFAULT_BASE_URL = "http://192.168.10.30:8000/api/v1";
+const DEFAULT_WS_URL = "ws://192.168.10.30:8000/ws/sync";
+
 export interface TokenState {
   accessToken: string;
   refreshToken: string;
@@ -47,8 +50,8 @@ export interface StoreSchema {
 
 export const settingsStore = new Store<StoreSchema>({
   defaults: {
-    baseUrl: "http://192.168.10.30:8000/api/v1",
-    wsUrl: "ws://192.168.10.30:8000/ws/sync",
+    baseUrl: DEFAULT_BASE_URL,
+    wsUrl: DEFAULT_WS_URL,
     language: "zh-CN",
     displayTimeZone: getSystemTimeZone(),
     lastSyncTime: "1970-01-01T00:00:00Z",

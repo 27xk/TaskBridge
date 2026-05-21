@@ -22,8 +22,10 @@ android {
             ?: localProperties.getProperty(name)
             ?: defaultValue
 
-    val taskBridgeBaseUrl = taskBridgeProperty("TASKBRIDGE_BASE_URL", "http://10.0.2.2:8000/api/v1/")
-    val taskBridgeWebSocketUrl = taskBridgeProperty("TASKBRIDGE_WS_URL", "ws://10.0.2.2:8000/ws/sync")
+    val taskBridgeBaseUrl = taskBridgeProperty("TASKBRIDGE_BASE_URL", "http://192.168.10.30:8000/api/v1/")
+    val taskBridgeWebSocketUrl = taskBridgeProperty("TASKBRIDGE_WS_URL", "ws://192.168.10.30:8000/ws/sync")
+    val taskBridgeUsesCleartext =
+        taskBridgeBaseUrl.startsWith("http://") || taskBridgeWebSocketUrl.startsWith("ws://")
     val releaseKeystorePath = taskBridgeProperty("ANDROID_KEYSTORE_PATH", System.getenv("ANDROID_KEYSTORE_PATH") ?: "")
     val releaseKeystorePassword = taskBridgeProperty("ANDROID_KEYSTORE_PASSWORD", System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "")
     val releaseKeyAlias = taskBridgeProperty("ANDROID_KEY_ALIAS", System.getenv("ANDROID_KEY_ALIAS") ?: "")
@@ -46,7 +48,7 @@ android {
         buildConfigField("String", "TASKBRIDGE_BASE_URL", "\"$taskBridgeBaseUrl\"")
         buildConfigField("String", "TASKBRIDGE_WS_URL", "\"$taskBridgeWebSocketUrl\"")
         manifestPlaceholders["allowBackup"] = true
-        manifestPlaceholders["usesCleartextTraffic"] = true
+        manifestPlaceholders["usesCleartextTraffic"] = taskBridgeUsesCleartext
     }
 
     compileOptions {
@@ -104,7 +106,7 @@ android {
                 signingConfigs.getByName("debug")
             }
             manifestPlaceholders["allowBackup"] = false
-            manifestPlaceholders["usesCleartextTraffic"] = false
+            manifestPlaceholders["usesCleartextTraffic"] = taskBridgeUsesCleartext
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

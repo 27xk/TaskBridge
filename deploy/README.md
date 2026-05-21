@@ -69,6 +69,24 @@ docker compose -f docker-compose.release.yml up -d
 docker compose -f docker-compose.release.yml logs -f api
 ```
 
+## 数据库迁移
+
+后端镜像启动时会自动执行：
+
+```bash
+alembic upgrade head
+```
+
+然后再启动 API 服务。正常部署不需要在 `api` 服务里额外配置 `command`。
+
+如果你手动运行迁移，请使用完整命令：
+
+```bash
+docker compose -f docker-compose.release.yml run --rm api alembic upgrade head
+```
+
+不要只运行 `alembic`，否则会出现 `alembic: error: too few arguments`。
+
 ## 停止服务
 
 ```bash
