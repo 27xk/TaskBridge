@@ -1,6 +1,7 @@
 import { app, Menu, nativeImage, Tray, type NativeImage } from "electron";
 
 import { hideFloatingWindow, showFloatingWindow } from "./floating-window";
+import { resolveAppIconPath } from "./app-icon";
 import { getSettings, windows } from "./state";
 
 let tray: Tray | null = null;
@@ -17,6 +18,12 @@ export function createAppTray(): Tray {
 }
 
 function createTrayIcon(): NativeImage {
+  const iconPath = resolveAppIconPath();
+  if (iconPath) {
+    const image = nativeImage.createFromPath(iconPath);
+    if (!image.isEmpty()) return image.resize({ width: 16, height: 16 });
+  }
+
   const svg = [
     '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">',
     '<rect width="32" height="32" rx="7" fill="#167c70"/>',

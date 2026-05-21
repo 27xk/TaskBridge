@@ -121,6 +121,8 @@ desktop/dist-electron/
 desktop/out/
 desktop/release/
 desktop/build/
+!desktop/build/
+!desktop/build/icon.ico
 desktop/coverage/
 desktop/.eslintcache
 desktop/.tmp-electron-user-data/

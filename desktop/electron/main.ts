@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu } from "electron";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
+import { resolveAppIconPath } from "./app-icon";
 import { createFloatingWindow, showFloatingWindow } from "./floating-window";
 import { registerIpcHandlers } from "./ipc";
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "./shortcut";
@@ -24,6 +25,7 @@ function createMainWindow(showOnReady = true): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     title: "TaskBridge",
+    icon: resolveAppIconPath(),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {

@@ -6,6 +6,7 @@
   },
   "files": [
     "out/**/*",
+    "build/icon.ico",
     "package.json",
     "!**/*.map",
     "!**/*.tsbuildinfo",
@@ -22,6 +23,7 @@
   ],
   "compression": "maximum",
   "win": {
+    "icon": "build/icon.ico",
     "target": [
       "nsis"
     ],

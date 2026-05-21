@@ -4,7 +4,9 @@
 
     <application
         android:allowBackup="${allowBackup}"
+        android:icon="@mipmap/ic_launcher"
         android:label="TaskBridge"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.TaskBridge"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
         <activity
