@@ -1,15 +1,16 @@
 package com.taskbridge.app.data.repository
 
+import androidx.room.withTransaction
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.local.AppDatabase
 import com.taskbridge.app.data.local.SyncQueueDao
 import com.taskbridge.app.data.local.TaskDao
+import com.taskbridge.app.data.local.TaskEntity
 import com.taskbridge.app.data.remote.ApiService
 import com.taskbridge.app.data.remote.dto.DeviceRegisterRequestDto
 import com.taskbridge.app.data.remote.dto.SyncPushRequestDto
 import com.taskbridge.app.data.remote.dto.WebSocketTicketRequestDto
 import com.taskbridge.app.domain.model.SyncStatus
-import androidx.room.withTransaction
 import kotlinx.coroutines.flow.first
 import java.time.Instant
 
@@ -68,7 +69,7 @@ class SyncRepository(
             ).data ?: return
 
             val remoteTasks = data.changedTasks + data.deletedTasks
-            val existingByServerId = if (remoteTasks.isEmpty()) {
+            val existingByServerId: Map<Int, TaskEntity> = if (remoteTasks.isEmpty()) {
                 emptyMap()
             } else {
                 taskDao.getByServerIds(remoteTasks.map { it.id })

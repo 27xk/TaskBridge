@@ -19,6 +19,7 @@ class SyncWorker(
         val apiService = RetrofitClient.create(applicationContext, tokenDataStore)
         val repository = SyncRepository(
             apiService = apiService,
+            database = database,
             taskDao = database.taskDao(),
             syncQueueDao = database.syncQueueDao(),
             tokenDataStore = tokenDataStore,
