@@ -3,12 +3,6 @@
 export {};
 
 declare global {
-  interface TaskBridgeTokens {
-    accessToken: string;
-    refreshToken: string;
-    userId?: number;
-  }
-
   interface TaskBridgeSettings {
     baseUrl: string;
     wsUrl: string;
@@ -102,7 +96,6 @@ declare global {
       };
       auth: {
         hasTokens: () => Promise<boolean>;
-        setTokens: (tokens: TaskBridgeTokens) => Promise<void>;
         clearTokens: () => Promise<void>;
       };
       api: {
@@ -124,6 +117,7 @@ declare global {
         getTask: (localId: string) => Promise<TaskRecord | null>;
         getTasksByServerIds: (serverIds: number[]) => Promise<TaskRecord[]>;
         upsertTask: (task: TaskRecord) => Promise<TaskRecord>;
+        upsertTasks: (tasks: TaskRecord[]) => Promise<TaskRecord[]>;
         deleteLocalTask: (localId: string) => Promise<void>;
         completeLocalTask: (localId: string) => Promise<TaskRecord | null>;
         listQueue: (limit?: number, includeExhausted?: boolean) => Promise<SyncQueueRecord[]>;

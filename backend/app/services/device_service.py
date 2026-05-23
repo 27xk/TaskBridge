@@ -1,9 +1,9 @@
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppException
 from app.models.device import Device
-from app.models.user import User
+from app.models.user import RefreshToken, User
 from app.schemas.device import DeviceRegister
 from app.utils.time import utc_now
 
@@ -66,6 +66,16 @@ def delete_device(db: Session, current_user: User, device_id: str) -> Device:
         last_online_at=device.last_online_at,
         created_at=device.created_at,
         updated_at=device.updated_at,
+    )
+    now = utc_now()
+    db.execute(
+        update(RefreshToken)
+        .where(
+            RefreshToken.user_id == current_user.id,
+            RefreshToken.device_id == device_id,
+            RefreshToken.revoked_at.is_(None),
+        )
+        .values(revoked_at=now),
     )
     db.delete(device)
     db.commit()

@@ -67,7 +67,15 @@ Release APK：
 .\gradlew.bat :app:assembleRelease
 ```
 
-如果没有配置 release keystore，项目会使用 debug signing 生成可安装 APK，便于内部测试。
+Release 构建必须配置正式签名。缺少 keystore、密码、alias 或 key 密码时，`assembleRelease` 会直接失败，避免误发布 debug 签名 APK。
+
+仅用于本机临时验证的无签名 release 实验，可以显式传入：
+
+```powershell
+.\gradlew.bat :app:assembleRelease -PTASKBRIDGE_ALLOW_UNSIGNED_RELEASE=true
+```
+
+该方式不适合公开分发，也不会用于 GitHub Release。
 
 ## Release 签名
 
@@ -81,6 +89,12 @@ Release APK：
 | `ANDROID_KEY_PASSWORD` | key 密码 |
 
 GitHub Actions 发布时还支持 `ANDROID_KEYSTORE_BASE64`，详见 [GitHub 发布说明](../docs/github-release.md)。
+
+生成 base64 内容：
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("release.keystore"))
+```
 
 ## 国内镜像
 
@@ -118,3 +132,5 @@ cd android
 .\gradlew.bat testDebugUnitTest
 .\gradlew.bat :app:assembleDebug
 ```
+
+CI 使用 JDK 17 和 Gradle Wrapper。若本地提示 `Undefined java.home` 或 Gradle JDK 无效，请在 Android Studio 中选择 Embedded JDK，或选择已安装的 JDK 17 / JDK 21 后重新同步项目。

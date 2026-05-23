@@ -21,11 +21,13 @@ export interface RegisterPayload {
   username: string;
   email: string;
   password: string;
+  device_id: string;
 }
 
 export interface LoginPayload {
   username_or_email: string;
   password: string;
+  device_id: string;
 }
 
 export interface WebSocketTicketDto {

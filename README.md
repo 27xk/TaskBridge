@@ -12,8 +12,9 @@ TaskBridge 是一个本地优先的跨端待办应用。手机、电脑和桌面
 ## 入口
 
 - **下载：** [GitHub Releases](https://github.com/27xk/TaskBridge/releases)
-- **在线 Demo 说明：** [Demo 脚本](./docs/demo.md)
+- **Demo 演示：** [演示脚本](./docs/demo.md)
 - **一键部署：** [部署说明](./deploy/README.md)
+- **发布与镜像：** [GitHub 发布说明](./docs/github-release.md)
 - **路线图：** [Roadmap](./ROADMAP.md)
 - **参与贡献：** [CONTRIBUTING.md](./CONTRIBUTING.md)
 
@@ -93,6 +94,12 @@ TaskBridge 是一个本地优先的跨端待办应用。手机、电脑和桌面
 3. 启动后端服务，或连接到你已经部署好的 TaskBridge API。
 4. 在 App / 桌面端中登录同一个账号。
 
+说明：
+
+- Android APK 和 Windows 安装包会使用构建时写入的默认后端地址。
+- 桌面端仍可在「设置」里修改 API 地址和 WebSocket 地址。
+- Android 端修改后端地址需要重新构建 APK。
+
 ### 自托管后端
 
 复制以下命令即可启动后端、MySQL 和 Redis：
@@ -108,6 +115,13 @@ docker compose -f docker-compose.release.yml up -d
 
 ```text
 http://127.0.0.1:8000
+```
+
+如果要让手机或其他电脑访问，请把客户端后端地址改成服务器的局域网 IP 或域名，例如：
+
+```text
+http://192.168.1.10:8000/api/v1/
+ws://192.168.1.10:8000/ws/sync
 ```
 
 ## 开发启动
@@ -171,6 +185,8 @@ cd android
 
 # 桌面端
 cd desktop
+npm run check:security-config
+npm run check:desktop-endpoint-config
 npm run typecheck
 npm run build
 ```
@@ -187,6 +203,9 @@ TaskBridge, todo app, task manager, offline-first, cross-platform sync, Android 
 - [架构说明](./docs/architecture.md)
 - [API 设计](./docs/api-design.md)
 - [同步设计](./docs/sync-design.md)
-- [Demo 脚本](./docs/demo.md)
+- [Demo 演示脚本](./docs/demo.md)
 - [部署说明](./deploy/README.md)
+- [发布说明](./docs/github-release.md)
+- [安全说明](./docs/security.md)
+- [常见问题](./docs/troubleshooting.md)
 - [开发路线图](./docs/development-roadmap.md)

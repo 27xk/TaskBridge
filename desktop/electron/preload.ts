@@ -26,7 +26,6 @@ contextBridge.exposeInMainWorld("taskBridge", {
   },
   auth: {
     hasTokens: () => ipcRenderer.invoke("auth:has-tokens"),
-    setTokens: (tokens: unknown) => ipcRenderer.invoke("auth:set-tokens", tokens),
     clearTokens: () => ipcRenderer.invoke("auth:clear-tokens"),
   },
   api: {
@@ -41,6 +40,7 @@ contextBridge.exposeInMainWorld("taskBridge", {
     getTask: (localId: string) => ipcRenderer.invoke("db:tasks:get", localId),
     getTasksByServerIds: (serverIds: number[]) => ipcRenderer.invoke("db:tasks:get-by-server-ids", serverIds),
     upsertTask: (task: unknown) => ipcRenderer.invoke("db:tasks:upsert", task),
+    upsertTasks: (tasks: unknown[]) => ipcRenderer.invoke("db:tasks:upsert-many", tasks),
     deleteLocalTask: (localId: string) => ipcRenderer.invoke("db:tasks:delete-local", localId),
     completeLocalTask: (localId: string) => ipcRenderer.invoke("db:tasks:complete-local", localId),
     listQueue: (limit?: number, includeExhausted?: boolean) => ipcRenderer.invoke("db:queue:list", limit, includeExhausted),

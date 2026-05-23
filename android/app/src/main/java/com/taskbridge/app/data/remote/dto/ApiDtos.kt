@@ -19,15 +19,18 @@ data class RegisterRequestDto(
     val username: String,
     val email: String,
     val password: String,
+    @SerializedName("device_id") val deviceId: String,
 )
 
 data class LoginRequestDto(
     @SerializedName("username_or_email") val usernameOrEmail: String,
     val password: String,
+    @SerializedName("device_id") val deviceId: String,
 )
 
 data class RefreshTokenRequestDto(
     @SerializedName("refresh_token") val refreshToken: String,
+    @SerializedName("device_id") val deviceId: String? = null,
 )
 
 data class TokenPairDto(
@@ -216,4 +219,7 @@ data class SyncPullResponseDto(
     @SerializedName("changed_tasks") val changedTasks: List<TaskDto>,
     @SerializedName("deleted_tasks") val deletedTasks: List<TaskDto>,
     @SerializedName("server_time") val serverTime: String,
+    @SerializedName("has_more") val hasMore: Boolean = false,
+    @SerializedName("next_cursor_updated_at") val nextCursorUpdatedAt: String? = null,
+    @SerializedName("next_cursor_id") val nextCursorId: Int? = null,
 )

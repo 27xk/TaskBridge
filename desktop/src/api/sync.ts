@@ -5,6 +5,15 @@ export interface SyncPullResponse {
   changed_tasks: ServerTaskDto[];
   deleted_tasks: ServerTaskDto[];
   server_time: string;
+  has_more: boolean;
+  next_cursor_updated_at: string | null;
+  next_cursor_id: number | null;
+}
+
+export interface SyncPullOptions {
+  limit?: number;
+  cursorUpdatedAt?: string | null;
+  cursorId?: number | null;
 }
 
 export interface SyncPushChange {
@@ -49,10 +58,15 @@ export interface SyncPushResponse {
   server_time: string;
 }
 
-export function pullSync(lastSyncTime: string): Promise<SyncPullResponse> {
+export function pullSync(lastSyncTime: string, options: SyncPullOptions = {}): Promise<SyncPullResponse> {
   return unwrap(
     request.get("/sync/pull", {
-      params: { last_sync_time: lastSyncTime },
+      params: {
+        last_sync_time: lastSyncTime,
+        limit: options.limit,
+        cursor_updated_at: options.cursorUpdatedAt ?? undefined,
+        cursor_id: options.cursorId ?? undefined,
+      },
     }),
   );
 }

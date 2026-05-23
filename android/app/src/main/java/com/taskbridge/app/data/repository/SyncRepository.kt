@@ -17,6 +17,12 @@ class SyncRepository(
     private val syncQueueDao: SyncQueueDao,
     private val tokenDataStore: TokenDataStore,
 ) {
+    private companion object {
+        const val PUSH_BATCH_SIZE = 100
+        const val MAX_PUSH_BATCHES = 25
+        const val PULL_PAGE_SIZE = 200
+    }
+
     suspend fun syncNow(deviceId: String): Result<Unit> {
         return runCatching {
             ensureDeviceRegistered(deviceId)
@@ -47,84 +53,101 @@ class SyncRepository(
 
     suspend fun pullChanges() {
         val lastSyncTime = tokenDataStore.lastSyncTime.first() ?: "1970-01-01T00:00:00Z"
-        val data = apiService.pullSync(lastSyncTime).data ?: return
+        var cursorUpdatedAt: String? = null
+        var cursorId: Int? = null
 
-        data.changedTasks.forEach { remoteTask ->
-            val existing = taskDao.getByServerId(remoteTask.id)
-            val localId = existing?.localId ?: "server-${remoteTask.id}"
-            taskDao.upsert(
-                remoteTask.toEntity(
-                    localId = localId,
-                    syncStatus = SyncStatus.Synced,
-                    lastSyncAt = data.serverTime,
-                ),
-            )
+        while (true) {
+            val data = apiService.pullSync(
+                lastSyncTime = lastSyncTime,
+                limit = PULL_PAGE_SIZE,
+                cursorUpdatedAt = cursorUpdatedAt,
+                cursorId = cursorId,
+            ).data ?: return
+
+            (data.changedTasks + data.deletedTasks).forEach { remoteTask ->
+                val existing = taskDao.getByServerId(remoteTask.id)
+                val localId = existing?.localId ?: "server-${remoteTask.id}"
+                taskDao.upsert(
+                    remoteTask.toEntity(
+                        localId = localId,
+                        syncStatus = SyncStatus.Synced,
+                        lastSyncAt = data.serverTime,
+                    ),
+                )
+            }
+
+            if (!data.hasMore) {
+                tokenDataStore.saveLastSyncTime(data.serverTime)
+                return
+            }
+            cursorUpdatedAt = data.nextCursorUpdatedAt
+                ?: error("sync pull response is missing the next cursor")
+            cursorId = data.nextCursorId
+                ?: error("sync pull response is missing the next cursor")
         }
-
-        data.deletedTasks.forEach { remoteTask ->
-            val existing = taskDao.getByServerId(remoteTask.id)
-            val localId = existing?.localId ?: "server-${remoteTask.id}"
-            taskDao.upsert(
-                remoteTask.toEntity(
-                    localId = localId,
-                    syncStatus = SyncStatus.Synced,
-                    lastSyncAt = data.serverTime,
-                ),
-            )
-        }
-
-        tokenDataStore.saveLastSyncTime(data.serverTime)
     }
 
     private suspend fun pushPendingChanges(deviceId: String) {
-        val pending = syncQueueDao.pendingChanges(100)
-        if (pending.isEmpty()) return
+        var processedBatches = 0
 
-        val data = apiService.pushSync(
-            SyncPushRequestDto(
-                deviceId = deviceId,
-                changes = pending.map { it.toDto() },
-            ),
-        ).data ?: return
+        while (processedBatches < MAX_PUSH_BATCHES) {
+            val pending = syncQueueDao.pendingChanges(PUSH_BATCH_SIZE)
+            if (pending.isEmpty()) return
 
-        val pendingByLocalId = pending.associateBy { it.localId }
-        data.results.forEach { result ->
-            val queued = pendingByLocalId[result.localId] ?: return@forEach
-            when (result.status) {
-                "applied" -> {
-                    result.task?.let { task ->
-                        taskDao.upsert(
-                            task.toEntity(
-                                localId = result.localId,
-                                syncStatus = SyncStatus.Synced,
-                                lastSyncAt = data.serverTime,
-                            ),
+            val data = apiService.pushSync(
+                SyncPushRequestDto(
+                    deviceId = deviceId,
+                    changes = pending.map { it.toDto() },
+                ),
+            ).data ?: return
+
+            val pendingByLocalId = pending.associateBy { it.localId }
+            data.results.forEach { result ->
+                val queued = pendingByLocalId[result.localId] ?: return@forEach
+                when (result.status) {
+                    "applied" -> {
+                        result.task?.let { task ->
+                            taskDao.upsert(
+                                task.toEntity(
+                                    localId = result.localId,
+                                    syncStatus = SyncStatus.Synced,
+                                    lastSyncAt = data.serverTime,
+                                ),
+                            )
+                        } ?: taskDao.markSynced(
+                            localId = result.localId,
+                            serverId = result.serverId,
+                            version = result.version ?: queued.version,
+                            updatedAt = Instant.now().toString(),
+                            syncedAt = data.serverTime,
                         )
-                    } ?: taskDao.markSynced(
-                        localId = result.localId,
-                        serverId = result.serverId,
-                        version = result.version ?: queued.version,
-                        updatedAt = Instant.now().toString(),
-                        syncedAt = data.serverTime,
-                    )
-                    syncQueueDao.delete(queued)
-                }
+                        syncQueueDao.delete(queued)
+                    }
 
-                "conflict" -> {
-                    result.serverTask?.let { task ->
-                        taskDao.upsert(
-                            task.toEntity(
-                                localId = result.localId,
-                                syncStatus = SyncStatus.Conflict,
-                                lastSyncAt = data.serverTime,
-                            ),
-                        )
-                    } ?: taskDao.updateSyncStatus(result.localId, SyncStatus.Conflict.wireName)
-                    syncQueueDao.delete(queued)
-                }
+                    "conflict" -> {
+                        result.serverTask?.let { task ->
+                            taskDao.upsert(
+                                task.toEntity(
+                                    localId = result.localId,
+                                    syncStatus = SyncStatus.Conflict,
+                                    lastSyncAt = data.serverTime,
+                                ),
+                            )
+                        } ?: taskDao.updateSyncStatus(result.localId, SyncStatus.Conflict.wireName)
+                        syncQueueDao.delete(queued)
+                    }
 
-                else -> syncQueueDao.incrementAttempt(queued.id)
+                    "failed" -> {
+                        taskDao.updateSyncStatus(result.localId, SyncStatus.Conflict.wireName)
+                        syncQueueDao.delete(queued)
+                    }
+
+                    else -> syncQueueDao.incrementAttempt(queued.id)
+                }
             }
+
+            processedBatches += 1
+            if (pending.size < PUSH_BATCH_SIZE) return
         }
     }
 }

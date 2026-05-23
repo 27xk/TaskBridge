@@ -213,7 +213,7 @@ interface TaskDao {
 
 @Dao
 interface SyncQueueDao {
-    @Query("SELECT * FROM sync_queue ORDER BY id ASC LIMIT :limit")
+    @Query("SELECT * FROM sync_queue WHERE attemptCount < 8 ORDER BY attemptCount ASC, id ASC LIMIT :limit")
     suspend fun pendingChanges(limit: Int): List<SyncQueueEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

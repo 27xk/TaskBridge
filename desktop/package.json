@@ -16,6 +16,8 @@
     "typecheck": "vue-tsc --noEmit",
     "dist": "npm run build && electron-builder --config electron-builder.json",
     "check:task-order": "node ./scripts/check-task-order.mjs",
+    "check:desktop-endpoint-config": "node ./scripts/check-desktop-endpoint-config.mjs",
+    "check:security-config": "node ./scripts/check-security-config.mjs",
     "check:quick-add-parser": "node ./scripts/check-quick-add-parser.mjs",
     "check:sync-push": "node ./scripts/check-sync-push-handling.mjs",
     "clean": "node ./scripts/clean.mjs",

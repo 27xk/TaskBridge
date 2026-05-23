@@ -90,6 +90,8 @@
 - 桌面端移除不必要的 Axios 依赖，使用原生 `fetch`。
 - 同步队列持久化，失败后延迟重试。
 - Android release 构建开启代码压缩和资源压缩。
+- Docker 部署默认不暴露 MySQL 和 Redis。
+- Electron renderer 启用 sandbox，并收紧 IPC 调用入口。
 
 后续建议：
 
@@ -108,12 +110,12 @@
 - CI 工作流：后端测试、Docker 构建、桌面端构建、Android 构建。
 - Release 工作流：Android APK、Windows 安装包和后端 Docker 镜像。
 - GHCR 后端镜像发布。
-- Android 可选 release 签名配置。
+- Android release 签名强校验，缺少签名配置时发布失败。
 - 发布说明文档。
+- 安全说明和常见问题文档。
 
 后续建议：
 
-- 配置正式 Android keystore Secrets。
 - 增加 Windows 代码签名。
 - 增加生产部署文档和 Nginx 反向代理示例。
 - 增加数据库备份和恢复文档。

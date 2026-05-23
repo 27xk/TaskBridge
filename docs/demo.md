@@ -61,15 +61,20 @@ http://127.0.0.1:8000/health
 
 打开悬浮窗，展示今日任务和快速查看体验。
 
-## 截图清单
+## 已有截图
 
-建议在正式发布前补充以下真实截图：
+仓库已包含以下截图，可用于 README、Release 说明和宣传图制作：
 
-- Windows 今日页。
-- Windows 设置页。
-- Android 今日任务列表。
-- Android 设置页。
-- Android 小组件两种样式。
-- GitHub Release 下载页面。
-- Docker 一键部署后的健康检查结果。
+- `docs/assets/screenshots/PC的今日.png`
+- `docs/assets/screenshots/PC的全部.png`
+- `docs/assets/screenshots/PC的设置.png`
+- `docs/assets/screenshots/PC悬浮窗.png`
+- `docs/assets/screenshots/APP首页.jpg`
+- `docs/assets/screenshots/APP设置页.jpg`
+- `docs/assets/screenshots/APP两组件UI.jpg`
 
+## 发布前建议补充
+
+- 一段 60-120 秒的同步演示视频。
+- GitHub Release 下载页面截图。
+- Docker 一键部署后的健康检查结果截图。

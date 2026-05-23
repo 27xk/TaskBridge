@@ -20,8 +20,6 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    ports:
-      - "3306:3306"
     volumes:
       - taskbridge_mysql:/var/lib/mysql
     command:
@@ -36,8 +34,6 @@ services:
   redis:
     image: redis:7.4-alpine
     container_name: taskbridge-redis
-    ports:
-      - "6379:6379"
     volumes:
       - taskbridge_redis:/data
     command: ["redis-server", "--appendonly", "yes"]

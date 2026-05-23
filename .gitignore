@@ -176,6 +176,7 @@ captures/
 
 # 测试、报告与生成文件
 test-results/
+tests/
 reports/
 playwright-report/
 blob-report/

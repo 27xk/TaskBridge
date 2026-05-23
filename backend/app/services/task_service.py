@@ -2,7 +2,7 @@ from copy import deepcopy
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -43,6 +43,41 @@ def _get_owned_task(
     if task is None:
         raise AppException(status_code=404, message="task not found")
     return task
+
+
+def _ensure_owned_parent_task(
+    db: Session,
+    current_user: User,
+    parent_task_id: int | None,
+    *,
+    child_task_id: int | None = None,
+) -> None:
+    if parent_task_id is None:
+        return
+    if child_task_id is not None and parent_task_id == child_task_id:
+        raise AppException(status_code=400, message="parent task cannot be self")
+    parent_id = db.scalar(
+        select(Task.id).where(
+            Task.id == parent_task_id,
+            Task.user_id == current_user.id,
+            Task.is_deleted.is_(False),
+        ),
+    )
+    if parent_id is None:
+        raise AppException(status_code=404, message="parent task not found")
+
+
+def _owned_parent_task_id_or_none(db: Session, current_user: User, parent_task_id: int | None) -> int | None:
+    if parent_task_id is None:
+        return None
+    parent_id = db.scalar(
+        select(Task.id).where(
+            Task.id == parent_task_id,
+            Task.user_id == current_user.id,
+            Task.is_deleted.is_(False),
+        ),
+    )
+    return parent_id
 
 
 def _snapshot(task: Task) -> dict[str, Any]:
@@ -125,19 +160,40 @@ def list_tasks(
     if templates_only:
         conditions.append(Task.is_template.is_(True))
     _apply_view_conditions(conditions, view=view, now=now)
+    current = normalize_to_utc_naive(now) if now else utc_now()
 
     query = (
         select(Task)
         .where(*conditions)
-        .order_by(
-            Task.sort_order.asc(),
-            Task.updated_at.desc(),
-            Task.id.desc(),
-        )
+        .order_by(*_timeline_ordering(current))
         .offset(offset)
         .limit(limit)
     )
     return list(db.scalars(query))
+
+
+def _timeline_ordering(now: datetime) -> tuple[Any, ...]:
+    completed = Task.status.in_(("completed", "done"))
+    open_task = Task.status.not_in(("completed", "done"))
+    completed_time = func.coalesce(Task.completed_at, Task.updated_at, Task.due_time)
+    return (
+        case((completed, 1), else_=0).asc(),
+        case(
+            (completed, 4),
+            (and_(open_task, Task.due_time.is_not(None), Task.due_time < now), 0),
+            (and_(open_task, Task.due_time.is_not(None)), 1),
+            (and_(open_task, Task.planned_date.is_not(None)), 2),
+            else_=3,
+        ).asc(),
+        case((completed, completed_time), else_=None).desc(),
+        case((and_(open_task, Task.due_time.is_(None)), 1), else_=0).asc(),
+        case((open_task, Task.due_time), else_=None).asc(),
+        case((open_task, Task.planned_date), else_=None).asc(),
+        Task.sort_order.asc(),
+        Task.priority.desc(),
+        Task.updated_at.desc(),
+        Task.id.desc(),
+    )
 
 
 def get_task_meta(db: Session, current_user: User) -> dict[str, Any]:
@@ -179,6 +235,7 @@ def get_task_meta(db: Session, current_user: User) -> dict[str, Any]:
                     Task.planned_date == today,
                     and_(Task.due_time.is_not(None), Task.due_time >= today_start, Task.due_time < today_end),
                     and_(Task.remind_time.is_not(None), Task.remind_time >= today_start, Task.remind_time < today_end),
+                    and_(Task.due_time.is_not(None), Task.due_time < now),
                 ),
             ],
         ),
@@ -331,6 +388,8 @@ def resolve_task_conflict(
     if payload.task is None:
         raise AppException(status_code=400, message="task is required for overwrite_server")
     updates = _task_payload_dump(payload.task, exclude_unset=True)
+    if "parent_task_id" in updates:
+        _ensure_owned_parent_task(db, current_user, updates["parent_task_id"], child_task_id=task.id)
     for field, value in updates.items():
         setattr(task, field, value)
     task.version += 1
@@ -376,6 +435,7 @@ def _apply_view_conditions(
                 Task.planned_date == today,
                 and_(Task.due_time.is_not(None), Task.due_time >= today_start, Task.due_time < today_end),
                 and_(Task.remind_time.is_not(None), Task.remind_time >= today_start, Task.remind_time < today_end),
+                and_(Task.status.not_in(("completed", "done")), Task.due_time.is_not(None), Task.due_time < current),
             ),
         )
     elif normalized == "overdue":
@@ -403,6 +463,7 @@ def _apply_view_conditions(
 
 def create_task(db: Session, current_user: User, payload: TaskCreate) -> Task:
     data = _task_payload_dump(payload)
+    _ensure_owned_parent_task(db, current_user, data.get("parent_task_id"))
     task = Task(user_id=current_user.id, **data)
     db.add(task)
     db.flush()
@@ -426,6 +487,8 @@ def get_task(db: Session, current_user: User, task_id: int) -> Task:
 def update_task(db: Session, current_user: User, task_id: int, payload: TaskUpdate) -> Task:
     task = _get_owned_task(db, current_user, task_id)
     updates = _task_payload_dump(payload, exclude_unset=True)
+    if "parent_task_id" in updates:
+        _ensure_owned_parent_task(db, current_user, updates["parent_task_id"], child_task_id=task.id)
     for field, value in updates.items():
         setattr(task, field, value)
     task.version += 1
@@ -669,6 +732,7 @@ def instantiate_template(
     if not template.is_template:
         raise AppException(status_code=400, message="task is not a template")
 
+    parent_task_id = _owned_parent_task_id_or_none(db, current_user, template.parent_task_id)
     task = Task(
         user_id=current_user.id,
         title=payload.title or template.title,
@@ -682,7 +746,7 @@ def instantiate_template(
         remind_time=normalize_to_utc_naive(payload.remind_time) if payload.remind_time else template.remind_time,
         repeat_rule=template.repeat_rule,
         planned_date=payload.planned_date if payload.planned_date is not None else template.planned_date,
-        parent_task_id=template.parent_task_id,
+        parent_task_id=parent_task_id,
         checklist=deepcopy(template.checklist or []),
         is_template=False,
         template_name=None,
@@ -801,6 +865,7 @@ def purge_task(db: Session, current_user: User, task_id: int) -> Task:
     )
     db.flush()
     db.execute(update(SyncLog).where(SyncLog.task_id == task.id).values(task_id=None))
+    db.execute(update(Task).where(Task.parent_task_id == task.id).values(parent_task_id=None))
     db.delete(task)
     db.commit()
     return task

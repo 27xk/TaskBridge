@@ -9,6 +9,10 @@ import { WebSocketClient, type SyncSocketMessage } from "./WebSocketClient";
 
 type SyncStatus = "idle" | "syncing" | "offline" | "error" | "synced";
 
+const SYNC_PUSH_BATCH_SIZE = 100;
+const MAX_SYNC_PUSH_BATCHES = 25;
+const SYNC_PULL_PAGE_SIZE = 200;
+
 export class SyncManager {
   private running = false;
   private rerunRequested = false;
@@ -109,35 +113,44 @@ export class SyncManager {
 
   private async pushPendingChanges(forceRetry = false): Promise<void> {
     const settings = await bridge().app.getSettings();
-    const queue = await listSyncQueue(100, forceRetry);
-    if (queue.length === 0) return;
+    let processedBatches = 0;
 
-    const response = await pushSync(settings.deviceId, queue.map(toPushChange));
-    const queueByLocalId = new Map(queue.map((item) => [item.localId, item]));
-    for (const result of response.results) {
-      const queueItem = queueByLocalId.get(result.local_id);
-      if (!queueItem?.id) continue;
+    while (processedBatches < MAX_SYNC_PUSH_BATCHES) {
+      const queue = await listSyncQueue(SYNC_PUSH_BATCH_SIZE, forceRetry);
+      if (queue.length === 0) return;
 
-      if (result.status === "applied") {
-        await this.markQueueItemApplied(queueItem, result);
-        await removeQueueItem(queueItem.id);
-        continue;
+      const response = await pushSync(settings.deviceId, queue.map(toPushChange));
+      const queueByLocalId = new Map(queue.map((item) => [item.localId, item]));
+      for (const result of response.results) {
+        const queueItem = queueByLocalId.get(result.local_id);
+        if (!queueItem?.id) continue;
+
+        if (result.status === "applied") {
+          await this.markQueueItemApplied(queueItem, result);
+          await removeQueueItem(queueItem.id);
+          continue;
+        }
+
+        if (result.status === "conflict") {
+          await this.markQueueItemConflict(queueItem, result);
+          await removeQueueItem(queueItem.id);
+          continue;
+        }
+
+        if (result.status === "failed") {
+          await this.markQueueItemFailed(queueItem);
+          await removeQueueItem(queueItem.id);
+          continue;
+        }
+
+        await incrementQueueAttempt(queueItem.id);
       }
 
-      if (result.status === "conflict") {
-        await this.markQueueItemConflict(queueItem, result);
-        await removeQueueItem(queueItem.id);
-        continue;
-      }
-
-      if (result.status === "failed") {
-        await this.markQueueItemFailed(queueItem);
-        await removeQueueItem(queueItem.id);
-        continue;
-      }
-
-      await incrementQueueAttempt(queueItem.id);
+      processedBatches += 1;
+      if (queue.length < SYNC_PUSH_BATCH_SIZE) return;
     }
+
+    this.rerunRequested = true;
   }
 
   private async markQueueItemApplied(queueItem: SyncQueueRecord, result: SyncPushResult): Promise<void> {
@@ -177,23 +190,42 @@ export class SyncManager {
 
   private async pullRemoteChanges(): Promise<void> {
     const settings = await bridge().app.getSettings();
-    const response = await pullSync(settings.lastSyncTime);
-    const pulledTasks = [...response.changed_tasks, ...response.deleted_tasks];
-    const localTasks = await getTasksByServerIds(pulledTasks.map((task) => task.id));
-    const localByServerId = new Map(
-      localTasks
-        .filter((task): task is TaskRecord & { serverId: number } => task.serverId !== null)
-        .map((task) => [task.serverId, task]),
-    );
-    const changed = response.changed_tasks.map((task) => {
-      return mergePulledTask(task, localByServerId.get(task.id));
-    });
-    const deleted = response.deleted_tasks.map((task) => {
-      return mergePulledTask(task, localByServerId.get(task.id));
-    });
+    let cursorUpdatedAt: string | null = null;
+    let cursorId: number | null = null;
 
-    await saveTasks([...changed, ...deleted]);
-    await bridge().app.setSetting("lastSyncTime", response.server_time);
+    while (true) {
+      const response = await pullSync(settings.lastSyncTime, {
+        limit: SYNC_PULL_PAGE_SIZE,
+        cursorUpdatedAt,
+        cursorId,
+      });
+      const pulledTasks = [...response.changed_tasks, ...response.deleted_tasks];
+      const localTasks = await getTasksByServerIds(pulledTasks.map((task) => task.id));
+      const localByServerId = new Map(
+        localTasks
+          .filter((task): task is TaskRecord & { serverId: number } => task.serverId !== null)
+          .map((task) => [task.serverId, task]),
+      );
+      const changed = response.changed_tasks.map((task) => {
+        return mergePulledTask(task, localByServerId.get(task.id));
+      });
+      const deleted = response.deleted_tasks.map((task) => {
+        return mergePulledTask(task, localByServerId.get(task.id));
+      });
+
+      await saveTasks([...changed, ...deleted]);
+
+      if (!response.has_more) {
+        await bridge().app.setSetting("lastSyncTime", response.server_time);
+        return;
+      }
+
+      if (!response.next_cursor_updated_at || response.next_cursor_id === null) {
+        throw new Error("sync pull response is missing the next cursor");
+      }
+      cursorUpdatedAt = response.next_cursor_updated_at;
+      cursorId = response.next_cursor_id;
+    }
   }
 
   private async connectWebSocket(): Promise<void> {

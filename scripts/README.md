@@ -6,9 +6,30 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `clean-local.ps1` | 清理本地生成文件和缓存 |
+| `clean-local.ps1` | 清理本地生成文件和缓存，支持 `-DryRun` 和 `-All` |
 
-桌面端专用脚本位于 `desktop/scripts/`，例如任务排序、快速添加解析和同步推送检查。
+示例：
+
+```powershell
+# 只预览将要清理的内容
+.\scripts\clean-local.ps1 -DryRun
+
+# 清理构建缓存
+.\scripts\clean-local.ps1
+
+# 同时清理 desktop/node_modules
+.\scripts\clean-local.ps1 -All
+```
+
+桌面端专用脚本位于 `desktop/scripts/`：
+
+| 命令 | 说明 |
+| --- | --- |
+| `npm run check:security-config` | 检查安全敏感配置 |
+| `npm run check:desktop-endpoint-config` | 检查桌面端默认后端地址注入 |
+| `npm run check:task-order` | 检查任务时间线排序 |
+| `npm run check:quick-add-parser` | 检查快速添加解析 |
+| `npm run check:sync-push` | 检查同步推送处理 |
 
 ## 编写约定
 

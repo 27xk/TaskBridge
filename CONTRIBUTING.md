@@ -38,6 +38,8 @@ python -m compileall -q app tests
 
 ```powershell
 cd desktop
+npm run check:security-config
+npm run check:desktop-endpoint-config
 npm run typecheck
 npm run build
 ```
@@ -56,6 +58,16 @@ cd android
 - 不要把格式化、重构和功能改动混在一起。
 - 不要提交本地密钥、`.env`、数据库文件、构建产物和 IDE 配置。
 - 文档改动请同步检查 README、`docs/` 和对应模块 README。
+- 涉及发布、Docker、Electron IPC、Android 签名或后端鉴权时，请运行 `npm run check:security-config`。
+- 涉及桌面端后端地址时，请运行 `npm run check:desktop-endpoint-config`。
+
+## 文档约定
+
+- 面向用户的入口写在根 README。
+- 模块开发说明写在对应目录的 README。
+- 架构、API、同步、安全、发布和排障说明写在 `docs/`。
+- 一键部署和 Docker Compose 说明写在 `deploy/README.md`。
+- 中英文、中文与数字之间保留空格，例如 `Python 3.11`、`Docker Compose`。
 
 ## 代码风格
 
@@ -63,4 +75,3 @@ cd android
 - Android 遵循现有 Compose、Repository 和 ViewModel 结构。
 - 桌面端遵循现有 Electron 主进程、Vue 视图和 Pinia store 结构。
 - UI 调整应同时考虑 Android、Windows 主窗口、小组件和悬浮窗之间的体验差异。
-

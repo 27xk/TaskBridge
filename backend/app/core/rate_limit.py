@@ -5,6 +5,7 @@ from app.core.exceptions import AppException
 from app.core.redis import get_redis_client
 
 _MEMORY_BUCKETS: dict[str, tuple[int, float]] = {}
+_MAX_MEMORY_BUCKETS = 10_000
 
 
 def check_rate_limit(
@@ -35,6 +36,8 @@ def _check_memory_rate_limit(key: str, *, limit: int, window_seconds: int) -> No
 
     now = time.time()
     _prune_memory_buckets(now)
+    if key not in _MEMORY_BUCKETS and len(_MEMORY_BUCKETS) >= _MAX_MEMORY_BUCKETS:
+        _evict_oldest_bucket()
     count, expires_at = _MEMORY_BUCKETS.get(key, (0, now + window_seconds))
     if expires_at <= now:
         count = 0
@@ -46,8 +49,17 @@ def _check_memory_rate_limit(key: str, *, limit: int, window_seconds: int) -> No
 
 
 def _prune_memory_buckets(now: float) -> None:
-    if len(_MEMORY_BUCKETS) < 10_000:
+    if len(_MEMORY_BUCKETS) < _MAX_MEMORY_BUCKETS:
         return
     for key, (_, expires_at) in list(_MEMORY_BUCKETS.items()):
         if expires_at <= now:
             _MEMORY_BUCKETS.pop(key, None)
+    while len(_MEMORY_BUCKETS) > _MAX_MEMORY_BUCKETS:
+        _evict_oldest_bucket()
+
+
+def _evict_oldest_bucket() -> None:
+    if not _MEMORY_BUCKETS:
+        return
+    oldest_key = min(_MEMORY_BUCKETS, key=lambda bucket_key: _MEMORY_BUCKETS[bucket_key][1])
+    _MEMORY_BUCKETS.pop(oldest_key, None)

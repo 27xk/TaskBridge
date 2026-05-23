@@ -25,9 +25,8 @@ export async function saveTask(task: TaskRecord): Promise<TaskRecord> {
 }
 
 export async function saveTasks(tasks: TaskRecord[]): Promise<void> {
-  for (const task of tasks) {
-    await saveTask(task);
-  }
+  if (tasks.length === 0) return;
+  await bridge().db.upsertTasks(tasks);
 }
 
 export async function softDeleteLocalTask(localId: string): Promise<void> {

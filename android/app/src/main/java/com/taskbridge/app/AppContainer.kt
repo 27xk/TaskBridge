@@ -8,6 +8,7 @@ import com.taskbridge.app.data.repository.AuthRepository
 import com.taskbridge.app.data.repository.SyncRepository
 import com.taskbridge.app.data.repository.TaskRepository
 import com.taskbridge.app.notification.ReminderManager
+import com.taskbridge.app.sync.DeviceIdProvider
 import com.taskbridge.app.sync.SyncManager
 
 class AppContainer(context: Context) {
@@ -17,7 +18,9 @@ class AppContainer(context: Context) {
     val tokenDataStore = TokenDataStore(appContext)
     private val apiService = RetrofitClient.create(appContext, tokenDataStore)
 
-    val authRepository = AuthRepository(apiService, tokenDataStore)
+    private val deviceIdProvider = DeviceIdProvider(appContext)
+
+    val authRepository = AuthRepository(apiService, tokenDataStore, deviceIdProvider)
     val taskRepository = TaskRepository(database.taskDao(), database.syncQueueDao())
     val syncRepository = SyncRepository(
         apiService = apiService,

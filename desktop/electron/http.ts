@@ -34,7 +34,9 @@ export async function performApiRequest<T = unknown>(
   let tokens = getTokens();
 
   try {
-    return await sendApiRequest<T>(payload, safePath, tokens?.accessToken);
+    const response = await sendApiRequest<T>(payload, safePath, tokens?.accessToken);
+    persistAuthTokensFromResponse(safePath, response as ApiEnvelope<unknown>);
+    return response;
   } catch (error) {
     if (!(error instanceof ApiHttpError) || error.status !== 401 || !tokens?.refreshToken) {
       throw error;
@@ -55,6 +57,30 @@ export async function performApiRequest<T = unknown>(
     }
     throw refreshError;
   }
+}
+
+function persistAuthTokensFromResponse(path: string, response: ApiEnvelope<unknown>): void {
+  if (path !== "/auth/login" && path !== "/auth/register") return;
+  const data = response.data;
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid auth response");
+  }
+  const authData = data as {
+    access_token?: unknown;
+    refresh_token?: unknown;
+    user?: { id?: unknown };
+  };
+  if (typeof authData.access_token !== "string" || typeof authData.refresh_token !== "string") {
+    throw new Error("Invalid auth response");
+  }
+  const userId = typeof authData.user?.id === "number" && Number.isFinite(authData.user.id)
+    ? authData.user.id
+    : undefined;
+  setTokens({
+    accessToken: authData.access_token,
+    refreshToken: authData.refresh_token,
+    userId,
+  });
 }
 
 async function sendApiRequest<T>(
@@ -81,7 +107,7 @@ async function refreshToken(refreshTokenValue: string): Promise<{
     "/auth/refresh",
     {
       method: "POST",
-      data: { refresh_token: refreshTokenValue },
+      data: { refresh_token: refreshTokenValue, device_id: settings.deviceId },
     },
   );
   return response.data;
@@ -123,6 +149,12 @@ async function requestJson<T>(
       throw new Error("Invalid API response");
     }
     return body;
+  } catch (error) {
+    if (error instanceof ApiHttpError) {
+      throw error;
+    }
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`API request failed: ${url} (${reason})`);
   } finally {
     clearTimeout(timeout);
   }

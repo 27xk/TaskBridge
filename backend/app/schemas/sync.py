@@ -25,7 +25,7 @@ class SyncChange(BaseModel):
     planned_date: date | None = None
     completed_at: datetime | None = None
     snoozed_until: datetime | None = None
-    parent_task_id: int | None = None
+    parent_task_id: int | None = Field(default=None, ge=1)
     checklist: list[ChecklistItem] | None = None
     is_template: bool | None = None
     template_name: str | None = Field(default=None, max_length=128)
@@ -59,6 +59,9 @@ class SyncPullResponse(BaseModel):
     changed_tasks: list[TaskRead]
     deleted_tasks: list[TaskRead]
     server_time: str
+    has_more: bool = False
+    next_cursor_updated_at: str | None = None
+    next_cursor_id: int | None = None
 
 
 class SyncNotification(BaseModel):

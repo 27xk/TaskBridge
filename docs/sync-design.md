@@ -87,8 +87,10 @@ TaskBridge 使用「HTTP 同步 + WebSocket 通知」的架构。
 - `changed_tasks`：新增或更新的任务。
 - `deleted_tasks`：软删除任务。
 - `server_time`：服务端当前时间，客户端保存为下一次拉取的 `last_sync_time`。
+- `has_more`：是否还有下一页。
+- `next_cursor_updated_at` / `next_cursor_id`：下一页游标。
 
-客户端应在本地事务中合并数据，并且只在合并成功后更新 `last_sync_time`。
+客户端应分页拉取直到 `has_more=false`，每页都在本地事务中合并数据，并且只在最后一页合并成功后更新 `last_sync_time`。
 
 ## 冲突策略
 
@@ -125,3 +127,10 @@ TaskBridge 使用「HTTP 同步 + WebSocket 通知」的架构。
 - **设备未注册：** 先调用设备注册接口。
 - **版本冲突：** 标记为 `conflict`，等待用户处理。
 - **服务端失败：** 增加尝试次数，避免无限快速重试。
+
+## 安全约束
+
+- `POST /api/v1/sync/push` 会先校验 `device_id` 是否属于当前用户。
+- 更新、删除、完成和恢复任务时，服务端只接受当前用户拥有的 `server_id`。
+- 设置 `parent_task_id` 时，父任务必须属于当前用户且未删除。
+- WebSocket 通知不携带完整任务内容，客户端必须通过鉴权后的 HTTP 拉取真实数据。

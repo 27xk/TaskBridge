@@ -5,10 +5,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +33,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.google.gson.JsonParser
 import com.taskbridge.app.ui.editor.EditorScreen
 import com.taskbridge.app.ui.i18n.AppLanguage
 import com.taskbridge.app.ui.i18n.TaskBridgeLanguageProvider
@@ -104,6 +109,7 @@ fun TaskBridgeApp(
     val language = AppLanguage.fromCode(languageCode)
     val widgetLaunchTarget = widgetLaunchState.value
     val sharedText = sharedTextState.value
+    val scope = rememberCoroutineScope()
 
     ForegroundWebSocketLifecycle(container)
 
@@ -121,20 +127,64 @@ fun TaskBridgeApp(
 
     LaunchedEffect(token, sharedText) {
         if (token.isNullOrBlank() || sharedText.isNullOrBlank()) return@LaunchedEffect
-        if (sharedText.contains("\"tasks\"")) {
-            container.taskRepository.importBackupJson(sharedText)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            container.syncManager.enqueueNetworkSync()
-            container.syncManager.syncNow()
-            sharedTextState.value = null
-            return@LaunchedEffect
-        }
+        if (isTaskBridgeBackupText(sharedText)) return@LaunchedEffect
         navController.navigate(Routes.Editor)
     }
 
     TaskBridgeLanguageProvider(language) {
         TaskBridgeNavHost(container, navController, sharedTextState, language)
+        val pendingBackupText = sharedText
+        if (!token.isNullOrBlank() && pendingBackupText != null && isTaskBridgeBackupText(pendingBackupText)) {
+            SharedBackupImportDialog(
+                isEnglish = language == AppLanguage.English,
+                onDismiss = { sharedTextState.value = null },
+                onConfirm = {
+                    scope.launch {
+                        val imported = container.taskRepository.importBackupJson(pendingBackupText)
+                        if (imported > 0) {
+                            TodayTaskWidgetUpdateWorker.enqueue(appContext)
+                            container.syncManager.enqueueNetworkSync()
+                            container.syncManager.syncNow()
+                        }
+                        sharedTextState.value = null
+                    }
+                },
+            )
+        }
     }
+}
+
+@Composable
+private fun SharedBackupImportDialog(
+    isEnglish: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(if (isEnglish) "Import backup?" else "\u5BFC\u5165\u5907\u4EFD\uFF1F")
+        },
+        text = {
+            Text(
+                if (isEnglish) {
+                    "This shared file contains TaskBridge tasks. Importing will add them to local data and sync after confirmation."
+                } else {
+                    "\u8BE5\u5206\u4EAB\u5185\u5BB9\u5305\u542B TaskBridge \u4EFB\u52A1\u3002\u786E\u8BA4\u540E\u624D\u4F1A\u5199\u5165\u672C\u5730\u5E76\u540C\u6B65\u3002"
+                },
+            )
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text(if (isEnglish) "Import" else "\u5BFC\u5165")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(if (isEnglish) "Cancel" else "\u53D6\u6D88")
+            }
+        },
+    )
 }
 
 @Composable
@@ -340,6 +390,7 @@ private fun EditorRoute(
     }
     LaunchedEffect(sharedTextState.value) {
         val text = sharedTextState.value ?: return@LaunchedEffect
+        if (isTaskBridgeBackupText(text)) return@LaunchedEffect
         viewModel.updateTitle(text.take(255))
     }
     EditorScreen(
@@ -351,8 +402,21 @@ private fun EditorRoute(
 }
 
 private fun sharedTextFromIntent(intent: Intent?): String? {
-    if (intent?.action != Intent.ACTION_SEND || intent.type != "text/plain") return null
+    val mimeType = intent?.type ?: return null
+    if (intent.action != Intent.ACTION_SEND || mimeType !in setOf("text/plain", "application/json")) return null
     return intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.takeIf { it.isNotBlank() }
+}
+
+private fun isTaskBridgeBackupText(value: String): Boolean {
+    return runCatching {
+        val root = JsonParser.parseString(value).asJsonObject
+        val format = root.get("format")?.takeIf { !it.isJsonNull }?.asString
+        format in setOf(
+            "taskbridge.local.backup.v1",
+            "taskbridge.android.backup.v1",
+            "taskbridge.desktop.backup.v1",
+        ) && root.get("tasks")?.isJsonArray == true
+    }.getOrDefault(false)
 }
 
 @Composable

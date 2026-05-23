@@ -104,6 +104,11 @@ type MessageKey =
   | "settings.floatingOpacity"
   | "settings.displayTimeZone"
   | "settings.displayTimeZoneHint"
+  | "settings.connection"
+  | "settings.baseUrl"
+  | "settings.baseUrlHint"
+  | "settings.wsUrl"
+  | "settings.wsUrlHint"
   | "settings.accountDisplay"
   | "settings.dataSession"
   | "settings.general"
@@ -252,6 +257,17 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "settings.displayTimeZoneHint": {
     "zh-CN": "任务时间按该时区显示，同步数据仍以 UTC 保存。",
     "en-US": "Task times use this time zone. Sync data remains stored as UTC.",
+  },
+  "settings.connection": { "zh-CN": "后端连接", "en-US": "Backend connection" },
+  "settings.baseUrl": { "zh-CN": "API 地址", "en-US": "API URL" },
+  "settings.baseUrlHint": {
+    "zh-CN": "桌面端请求后端 API 的基础地址，通常以 /api/v1 结尾。",
+    "en-US": "Base URL for desktop API requests, usually ending with /api/v1.",
+  },
+  "settings.wsUrl": { "zh-CN": "同步 WebSocket 地址", "en-US": "Sync WebSocket URL" },
+  "settings.wsUrlHint": {
+    "zh-CN": "用于实时同步状态，通常以 /ws/sync 结尾。",
+    "en-US": "Used for real-time sync, usually ending with /ws/sync.",
   },
   "settings.accountDisplay": { "zh-CN": "账号与显示", "en-US": "Account and display" },
   "settings.dataSession": { "zh-CN": "数据与会话", "en-US": "Data and session" },

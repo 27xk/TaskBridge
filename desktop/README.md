@@ -19,6 +19,8 @@ npm run dev
 ## 常用命令
 
 ```powershell
+npm run check:security-config
+npm run check:desktop-endpoint-config
 npm run typecheck
 npm run build
 npm run dist
@@ -39,6 +41,8 @@ npm run rebuild:native
 - `npm run dist` 生成 Windows 安装包，输出目录为 `desktop/release/`。
 - 主窗口默认隐藏 Electron 菜单栏。
 - 悬浮窗使用独立入口，不受主窗口布局样式影响。
+- `npm run check:security-config` 检查 Electron sandbox、IPC 入口、Android release 签名和 Docker 端口配置。
+- `npm run check:desktop-endpoint-config` 检查桌面端是否正确使用构建时注入的后端地址。
 
 ## 功能
 
@@ -51,6 +55,30 @@ npm run rebuild:native
 - 全局快捷键 `Ctrl + Alt + T`。
 - 系统通知和本地提醒。
 - 导入导出备份 JSON。
+
+## 后端地址
+
+桌面端默认后端地址在构建时注入。GitHub Release 会读取仓库 Variables：
+
+- `TASKBRIDGE_BASE_URL`
+- `TASKBRIDGE_WS_URL`
+
+本地打包时可这样指定：
+
+```powershell
+$env:TASKBRIDGE_BASE_URL="http://192.168.1.10:8000/api/v1/"
+$env:TASKBRIDGE_WS_URL="ws://192.168.1.10:8000/ws/sync"
+npm run dist
+```
+
+用户安装后也可以在设置页修改 API 地址和 WebSocket 地址。应用会迁移旧版本内置的默认地址，但会保留用户手动改过的地址。
+
+## 安全边界
+
+- 主窗口和悬浮窗启用 `contextIsolation`、禁用 `nodeIntegration`，并启用 renderer sandbox。
+- Preload 只暴露受控的 `window.taskBridge` 能力。
+- Renderer 不能直接写入 Token；登录、注册和刷新 Token 后由主进程保存。
+- IPC handler 会校验调用方是否来自当前主窗口或悬浮窗。
 
 ## 打包注意事项
 

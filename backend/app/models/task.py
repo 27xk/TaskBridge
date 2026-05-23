@@ -32,7 +32,7 @@ class Task(Base):
     planned_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
     snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
-    parent_task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    parent_task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     checklist: Mapped[list[dict] | None] = mapped_column(JSON, default=list, nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     template_name: Mapped[str | None] = mapped_column(String(128), nullable=True)

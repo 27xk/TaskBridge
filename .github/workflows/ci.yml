@@ -91,6 +91,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify security-sensitive config
+        run: npm run check:security-config
+
       - name: Build desktop app
         run: npm run build
 

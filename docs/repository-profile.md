@@ -52,16 +52,17 @@ https://github.com/27xk/TaskBridge/releases
 - Android、小组件和 Windows 三端界面。
 - 关键词：Offline-first、Android、Windows、Self-hosted。
 
-## 发布前检查
+## 仓库展示检查
 
-- [ ] README 首屏有下载入口。
-- [ ] README 有截图。
-- [ ] README 有 Demo 链接。
-- [ ] README 有一键部署命令。
+- [x] README 首屏有下载入口。
+- [x] README 有截图。
+- [x] README 有 Demo 链接。
+- [x] README 有一键部署命令。
+- [x] Issue 模板可用。
+- [x] Pull Request 模板可用。
+- [x] Roadmap 链接可见。
+- [x] 贡献指南链接可见。
+- [x] 安全文档和常见问题文档可见。
 - [ ] Release 页面存在可下载产物。
-- [ ] Issue 模板可用。
-- [ ] Pull Request 模板可用。
-- [ ] Roadmap 链接可见。
-- [ ] 贡献指南链接可见。
 - [ ] Topics 已设置。
-
+- [ ] Social Preview 已上传。

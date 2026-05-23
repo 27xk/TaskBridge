@@ -109,7 +109,12 @@ interface ApiService {
     suspend fun registerDevice(@Body request: DeviceRegisterRequestDto): ApiEnvelope<DeviceDto>
 
     @GET("sync/pull")
-    suspend fun pullSync(@Query("last_sync_time") lastSyncTime: String): ApiEnvelope<SyncPullResponseDto>
+    suspend fun pullSync(
+        @Query("last_sync_time") lastSyncTime: String,
+        @Query("limit") limit: Int? = null,
+        @Query("cursor_updated_at") cursorUpdatedAt: String? = null,
+        @Query("cursor_id") cursorId: Int? = null,
+    ): ApiEnvelope<SyncPullResponseDto>
 
     @POST("sync/push")
     suspend fun pushSync(@Body request: SyncPushRequestDto): ApiEnvelope<SyncPushResponseDto>

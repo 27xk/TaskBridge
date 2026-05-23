@@ -22,10 +22,22 @@ def read_sync_status():
 @router.get("/pull")
 def pull(
     last_sync_time: datetime = Query(...),
+    limit: int = Query(200, ge=1, le=500),
+    cursor_updated_at: datetime | None = Query(default=None),
+    cursor_id: int | None = Query(default=None, ge=1),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return api_success(pull_changes(db, current_user, last_sync_time))
+    return api_success(
+        pull_changes(
+            db,
+            current_user,
+            last_sync_time,
+            limit=limit,
+            cursor_updated_at=cursor_updated_at,
+            cursor_id=cursor_id,
+        ),
+    )
 
 
 @router.post("/push")

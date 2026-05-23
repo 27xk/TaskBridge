@@ -57,7 +57,7 @@ def refresh(payload: RefreshTokenRequest, request: Request, db: Session = Depend
         limit=60,
         window_seconds=300,
     )
-    token_pair = refresh_token_pair(db, payload.refresh_token)
+    token_pair = refresh_token_pair(db, payload.refresh_token, payload.device_id)
     return api_success(token_pair)
 
 

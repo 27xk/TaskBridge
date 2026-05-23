@@ -16,6 +16,7 @@
 - HTTP 增量同步、离线变更上传和同步日志。
 - WebSocket 多设备通知、心跳和断线重连支持。
 - 基础限流和自动化测试。
+- 生产环境配置检查、设备绑定 Refresh Token 和 CSV 导出安全转义。
 
 ## 环境要求
 
@@ -48,6 +49,8 @@ docker compose up --build
 
 `backend/.env.docker.example` 包含 MySQL 容器初始化变量。容器启动时会先执行 `alembic upgrade head`，再启动 Uvicorn。
 
+Docker Compose 中只有 API 端口对宿主机开放。MySQL 和 Redis 默认只在 Docker 内部网络可访问，避免把数据库直接暴露到外部网络。
+
 ## 环境变量
 
 | 变量 | 说明 |
@@ -64,6 +67,13 @@ docker compose up --build
 | `WEBSOCKET_TICKET_EXPIRE_SECONDS` | WebSocket Ticket 有效期 |
 
 `MYSQL_ROOT_PASSWORD`、`MYSQL_DATABASE`、`MYSQL_USER` 和 `MYSQL_PASSWORD` 只用于 Docker Compose 内置 MySQL 初始化。
+
+生产环境建议：
+
+- `ENVIRONMENT=production`
+- `JWT_SECRET` 至少 32 位，使用随机生成值。
+- 不要使用示例里的数据库密码。
+- 不要把 `.env`、keystore、数据库文件或 Redis 数据目录提交到 Git。
 
 ## 数据库迁移
 
@@ -143,6 +153,15 @@ WS   /ws/sync?ticket=<short_lived_ticket>&device_id=<device_id>
 ```
 
 客户端收到通知后，应调用 `GET /api/v1/sync/pull` 拉取增量数据。
+
+## 安全说明
+
+- 所有业务接口按 Bearer Token 鉴权。
+- 任务、父任务、同步日志和设备操作都按 `user_id` 做归属校验。
+- Refresh Token 绑定设备；删除设备会撤销该设备的 Refresh Token。
+- WebSocket 推荐使用短期 Ticket 建连。
+- CSV 导出会转义公式前缀，降低表格软件公式注入风险。
+- 生产环境会拒绝默认 `JWT_SECRET` 和默认数据库密码。
 
 ## 测试
 

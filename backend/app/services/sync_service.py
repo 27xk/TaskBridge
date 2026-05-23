@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.task import Task
 from app.models.sync_log import SyncLog
 from app.models.user import User
-from app.repositories.sync_repository import get_owned_task, list_changed_tasks
+from app.repositories.sync_repository import get_owned_task, list_changed_tasks_page
 from app.schemas.sync import (
     SyncChange,
     SyncChangeResult,
@@ -17,6 +17,7 @@ from app.schemas.sync import (
     SyncPushResponse,
 )
 from app.schemas.task import TaskRead
+from app.services.maintenance_service import cleanup_sync_logs
 from app.utils.time import normalize_to_utc_naive, utc_iso, utc_now
 
 
@@ -86,24 +87,43 @@ def append_sync_log(
     return sync_log
 
 
-def pull_changes(db: Session, current_user: User, last_sync_time: datetime) -> SyncPullResponse:
+def pull_changes(
+    db: Session,
+    current_user: User,
+    last_sync_time: datetime,
+    *,
+    limit: int = 200,
+    cursor_updated_at: datetime | None = None,
+    cursor_id: int | None = None,
+) -> SyncPullResponse:
     since = normalize_to_utc_naive(last_sync_time)
-    changed_tasks = list_changed_tasks(
+    cursor = normalize_to_utc_naive(cursor_updated_at) if cursor_updated_at else None
+    page = list_changed_tasks_page(
         db,
         user_id=current_user.id,
         since=since,
-        is_deleted=False,
+        limit=limit + 1,
+        cursor_updated_at=cursor,
+        cursor_id=cursor_id,
     )
-    deleted_tasks = list_changed_tasks(
-        db,
-        user_id=current_user.id,
-        since=since,
-        is_deleted=True,
-    )
+    has_more = len(page) > limit
+    visible_page = page[:limit]
+    next_cursor_updated_at = None
+    next_cursor_id = None
+    if has_more and visible_page:
+        cursor_task = visible_page[-1]
+        next_cursor_updated_at = utc_iso(cursor_task.updated_at)
+        next_cursor_id = cursor_task.id
+
+    changed_tasks = [task for task in visible_page if not task.is_deleted]
+    deleted_tasks = [task for task in visible_page if task.is_deleted]
     return SyncPullResponse(
         changed_tasks=[TaskRead.model_validate(task) for task in changed_tasks],
         deleted_tasks=[TaskRead.model_validate(task) for task in deleted_tasks],
         server_time=utc_iso(),
+        has_more=has_more,
+        next_cursor_updated_at=next_cursor_updated_at,
+        next_cursor_id=next_cursor_id,
     )
 
 
@@ -116,6 +136,7 @@ def push_changes(
     notifications: list[SyncNotification] = []
     server_now = utc_now()
     server_time = utc_iso(server_now)
+    cleanup_sync_logs(db, user_id=current_user.id, now=server_now)
 
     for change in payload.changes:
         result, notification = _apply_change(
@@ -187,6 +208,24 @@ def _apply_change(
                 version=task.version,
                 message="version conflict",
                 server_task=TaskRead.model_validate(task),
+            ),
+            None,
+        )
+
+    if "parent_task_id" in change.model_fields_set and not _is_owned_parent_task(
+        db,
+        current_user.id,
+        change.parent_task_id,
+        child_task_id=task.id,
+    ):
+        return (
+            SyncChangeResult(
+                local_id=change.local_id,
+                server_id=task.id,
+                action=change.action,
+                status="failed",
+                version=task.version,
+                message="parent task not found",
             ),
             None,
         )
@@ -341,6 +380,18 @@ def _create_from_change(
             None,
         )
 
+    if not _is_owned_parent_task(db, current_user.id, change.parent_task_id):
+        return (
+            SyncChangeResult(
+                local_id=change.local_id,
+                server_id=None,
+                action=change.action,
+                status="failed",
+                message="parent task not found",
+            ),
+            None,
+        )
+
     task = Task(
         user_id=current_user.id,
         title=title,
@@ -400,6 +451,27 @@ def _apply_update_fields(task: Task, change: SyncChange) -> None:
         elif field == "checklist" and value is not None:
             value = _normalize_checklist(value)
         setattr(task, field, value)
+
+
+def _is_owned_parent_task(
+    db: Session,
+    user_id: int,
+    parent_task_id: int | None,
+    *,
+    child_task_id: int | None = None,
+) -> bool:
+    if parent_task_id is None:
+        return True
+    if child_task_id is not None and parent_task_id == child_task_id:
+        return False
+    parent_id = db.scalar(
+        select(Task.id).where(
+            Task.id == parent_task_id,
+            Task.user_id == user_id,
+            Task.is_deleted.is_(False),
+        ),
+    )
+    return parent_id is not None
 
 
 def _clean_title(title: str | None) -> str | None:

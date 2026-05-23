@@ -32,11 +32,13 @@ export const useAuthStore = defineStore("auth", () => {
     loading.value = true;
     error.value = null;
     try {
+      const deviceId = await currentDeviceId();
       const response = await loginApi({
         username_or_email: usernameOrEmail,
         password,
+        device_id: deviceId,
       });
-      await persistTokens(response.access_token, response.refresh_token, response.user.id);
+      authenticated.value = true;
       user.value = response.user;
     } catch (err) {
       error.value = err instanceof Error ? err.message : "登录失败";
@@ -50,8 +52,9 @@ export const useAuthStore = defineStore("auth", () => {
     loading.value = true;
     error.value = null;
     try {
-      const response = await registerApi({ username, email, password });
-      await persistTokens(response.access_token, response.refresh_token, response.user.id);
+      const deviceId = await currentDeviceId();
+      const response = await registerApi({ username, email, password, device_id: deviceId });
+      authenticated.value = true;
       user.value = response.user;
     } catch (err) {
       error.value = err instanceof Error ? err.message : "注册失败";
@@ -61,9 +64,9 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  async function persistTokens(accessToken: string, refreshToken: string, userId?: number): Promise<void> {
-    await bridge().auth.setTokens({ accessToken, refreshToken, userId });
-    authenticated.value = true;
+  async function currentDeviceId(): Promise<string> {
+    const settings = await bridge().app.getSettings();
+    return settings.deviceId;
   }
 
   async function logout(): Promise<void> {

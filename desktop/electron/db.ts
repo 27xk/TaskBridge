@@ -477,6 +477,10 @@ export function upsertTask(task: TaskRecord): TaskRecord {
   return normalizedTask;
 }
 
+export function upsertTasks(tasks: TaskRecord[]): TaskRecord[] {
+  return tasks.map(upsertTask);
+}
+
 export function softDeleteLocalTask(localId: string): void {
   database()
     .prepare(

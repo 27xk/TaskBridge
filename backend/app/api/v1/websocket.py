@@ -14,24 +14,6 @@ from app.utils.time import utc_iso
 router = APIRouter(tags=["websocket"])
 
 
-@router.websocket("/ws/v1/notifications")
-async def notifications(websocket: WebSocket):
-    try:
-        payload = decode_access_token(_access_token_from_authorization_header(websocket))
-        user_id = int(payload["sub"])
-    except (AppException, KeyError, ValueError):
-        await websocket.close(code=4401)
-        return
-
-    device_id = "legacy"
-    await websocket_manager.connect(user_id, device_id, websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        websocket_manager.disconnect(user_id, device_id, websocket)
-
-
 @router.websocket("/ws/sync")
 async def sync_socket(
     websocket: WebSocket,

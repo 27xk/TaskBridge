@@ -7,6 +7,15 @@ class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     email: str = Field(min_length=5, max_length=255)
     password: str = Field(min_length=8, max_length=128)
+    device_id: str = Field(min_length=1, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("invalid username")
+        return normalized
 
     @field_validator("email")
     @classmethod
@@ -20,10 +29,12 @@ class UserCreate(BaseModel):
 class LoginRequest(BaseModel):
     username_or_email: str = Field(min_length=1, max_length=255)
     password: str = Field(min_length=1, max_length=128)
+    device_id: str = Field(min_length=1, max_length=128)
 
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str = Field(min_length=16)
+    device_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class WebSocketTicketRequest(BaseModel):

@@ -3,8 +3,29 @@ import Store from "electron-store";
 import { randomUUID } from "node:crypto";
 import { getSystemTimeZone, normalizeTimeZone } from "../shared/quick-add-parser";
 
-const DEFAULT_BASE_URL = "http://192.168.10.30:8000/api/v1";
-const DEFAULT_WS_URL = "ws://192.168.10.30:8000/ws/sync";
+declare const __TASKBRIDGE_BASE_URL__: string;
+declare const __TASKBRIDGE_WS_URL__: string;
+
+const FALLBACK_BASE_URL = "http://192.168.10.30:8000/api/v1";
+const FALLBACK_WS_URL = "ws://192.168.10.30:8000/ws/sync";
+const DEFAULT_BASE_URL = normalizeEndpointDefault(__TASKBRIDGE_BASE_URL__, FALLBACK_BASE_URL, isHttpUrl);
+const DEFAULT_WS_URL = normalizeEndpointDefault(__TASKBRIDGE_WS_URL__, FALLBACK_WS_URL, isWebSocketUrl);
+const LEGACY_BASE_URLS = new Set([
+  FALLBACK_BASE_URL,
+  `${FALLBACK_BASE_URL}/`,
+  "http://127.0.0.1:8000/api/v1",
+  "http://127.0.0.1:8000/api/v1/",
+  "http://localhost:8000/api/v1",
+  "http://localhost:8000/api/v1/",
+  "http://10.0.2.2:8000/api/v1",
+  "http://10.0.2.2:8000/api/v1/",
+]);
+const LEGACY_WS_URLS = new Set([
+  FALLBACK_WS_URL,
+  "ws://127.0.0.1:8000/ws/sync",
+  "ws://localhost:8000/ws/sync",
+  "ws://10.0.2.2:8000/ws/sync",
+]);
 
 export interface TokenState {
   accessToken: string;
@@ -37,6 +58,9 @@ export interface StoreSchema {
   language: "zh-CN" | "en-US";
   displayTimeZone: string;
   displayTimeZoneByUser?: Record<string, string>;
+  networkSettingsMigrated?: boolean;
+  networkSettingsDefaultBaseUrl?: string;
+  networkSettingsDefaultWsUrl?: string;
   deviceId?: string;
   lastSyncTime: string;
   autoStart: boolean;
@@ -62,6 +86,8 @@ export const settingsStore = new Store<StoreSchema>({
     floatingHeight: 460,
   },
 });
+
+migrateNetworkSettings();
 
 export interface WindowRegistry {
   mainWindow: BrowserWindow | null;
@@ -120,7 +146,11 @@ export function setSetting<Key extends keyof AppSettings>(
   if (value === null) {
     settingsStore.delete(key as keyof StoreSchema);
   } else {
-    settingsStore.set(key as keyof StoreSchema, value as StoreSchema[keyof StoreSchema]);
+    const nextValue =
+      typeof value === "string" && (key === "baseUrl" || key === "wsUrl")
+        ? value.trim()
+        : value;
+    settingsStore.set(key as keyof StoreSchema, nextValue as StoreSchema[keyof StoreSchema]);
   }
   return getSettings();
 }
@@ -166,6 +196,78 @@ function setDisplayTimeZone(timeZoneId: string): void {
 
 function normalizeLanguage(language: unknown): "zh-CN" | "en-US" {
   return language === "en-US" ? "en-US" : "zh-CN";
+}
+
+function migrateNetworkSettings(): void {
+  migrateStringSetting(
+    "baseUrl",
+    DEFAULT_BASE_URL,
+    buildLegacyEndpointSet(LEGACY_BASE_URLS, settingsStore.get("networkSettingsDefaultBaseUrl")),
+    isHttpUrl,
+  );
+  migrateStringSetting(
+    "wsUrl",
+    DEFAULT_WS_URL,
+    buildLegacyEndpointSet(LEGACY_WS_URLS, settingsStore.get("networkSettingsDefaultWsUrl")),
+    isWebSocketUrl,
+  );
+  settingsStore.set("networkSettingsDefaultBaseUrl", DEFAULT_BASE_URL);
+  settingsStore.set("networkSettingsDefaultWsUrl", DEFAULT_WS_URL);
+  settingsStore.delete("networkSettingsMigrated");
+}
+
+function migrateStringSetting(
+  key: "baseUrl" | "wsUrl",
+  fallback: string,
+  legacyValues: Set<string>,
+  isValid: (value: string) => boolean,
+): void {
+  const stored = settingsStore.get(key);
+  const normalized = typeof stored === "string" ? stored.trim() : "";
+  if (!normalized || legacyValues.has(normalized) || !isValid(normalized)) {
+    settingsStore.set(key, fallback);
+    return;
+  }
+  if (normalized !== stored) {
+    settingsStore.set(key, normalized);
+  }
+}
+
+function normalizeEndpointDefault(
+  value: unknown,
+  fallback: string,
+  isValid: (value: string) => boolean,
+): string {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized && isValid(normalized) ? normalized : fallback;
+}
+
+function buildLegacyEndpointSet(legacyValues: Set<string>, previousDefault: unknown): Set<string> {
+  const values = new Set(legacyValues);
+  if (typeof previousDefault !== "string") return values;
+  const normalized = previousDefault.trim();
+  if (!normalized) return values;
+  values.add(normalized);
+  values.add(normalized.replace(/\/+$/, ""));
+  return values;
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isWebSocketUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "ws:" || url.protocol === "wss:";
+  } catch {
+    return false;
+  }
 }
 
 export function getFloatingOpacity(): number {

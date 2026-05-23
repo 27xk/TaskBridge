@@ -21,6 +21,8 @@ $targets = @(
 
 $tmpGradleDirs = Get-ChildItem -LiteralPath $root -Force -Directory -Filter ".tmp-gradle-wrapper-gen-*" -ErrorAction SilentlyContinue |
     ForEach-Object { $_.FullName }
+$pythonCacheDirs = Get-ChildItem -LiteralPath (Join-Path $root "backend") -Force -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.FullName }
 
 if ($All) {
     $targets += "desktop\node_modules"
@@ -43,7 +45,7 @@ function Resolve-SafeTarget {
     return $fullPath
 }
 
-foreach ($target in ($targets + $tmpGradleDirs)) {
+foreach ($target in ($targets + $tmpGradleDirs + $pythonCacheDirs)) {
     $fullPath = Resolve-SafeTarget $target
     if (Test-Path -LiteralPath $fullPath) {
         if ($DryRun) {

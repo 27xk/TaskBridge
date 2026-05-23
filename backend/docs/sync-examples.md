@@ -27,9 +27,19 @@ Authorization: Bearer <access_token>
         "status": "todo",
         "priority": 2,
         "tag": "release",
+        "project": "work",
+        "list_type": "today",
         "due_time": null,
         "remind_time": null,
         "repeat_rule": null,
+        "planned_date": "2026-05-17",
+        "completed_at": null,
+        "snoozed_until": null,
+        "parent_task_id": null,
+        "checklist": [],
+        "is_template": false,
+        "template_name": null,
+        "sort_order": 0,
         "version": 4,
         "is_deleted": false,
         "created_at": "2026-05-17T10:00:00",
@@ -38,12 +48,15 @@ Authorization: Bearer <access_token>
       }
     ],
     "deleted_tasks": [],
-    "server_time": "2026-05-17T12:10:00Z"
+    "server_time": "2026-05-17T12:10:00Z",
+    "has_more": false,
+    "next_cursor_updated_at": null,
+    "next_cursor_id": null
   }
 }
 ```
 
-客户端应保存 `server_time`，作为下一次拉取的 `last_sync_time`。
+客户端应保存 `server_time`，作为下一次拉取的 `last_sync_time`。如果 `has_more` 为 `true`，客户端需要保持同一个 `last_sync_time`，携带 `next_cursor_updated_at` 和 `next_cursor_id` 继续拉取下一页；只有最后一页合并成功后才保存新的 `server_time`。
 
 ## 上传离线变更
 
@@ -68,9 +81,19 @@ Content-Type: application/json
       "status": "todo",
       "priority": 1,
       "tag": "home",
+      "project": "life",
+      "list_type": "today",
       "due_time": null,
       "remind_time": null,
       "repeat_rule": null,
+      "planned_date": "2026-05-17",
+      "completed_at": null,
+      "snoozed_until": null,
+      "parent_task_id": null,
+      "checklist": [],
+      "is_template": false,
+      "template_name": null,
+      "sort_order": 0,
       "version": 0,
       "local_updated_at": "2026-05-17T12:00:00Z"
     }
@@ -101,9 +124,19 @@ Content-Type: application/json
           "status": "todo",
           "priority": 1,
           "tag": "home",
+          "project": "life",
+          "list_type": "today",
           "due_time": null,
           "remind_time": null,
           "repeat_rule": null,
+          "planned_date": "2026-05-17",
+          "completed_at": null,
+          "snoozed_until": null,
+          "parent_task_id": null,
+          "checklist": [],
+          "is_template": false,
+          "template_name": null,
+          "sort_order": 0,
           "version": 1,
           "is_deleted": false,
           "created_at": "2026-05-17T12:10:00",
@@ -135,8 +168,30 @@ Content-Type: application/json
   "task": null,
   "server_task": {
     "id": 123,
+    "user_id": 1,
+    "title": "购买牛奶和面包",
+    "content": "两瓶牛奶，一袋吐司",
+    "status": "todo",
+    "priority": 1,
+    "tag": "home",
+    "project": "life",
+    "list_type": "today",
+    "due_time": null,
+    "remind_time": null,
+    "repeat_rule": null,
+    "planned_date": "2026-05-17",
+    "completed_at": null,
+    "snoozed_until": null,
+    "parent_task_id": null,
+    "checklist": [],
+    "is_template": false,
+    "template_name": null,
+    "sort_order": 0,
     "version": 5,
-    "is_deleted": false
+    "is_deleted": false,
+    "created_at": "2026-05-17T12:10:00",
+    "updated_at": "2026-05-17T12:30:00",
+    "deleted_at": null
   }
 }
 ```
@@ -167,6 +222,8 @@ Content-Type: application/json
 ```text
 ws://127.0.0.1:8000/ws/sync?ticket=<short_lived_ticket>&device_id=windows-001
 ```
+
+服务端会校验 Ticket 对应用户和 `device_id` 是否匹配。设备未注册时连接会被关闭。
 
 ## 心跳
 

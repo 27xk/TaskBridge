@@ -19,6 +19,7 @@ TaskBridge 由后端服务、Android App 和 Windows 桌面端组成。系统采
 5. 同步冲突通过任务 `version` 做乐观锁检测。
 6. Android 后台同步交给 WorkManager，不长期保活 WebSocket。
 7. Windows 桌面端可常驻 WebSocket，并在断线后自动重连。
+8. 客户端渲染层不直接持有数据库、Token 和系统能力，敏感操作必须经过受控桥接层。
 
 ## 模块图
 
@@ -117,3 +118,12 @@ Android 和 Windows 都需要维护：
 - **Alembic：** 管理数据库迁移。
 - **Docker Compose：** 用于本地联调后端、MySQL 和 Redis。
 - **GitHub Actions：** 用于 CI、Release 和 GHCR 镜像发布。
+
+## 安全边界
+
+- 后端所有业务数据按 `user_id` 过滤，任务父子关系也必须校验归属。
+- Refresh Token 绑定设备；删除设备会撤销该设备登录态。
+- WebSocket 使用短期 Ticket，连接后仍校验 `device_id`。
+- Android Release 必须使用正式签名，缺少签名配置时构建失败。
+- Windows Electron renderer 启用 sandbox，IPC 会校验调用方窗口。
+- Docker release 部署默认只暴露 API，MySQL 和 Redis 保持在 Compose 内部网络。

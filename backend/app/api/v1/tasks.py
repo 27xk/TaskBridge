@@ -1,6 +1,7 @@
 import csv
 import io
 from datetime import date, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
@@ -54,6 +55,8 @@ from app.services.task_service import (
 )
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n")
 
 
 @router.get("")
@@ -125,13 +128,29 @@ def export(
         ]
         writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(tasks)
+        writer.writerows(_escape_csv_rows(tasks))
         return Response(
             content=buffer.getvalue(),
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": 'attachment; filename="taskbridge-tasks.csv"'},
         )
     return api_success({"format": "json", "tasks": tasks})
+
+
+def _escape_csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {key: _escape_csv_cell(value) for key, value in row.items()}
+        for row in rows
+    ]
+
+
+def _escape_csv_cell(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    stripped = value.lstrip()
+    if stripped.startswith(CSV_FORMULA_PREFIXES):
+        return f"'{value}"
+    return value
 
 
 @router.post("")

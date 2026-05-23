@@ -27,6 +27,11 @@ private const val ACTIVE_TASK_LIMIT = 200
 private const val TODAY_TASK_LIMIT = 120
 private const val SEARCH_TASK_LIMIT = 100
 private const val BACKUP_EXPORT_LIMIT = 5_000
+private val ACCEPTED_BACKUP_FORMATS = setOf(
+    "taskbridge.local.backup.v1",
+    "taskbridge.android.backup.v1",
+    "taskbridge.desktop.backup.v1",
+)
 
 private data class LocalChecklistItem(
     val id: String,
@@ -119,45 +124,48 @@ class TaskRepository(
     suspend fun importBackupJson(raw: String): Int {
         if (raw.length > MAX_IMPORT_BYTES) return 0
         val root = runCatching { JsonParser.parseString(raw).asJsonObject }.getOrNull() ?: return 0
-        val tasks = root.getAsJsonArray("tasks") ?: return 0
+        if (root.stringOrNull("format") !in ACCEPTED_BACKUP_FORMATS) return 0
+        val tasks = root.get("tasks")?.takeIf { it.isJsonArray }?.asJsonArray ?: return 0
         var imported = 0
         tasks.forEach { element ->
             if (imported >= MAX_IMPORT_TASKS) return@forEach
-            val item = element.asJsonObjectOrNull() ?: return@forEach
+            val item = runCatching { element.asJsonObjectOrNull() }.getOrNull() ?: return@forEach
             val title = item.stringOrNull("title")?.trim().orEmpty()
             if (title.isBlank()) return@forEach
             val now = Instant.now().toString()
-            val task = TaskEntity(
-                localId = "import-${UUID.randomUUID()}",
-                serverId = null,
-                title = title,
-                content = item.stringOrNull("content"),
-                status = item.stringOrNull("status")?.takeIf { it == TaskStatus.Completed.wireName }
-                    ?: TaskStatus.Todo.wireName,
-                priority = item.intOrNull("priority")?.coerceIn(0, 5) ?: 0,
-                tag = item.stringOrNull("tag"),
-                project = item.stringOrNull("project"),
-                listType = item.stringOrNull("listType") ?: item.stringOrNull("list_type") ?: "inbox",
-                dueTime = item.stringOrNull("dueTime") ?: item.stringOrNull("due_time"),
-                remindTime = item.stringOrNull("remindTime") ?: item.stringOrNull("remind_time"),
-                repeatRule = item.stringOrNull("repeatRule") ?: item.stringOrNull("repeat_rule"),
-                plannedDate = item.stringOrNull("plannedDate") ?: item.stringOrNull("planned_date"),
-                completedAt = item.stringOrNull("completedAt") ?: item.stringOrNull("completed_at"),
-                snoozedUntil = item.stringOrNull("snoozedUntil") ?: item.stringOrNull("snoozed_until"),
-                parentServerId = null,
-                checklistJson = item.get("checklistJson")?.takeIf { !it.isJsonNull }?.asString
-                    ?: item.get("checklist")?.toString()
-                    ?: "[]",
-                isTemplate = item.booleanOrNull("isTemplate") ?: item.booleanOrNull("is_template") ?: false,
-                templateName = item.stringOrNull("templateName") ?: item.stringOrNull("template_name"),
-                sortOrder = item.intOrNull("sortOrder") ?: item.intOrNull("sort_order") ?: 0,
-                version = 0,
-                isDeleted = false,
-                syncStatus = SyncStatus.PendingCreate.wireName,
-                createdAt = now,
-                updatedAt = now,
-                lastSyncAt = null,
-            )
+            val task = runCatching {
+                TaskEntity(
+                    localId = "import-${UUID.randomUUID()}",
+                    serverId = null,
+                    title = title,
+                    content = item.stringOrNull("content"),
+                    status = item.stringOrNull("status")?.takeIf { it == TaskStatus.Completed.wireName }
+                        ?: TaskStatus.Todo.wireName,
+                    priority = item.intOrNull("priority")?.coerceIn(0, 5) ?: 0,
+                    tag = item.stringOrNull("tag"),
+                    project = item.stringOrNull("project"),
+                    listType = item.stringOrNull("listType") ?: item.stringOrNull("list_type") ?: "inbox",
+                    dueTime = item.stringOrNull("dueTime") ?: item.stringOrNull("due_time"),
+                    remindTime = item.stringOrNull("remindTime") ?: item.stringOrNull("remind_time"),
+                    repeatRule = item.stringOrNull("repeatRule") ?: item.stringOrNull("repeat_rule"),
+                    plannedDate = item.stringOrNull("plannedDate") ?: item.stringOrNull("planned_date"),
+                    completedAt = item.stringOrNull("completedAt") ?: item.stringOrNull("completed_at"),
+                    snoozedUntil = item.stringOrNull("snoozedUntil") ?: item.stringOrNull("snoozed_until"),
+                    parentServerId = null,
+                    checklistJson = item.stringOrNull("checklistJson")
+                        ?: item.get("checklist")?.takeIf { it.isJsonArray }?.toString()
+                        ?: "[]",
+                    isTemplate = item.booleanOrNull("isTemplate") ?: item.booleanOrNull("is_template") ?: false,
+                    templateName = item.stringOrNull("templateName") ?: item.stringOrNull("template_name"),
+                    sortOrder = item.intOrNull("sortOrder") ?: item.intOrNull("sort_order") ?: 0,
+                    version = 0,
+                    isDeleted = false,
+                    syncStatus = SyncStatus.PendingCreate.wireName,
+                    createdAt = now,
+                    updatedAt = now,
+                    lastSyncAt = null,
+                )
+            }.getOrNull() ?: return@forEach
             taskDao.upsert(task)
             replaceQueue(task, "create")
             imported += 1

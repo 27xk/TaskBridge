@@ -30,6 +30,10 @@ android {
     val releaseKeystorePassword = taskBridgeProperty("ANDROID_KEYSTORE_PASSWORD", System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "")
     val releaseKeyAlias = taskBridgeProperty("ANDROID_KEY_ALIAS", System.getenv("ANDROID_KEY_ALIAS") ?: "")
     val releaseKeyPassword = taskBridgeProperty("ANDROID_KEY_PASSWORD", System.getenv("ANDROID_KEY_PASSWORD") ?: "")
+    val allowUnsignedRelease = taskBridgeProperty(
+        "TASKBRIDGE_ALLOW_UNSIGNED_RELEASE",
+        System.getenv("TASKBRIDGE_ALLOW_UNSIGNED_RELEASE") ?: "",
+    ).equals("true", ignoreCase = true)
     val hasReleaseSigning = listOf(
         releaseKeystorePath,
         releaseKeystorePassword,
@@ -100,16 +104,29 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = if (hasReleaseSigning) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             }
             manifestPlaceholders["allowBackup"] = false
             manifestPlaceholders["usesCleartextTraffic"] = taskBridgeUsesCleartext
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
+            )
+        }
+    }
+
+    gradle.taskGraph.whenReady {
+        val requiresSignedRelease = allTasks.any {
+            it.name == "assembleRelease" ||
+                it.name == "bundleRelease" ||
+                it.name == "packageRelease"
+        }
+        if (requiresSignedRelease && !hasReleaseSigning && !allowUnsignedRelease) {
+            throw org.gradle.api.GradleException(
+                "Release signing is required. Configure ANDROID_KEYSTORE_PATH, " +
+                    "ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD. " +
+                    "For local unsigned release experiments, set TASKBRIDGE_ALLOW_UNSIGNED_RELEASE=true.",
             )
         }
     }

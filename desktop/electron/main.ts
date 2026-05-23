@@ -32,6 +32,7 @@ function createMainWindow(showOnReady = true): BrowserWindow {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
   mainWindow.setMenuBarVisibility(false);

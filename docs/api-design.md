@@ -37,8 +37,30 @@ POST /api/v1/auth/ws-ticket
 说明：
 
 - Access Token 使用 JWT。
-- Refresh Token 保存在服务端，支持按设备撤销登录态。
+- Refresh Token 保存在服务端，并绑定 `device_id`。
+- 删除设备会撤销该设备关联的 Refresh Token。
+- `POST /api/v1/auth/refresh` 建议传入当前设备的 `device_id`，旧 Token 首次刷新时会补齐设备绑定。
 - WebSocket 建议使用短期 Ticket 建连，避免在 URL 中暴露长期 Access Token。
+
+注册请求示例：
+
+```json
+{
+  "username": "alice",
+  "email": "alice@example.com",
+  "password": "password123",
+  "device_id": "android-001"
+}
+```
+
+刷新 Token 请求示例：
+
+```json
+{
+  "refresh_token": "<refresh_token>",
+  "device_id": "android-001"
+}
+```
 
 ## 设备接口
 
@@ -85,7 +107,8 @@ POST /api/v1/tasks/{task_id}/resolve-conflict
 
 ```text
 GET    /api/v1/tasks/meta
-GET    /api/v1/tasks/export
+GET    /api/v1/tasks/export?format=json
+GET    /api/v1/tasks/export?format=csv
 POST   /api/v1/tasks/import
 POST   /api/v1/tasks/batch
 POST   /api/v1/tasks/projects/rename
@@ -111,6 +134,8 @@ DELETE /api/v1/tasks/{task_id}/purge
 
 任务删除默认使用软删除，确保离线设备重新上线后也能收到删除变更。
 
+CSV 导出会对 `=`, `+`, `-`, `@` 等表格公式前缀做转义，降低用 Excel 等表格软件打开时的公式注入风险。
+
 ## 同步接口
 
 ```text
@@ -121,7 +146,7 @@ GET  /api/v1/sync/status
 
 说明：
 
-- `pull` 根据 `last_sync_time` 返回之后发生变化的任务。
+- `pull` 根据 `last_sync_time` 返回之后发生变化的任务，并通过 `limit`、`cursor_updated_at`、`cursor_id` 支持分页拉取。客户端应在 `has_more=false` 后再保存新的 `server_time`。
 - `push` 接收客户端离线期间产生的变更。
 - 每次成功修改任务，服务端更新 `updated_at` 并递增 `version`。
 - 冲突时返回服务端任务快照，客户端本地状态标记为 `conflict`。
@@ -136,6 +161,8 @@ WS   /ws/sync?ticket=<short_lived_ticket>&device_id=<device_id>
 ```
 
 WebSocket 只发送通知，不同步完整任务内容。客户端收到 `task_changed` 后，应主动调用 `GET /api/v1/sync/pull`。
+
+连接时服务端会同时校验 Ticket 或 Access Token，以及 `device_id` 是否属于当前用户。
 
 通知示例：
 

@@ -46,6 +46,8 @@ onMounted(async () => {
 });
 
 async function save(): Promise<void> {
+  Object.assign(settings, await bridge().app.setSetting("baseUrl", settings.baseUrl.trim()));
+  Object.assign(settings, await bridge().app.setSetting("wsUrl", settings.wsUrl.trim()));
   Object.assign(settings, await bridge().app.setSetting("language", settings.language));
   await settingsStore.setLanguage(settings.language);
   Object.assign(settings, await bridge().app.setSetting("displayTimeZone", settings.displayTimeZone));
@@ -125,6 +127,22 @@ function updateLanguage(event: Event): void {
           <label class="checkbox-line">
             <input v-model="settings.autoStart" type="checkbox" />
             <span>{{ settingsStore.t("settings.autoStart") }}</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>{{ settingsStore.t("settings.connection") }}</h2>
+        <div class="settings-grid">
+          <label>
+            <span>{{ settingsStore.t("settings.baseUrl") }}</span>
+            <input v-model.trim="settings.baseUrl" type="url" placeholder="http://192.168.10.30:8000/api/v1" />
+            <small>{{ settingsStore.t("settings.baseUrlHint") }}</small>
+          </label>
+          <label>
+            <span>{{ settingsStore.t("settings.wsUrl") }}</span>
+            <input v-model.trim="settings.wsUrl" type="text" placeholder="ws://192.168.10.30:8000/ws/sync" />
+            <small>{{ settingsStore.t("settings.wsUrlHint") }}</small>
           </label>
         </div>
       </section>

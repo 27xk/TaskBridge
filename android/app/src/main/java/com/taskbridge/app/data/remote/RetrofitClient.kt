@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder
 import com.taskbridge.app.BuildConfig
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.remote.dto.RefreshTokenRequestDto
+import com.taskbridge.app.sync.DeviceIdProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.Authenticator
@@ -34,7 +35,13 @@ object RetrofitClient {
         val client = baseHttpClient()
             .newBuilder()
             .addInterceptor(AuthInterceptor(tokenDataStore))
-            .authenticator(RefreshTokenAuthenticator(tokenDataStore, refreshApi))
+            .authenticator(
+                RefreshTokenAuthenticator(
+                    tokenDataStore,
+                    refreshApi,
+                    DeviceIdProvider(context.applicationContext),
+                ),
+            )
             .build()
 
         return Retrofit.Builder()
@@ -73,13 +80,18 @@ private class AuthInterceptor(
 private class RefreshTokenAuthenticator(
     private val tokenDataStore: TokenDataStore,
     private val refreshApi: TokenRefreshApi,
+    private val deviceIdProvider: DeviceIdProvider,
 ) : Authenticator {
     override fun authenticate(route: Route?, response: Response): Request? {
         if (responseCount(response) >= 2) return null
         val refreshToken = runBlocking { tokenDataStore.refreshToken.first() } ?: return null
 
         val tokenPair = try {
-            refreshApi.refresh(RefreshTokenRequestDto(refreshToken)).execute().body()?.data
+            refreshApi
+                .refresh(RefreshTokenRequestDto(refreshToken, deviceIdProvider.getDeviceId()))
+                .execute()
+                .body()
+                ?.data
         } catch (_: Exception) {
             null
         } ?: return null
