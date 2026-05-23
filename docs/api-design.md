@@ -99,7 +99,7 @@ POST /api/v1/tasks/{task_id}/plan
 
 ```text
 POST /api/v1/tasks/{task_id}/next-occurrence
-GET  /api/v1/tasks/{task_id}/history
+GET  /api/v1/tasks/{task_id}/history?offset=0&limit=200
 POST /api/v1/tasks/{task_id}/resolve-conflict
 ```
 
@@ -113,7 +113,7 @@ POST   /api/v1/tasks/import
 POST   /api/v1/tasks/batch
 POST   /api/v1/tasks/projects/rename
 POST   /api/v1/tasks/tags/rename
-GET    /api/v1/tasks/trash
+GET    /api/v1/tasks/trash?offset=0&limit=100
 DELETE /api/v1/tasks/{task_id}/purge
 ```
 

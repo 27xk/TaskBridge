@@ -1,6 +1,7 @@
 package com.taskbridge.app.data.repository
 
 import com.taskbridge.app.data.datastore.TokenDataStore
+import com.taskbridge.app.data.local.AppDatabase
 import com.taskbridge.app.data.local.SyncQueueDao
 import com.taskbridge.app.data.local.TaskDao
 import com.taskbridge.app.data.remote.ApiService
@@ -8,11 +9,13 @@ import com.taskbridge.app.data.remote.dto.DeviceRegisterRequestDto
 import com.taskbridge.app.data.remote.dto.SyncPushRequestDto
 import com.taskbridge.app.data.remote.dto.WebSocketTicketRequestDto
 import com.taskbridge.app.domain.model.SyncStatus
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.first
 import java.time.Instant
 
 class SyncRepository(
     private val apiService: ApiService,
+    private val database: AppDatabase,
     private val taskDao: TaskDao,
     private val syncQueueDao: SyncQueueDao,
     private val tokenDataStore: TokenDataStore,
@@ -64,16 +67,25 @@ class SyncRepository(
                 cursorId = cursorId,
             ).data ?: return
 
-            (data.changedTasks + data.deletedTasks).forEach { remoteTask ->
-                val existing = taskDao.getByServerId(remoteTask.id)
-                val localId = existing?.localId ?: "server-${remoteTask.id}"
-                taskDao.upsert(
-                    remoteTask.toEntity(
-                        localId = localId,
-                        syncStatus = SyncStatus.Synced,
-                        lastSyncAt = data.serverTime,
-                    ),
+            val remoteTasks = data.changedTasks + data.deletedTasks
+            val existingByServerId = if (remoteTasks.isEmpty()) {
+                emptyMap()
+            } else {
+                taskDao.getByServerIds(remoteTasks.map { it.id })
+                    .mapNotNull { entity -> entity.serverId?.let { serverId -> serverId to entity } }
+                    .toMap()
+            }
+            val entities = remoteTasks.map { remoteTask ->
+                remoteTask.toEntity(
+                    localId = existingByServerId[remoteTask.id]?.localId ?: "server-${remoteTask.id}",
+                    syncStatus = SyncStatus.Synced,
+                    lastSyncAt = data.serverTime,
                 )
+            }
+            if (entities.isNotEmpty()) {
+                database.withTransaction {
+                    taskDao.upsertAll(entities)
+                }
             }
 
             if (!data.hasMore) {
@@ -102,47 +114,49 @@ class SyncRepository(
             ).data ?: return
 
             val pendingByLocalId = pending.associateBy { it.localId }
-            data.results.forEach { result ->
-                val queued = pendingByLocalId[result.localId] ?: return@forEach
-                when (result.status) {
-                    "applied" -> {
-                        result.task?.let { task ->
-                            taskDao.upsert(
-                                task.toEntity(
-                                    localId = result.localId,
-                                    syncStatus = SyncStatus.Synced,
-                                    lastSyncAt = data.serverTime,
-                                ),
+            database.withTransaction {
+                data.results.forEach { result ->
+                    val queued = pendingByLocalId[result.localId] ?: return@forEach
+                    when (result.status) {
+                        "applied" -> {
+                            result.task?.let { task ->
+                                taskDao.upsert(
+                                    task.toEntity(
+                                        localId = result.localId,
+                                        syncStatus = SyncStatus.Synced,
+                                        lastSyncAt = data.serverTime,
+                                    ),
+                                )
+                            } ?: taskDao.markSynced(
+                                localId = result.localId,
+                                serverId = result.serverId,
+                                version = result.version ?: queued.version,
+                                updatedAt = Instant.now().toString(),
+                                syncedAt = data.serverTime,
                             )
-                        } ?: taskDao.markSynced(
-                            localId = result.localId,
-                            serverId = result.serverId,
-                            version = result.version ?: queued.version,
-                            updatedAt = Instant.now().toString(),
-                            syncedAt = data.serverTime,
-                        )
-                        syncQueueDao.delete(queued)
-                    }
+                            syncQueueDao.deleteById(queued.id)
+                        }
 
-                    "conflict" -> {
-                        result.serverTask?.let { task ->
-                            taskDao.upsert(
-                                task.toEntity(
-                                    localId = result.localId,
-                                    syncStatus = SyncStatus.Conflict,
-                                    lastSyncAt = data.serverTime,
-                                ),
-                            )
-                        } ?: taskDao.updateSyncStatus(result.localId, SyncStatus.Conflict.wireName)
-                        syncQueueDao.delete(queued)
-                    }
+                        "conflict" -> {
+                            result.serverTask?.let { task ->
+                                taskDao.upsert(
+                                    task.toEntity(
+                                        localId = result.localId,
+                                        syncStatus = SyncStatus.Conflict,
+                                        lastSyncAt = data.serverTime,
+                                    ),
+                                )
+                            } ?: taskDao.updateSyncStatus(result.localId, SyncStatus.Conflict.wireName)
+                            syncQueueDao.deleteById(queued.id)
+                        }
 
-                    "failed" -> {
-                        taskDao.updateSyncStatus(result.localId, SyncStatus.Conflict.wireName)
-                        syncQueueDao.delete(queued)
-                    }
+                        "failed" -> {
+                            taskDao.updateSyncStatus(result.localId, SyncStatus.Conflict.wireName)
+                            syncQueueDao.deleteById(queued.id)
+                        }
 
-                    else -> syncQueueDao.incrementAttempt(queued.id)
+                        else -> syncQueueDao.incrementAttempt(queued.id)
+                    }
                 }
             }
 

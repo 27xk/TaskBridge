@@ -21,9 +21,10 @@ class AppContainer(context: Context) {
     private val deviceIdProvider = DeviceIdProvider(appContext)
 
     val authRepository = AuthRepository(apiService, tokenDataStore, deviceIdProvider)
-    val taskRepository = TaskRepository(database.taskDao(), database.syncQueueDao())
+    val taskRepository = TaskRepository(database, database.taskDao(), database.syncQueueDao())
     val syncRepository = SyncRepository(
         apiService = apiService,
+        database = database,
         taskDao = database.taskDao(),
         syncQueueDao = database.syncQueueDao(),
         tokenDataStore = tokenDataStore,

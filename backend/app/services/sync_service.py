@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.task import Task
 from app.models.sync_log import SyncLog
 from app.models.user import User
-from app.repositories.sync_repository import get_owned_task, list_changed_tasks_page
+from app.repositories.sync_repository import list_changed_tasks_page
 from app.schemas.sync import (
     SyncChange,
     SyncChangeResult,
@@ -17,7 +18,6 @@ from app.schemas.sync import (
     SyncPushResponse,
 )
 from app.schemas.task import TaskRead
-from app.services.maintenance_service import cleanup_sync_logs
 from app.utils.time import normalize_to_utc_naive, utc_iso, utc_now
 
 
@@ -54,6 +54,14 @@ NOTIFICATION_ACTIONS = {
     "complete": "completed",
     "restore": "restored",
 }
+
+
+@dataclass
+class SyncPushContext:
+    applied_logs: list[SyncLog]
+    tasks_by_id: dict[int, Task]
+    owned_parent_ids: set[int]
+    repeat_child_parent_ids: set[int]
 
 
 def append_sync_log(
@@ -136,7 +144,7 @@ def push_changes(
     notifications: list[SyncNotification] = []
     server_now = utc_now()
     server_time = utc_iso(server_now)
-    cleanup_sync_logs(db, user_id=current_user.id, now=server_now)
+    context = _prepare_push_context(db, current_user.id, payload.device_id, payload.changes)
 
     for change in payload.changes:
         result, notification = _apply_change(
@@ -145,6 +153,7 @@ def push_changes(
             payload.device_id,
             change,
             server_now,
+            context,
         )
         results.append(result)
         if notification is not None:
@@ -154,19 +163,98 @@ def push_changes(
     return SyncPushResponse(results=results, server_time=server_time), notifications
 
 
+def _prepare_push_context(
+    db: Session,
+    user_id: int,
+    device_id: str,
+    changes: list[SyncChange],
+) -> SyncPushContext:
+    applied_logs = _load_applied_logs(db, user_id, device_id, changes)
+    task_ids = {change.server_id for change in changes if change.server_id is not None}
+    task_ids.update(log.task_id for log in applied_logs if log.task_id is not None)
+    task_ids.update(change.parent_task_id for change in changes if change.parent_task_id is not None)
+
+    tasks_by_id: dict[int, Task] = {}
+    if task_ids:
+        tasks = db.scalars(
+            select(Task).where(
+                Task.user_id == user_id,
+                Task.id.in_(task_ids),
+            ),
+        )
+        tasks_by_id = {task.id: task for task in tasks}
+
+    repeat_parent_ids = {
+        change.server_id
+        for change in changes
+        if change.action == "complete" and change.server_id is not None
+    }
+    repeat_child_parent_ids: set[int] = set()
+    if repeat_parent_ids:
+        repeat_child_parent_ids = set(
+            db.scalars(
+                select(Task.parent_task_id).where(
+                    Task.user_id == user_id,
+                    Task.parent_task_id.in_(repeat_parent_ids),
+                    Task.is_deleted.is_(False),
+                ),
+            ),
+        )
+
+    owned_parent_ids = {
+        task.id
+        for task in tasks_by_id.values()
+        if not task.is_deleted
+    }
+    return SyncPushContext(
+        applied_logs=applied_logs,
+        tasks_by_id=tasks_by_id,
+        owned_parent_ids=owned_parent_ids,
+        repeat_child_parent_ids=repeat_child_parent_ids,
+    )
+
+
+def _load_applied_logs(
+    db: Session,
+    user_id: int,
+    device_id: str,
+    changes: list[SyncChange],
+) -> list[SyncLog]:
+    if not changes:
+        return []
+    local_ids = {change.local_id for change in changes}
+    actions = {change.action for change in changes}
+    client_versions = {change.version for change in changes}
+    return list(
+        db.scalars(
+            select(SyncLog)
+            .where(
+                SyncLog.user_id == user_id,
+                SyncLog.device_id == device_id,
+                SyncLog.local_id.in_(local_ids),
+                SyncLog.action.in_(actions),
+                SyncLog.result == "applied",
+                SyncLog.client_version.in_(client_versions),
+            )
+            .order_by(SyncLog.id.desc()),
+        ),
+    )
+
+
 def _apply_change(
     db: Session,
     current_user: User,
     device_id: str,
     change: SyncChange,
     server_now: datetime,
+    context: SyncPushContext,
 ) -> tuple[SyncChangeResult, SyncNotification | None]:
-    existing_result = _result_from_existing_applied_change(db, current_user, device_id, change)
+    existing_result = _result_from_existing_applied_change(context, change)
     if existing_result is not None:
         return existing_result, None
 
     if change.action == "create":
-        return _create_from_change(db, current_user, device_id, change, server_now)
+        return _create_from_change(db, current_user, device_id, change, server_now, context)
 
     if change.server_id is None:
         return (
@@ -180,12 +268,7 @@ def _apply_change(
             None,
         )
 
-    task = get_owned_task(
-        db,
-        user_id=current_user.id,
-        task_id=change.server_id,
-        include_deleted=True,
-    )
+    task = context.tasks_by_id.get(change.server_id)
     if task is None:
         return (
             SyncChangeResult(
@@ -212,12 +295,7 @@ def _apply_change(
             None,
         )
 
-    if "parent_task_id" in change.model_fields_set and not _is_owned_parent_task(
-        db,
-        current_user.id,
-        change.parent_task_id,
-        child_task_id=task.id,
-    ):
+    if "parent_task_id" in change.model_fields_set and not _is_owned_parent_task(context, change.parent_task_id, child_task_id=task.id):
         return (
             SyncChangeResult(
                 local_id=change.local_id,
@@ -248,9 +326,9 @@ def _apply_change(
     task.updated_at = server_now
     db.add(task)
     db.flush()
-    _append_success_log(db, current_user.id, device_id, change, task)
+    _append_success_log(db, current_user.id, device_id, change, task, context)
     if change.action == "complete":
-        _create_repeat_from_sync(db, current_user.id, task)
+        _create_repeat_from_sync(db, current_user.id, task, context)
     task_read = TaskRead.model_validate(task)
     return (
         SyncChangeResult(
@@ -266,40 +344,29 @@ def _apply_change(
 
 
 def _result_from_existing_applied_change(
-    db: Session,
-    current_user: User,
-    device_id: str,
+    context: SyncPushContext,
     change: SyncChange,
 ) -> SyncChangeResult | None:
-    conditions = [
-        SyncLog.user_id == current_user.id,
-        SyncLog.device_id == device_id,
-        SyncLog.local_id == change.local_id,
-        SyncLog.action == change.action,
-        SyncLog.result == "applied",
-        SyncLog.client_version == change.version,
-    ]
-    if change.server_id is not None:
-        conditions.append(SyncLog.server_id == change.server_id)
-
-    sync_log = db.scalar(
-        select(SyncLog)
-        .where(*conditions)
-        .order_by(SyncLog.id.desc())
-        .limit(1),
-    )
-    if sync_log is None or sync_log.task_id is None:
-        return None
-    if not _change_matches_logged_payload(change, sync_log.payload):
-        return None
-
-    task = get_owned_task(
-        db,
-        user_id=current_user.id,
-        task_id=sync_log.task_id,
-        include_deleted=True,
-    )
-    if task is None:
+    sync_log = None
+    task = None
+    for candidate in context.applied_logs:
+        if (
+            candidate.local_id != change.local_id
+            or candidate.action != change.action
+            or candidate.client_version != change.version
+            or candidate.task_id is None
+        ):
+            continue
+        if change.server_id is not None and candidate.server_id != change.server_id:
+            continue
+        if not _change_matches_logged_payload(change, candidate.payload):
+            continue
+        task = context.tasks_by_id.get(candidate.task_id)
+        if task is None:
+            continue
+        sync_log = candidate
+        break
+    if sync_log is None or task is None:
         return None
 
     return SyncChangeResult(
@@ -332,23 +399,18 @@ def _change_matches_logged_payload(change: SyncChange, payload: dict[str, Any] |
     return True
 
 
-def _create_repeat_from_sync(db: Session, user_id: int, task: Task) -> Task | None:
+def _create_repeat_from_sync(db: Session, user_id: int, task: Task, context: SyncPushContext) -> Task | None:
     if not task.repeat_rule:
         return None
-    existing_id = db.scalar(
-        select(Task.id).where(
-            Task.user_id == user_id,
-            Task.parent_task_id == task.id,
-            Task.is_deleted.is_(False),
-        ),
-    )
-    if existing_id is not None:
+    if task.id in context.repeat_child_parent_ids:
         return None
     next_task = shift_repeat_task(task)
     if next_task is None:
         return None
     db.add(next_task)
     db.flush()
+    context.tasks_by_id[next_task.id] = next_task
+    context.repeat_child_parent_ids.add(task.id)
     append_sync_log(
         db,
         user_id=user_id,
@@ -366,6 +428,7 @@ def _create_from_change(
     device_id: str,
     change: SyncChange,
     server_now: datetime,
+    context: SyncPushContext,
 ) -> tuple[SyncChangeResult, SyncNotification | None]:
     title = _clean_title(change.title)
     if title is None:
@@ -380,7 +443,7 @@ def _create_from_change(
             None,
         )
 
-    if not _is_owned_parent_task(db, current_user.id, change.parent_task_id):
+    if not _is_owned_parent_task(context, change.parent_task_id):
         return (
             SyncChangeResult(
                 local_id=change.local_id,
@@ -419,7 +482,8 @@ def _create_from_change(
     )
     db.add(task)
     db.flush()
-    _append_success_log(db, current_user.id, device_id, change, task)
+    context.tasks_by_id[task.id] = task
+    _append_success_log(db, current_user.id, device_id, change, task, context)
     task_read = TaskRead.model_validate(task)
     return (
         SyncChangeResult(
@@ -454,8 +518,7 @@ def _apply_update_fields(task: Task, change: SyncChange) -> None:
 
 
 def _is_owned_parent_task(
-    db: Session,
-    user_id: int,
+    context: SyncPushContext,
     parent_task_id: int | None,
     *,
     child_task_id: int | None = None,
@@ -464,14 +527,7 @@ def _is_owned_parent_task(
         return True
     if child_task_id is not None and parent_task_id == child_task_id:
         return False
-    parent_id = db.scalar(
-        select(Task.id).where(
-            Task.id == parent_task_id,
-            Task.user_id == user_id,
-            Task.is_deleted.is_(False),
-        ),
-    )
-    return parent_id is not None
+    return parent_task_id in context.owned_parent_ids
 
 
 def _clean_title(title: str | None) -> str | None:
@@ -487,8 +543,9 @@ def _append_success_log(
     device_id: str,
     change: SyncChange,
     task: Task,
+    context: SyncPushContext,
 ) -> None:
-    append_sync_log(
+    sync_log = append_sync_log(
         db,
         user_id=user_id,
         task_id=task.id,
@@ -501,6 +558,7 @@ def _append_success_log(
         version=task.version,
         payload=_task_payload(task),
     )
+    context.applied_logs.insert(0, sync_log)
 
 
 def _task_payload(task: Task) -> dict[str, Any]:

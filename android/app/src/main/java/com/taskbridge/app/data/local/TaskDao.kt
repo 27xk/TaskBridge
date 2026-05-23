@@ -176,8 +176,8 @@ interface TaskDao {
     )
     suspend fun getAllWidgetTasks(limit: Int, nowTime: String): List<TodayWidgetTaskProjection>
 
-    @Query("SELECT * FROM tasks WHERE serverId = :serverId LIMIT 1")
-    suspend fun getByServerId(serverId: Int): TaskEntity?
+    @Query("SELECT * FROM tasks WHERE serverId IN (:serverIds)")
+    suspend fun getByServerIds(serverIds: List<Int>): List<TaskEntity>
 
     @Query("SELECT * FROM tasks WHERE syncStatus != 'synced'")
     suspend fun getPendingTasks(): List<TaskEntity>

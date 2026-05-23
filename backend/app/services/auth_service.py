@@ -15,14 +15,12 @@ from app.core.security import (
 from app.models.user import RefreshToken, User
 from app.schemas.auth import LoginRequest, TokenPair, UserCreate, UserRead, WebSocketTicketResponse
 from app.services.device_service import ensure_device_registered
-from app.services.maintenance_service import cleanup_refresh_tokens
 from app.services.websocket_ticket_service import issue_websocket_ticket
 from app.utils.time import utc_now
 
 
 def _issue_token_pair(db: Session, user: User, device_id: str) -> TokenPair:
     refresh_token = create_refresh_token()
-    cleanup_refresh_tokens(db)
     db.add(
         RefreshToken(
             user_id=user.id,

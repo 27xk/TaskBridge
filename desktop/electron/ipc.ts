@@ -456,17 +456,19 @@ async function importTasksJson(): Promise<{ canceled: boolean; importedCount?: n
   }
   const now = new Date().toISOString();
   const tasks = raw.tasks.slice(0, MAX_IMPORT_TASKS);
-  let importedCount = 0;
+  const importedTasks: TaskRecord[] = [];
   for (const item of tasks) {
-    const next = normalizeImportedTask(item, now, importedCount);
+    const next = normalizeImportedTask(item, now, importedTasks.length);
     if (!next) continue;
-    upsertTask(next);
-    enqueueTaskChange(next, "create");
-    importedCount += 1;
+    importedTasks.push(next);
+  }
+  upsertTasks(importedTasks);
+  for (const task of importedTasks) {
+    enqueueTaskChange(task, "create");
   }
   notifyFloatingTasksChanged();
   windows.mainWindow?.webContents.send("taskbridge:tasks-changed");
-  return { canceled: false, importedCount };
+  return { canceled: false, importedCount: importedTasks.length };
 }
 
 function normalizeImportedTask(item: unknown, now: string, index: number): TaskRecord | null {

@@ -230,10 +230,12 @@ def rename_tag(
 
 @router.get("/trash")
 def read_trash(
+    offset: int = Query(default=0, ge=0, le=100_000),
+    limit: int = Query(default=100, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    tasks = list_trash(db, current_user)
+    tasks = list_trash(db, current_user, offset=offset, limit=limit)
     return api_success([TaskRead.model_validate(task) for task in tasks])
 
 
@@ -261,10 +263,12 @@ def read_task(
 @router.get("/{task_id}/history")
 def history(
     task_id: int,
+    offset: int = Query(default=0, ge=0, le=100_000),
+    limit: int = Query(default=200, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    items: list[TaskHistoryRead] = list_task_history(db, current_user, task_id)
+    items: list[TaskHistoryRead] = list_task_history(db, current_user, task_id, offset=offset, limit=limit)
     return api_success(items)
 
 

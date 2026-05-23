@@ -19,6 +19,7 @@ class SyncLog(Base):
             "operation",
             "client_version",
         ),
+        Index("ix_sync_logs_user_created", "user_id", "created_at"),
         Index("ix_sync_logs_user_task_created", "user_id", "task_id", "created_at"),
     )
 

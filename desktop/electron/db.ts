@@ -396,89 +396,101 @@ export function listTasksByServerIds(serverIds: unknown): TaskRecord[] {
 }
 
 export function upsertTask(task: TaskRecord): TaskRecord {
-  const existingByServerId = task.serverId === null ? null : getTaskByServerId(task.serverId);
-  const shouldRemoveMergedDuplicate = Boolean(existingByServerId && existingByServerId.localId !== task.localId);
-  const normalizedTask = existingByServerId && existingByServerId.localId !== task.localId
-    ? {
-        ...task,
-        localId: existingByServerId.localId,
-        createdAt: existingByServerId.createdAt,
-      }
-    : task;
-
-  const target = database();
-  const saveNormalizedTask = target.transaction(() => {
-    target
-      .prepare(
-        `
-        INSERT INTO tasks (
-          local_id, server_id, title, content, status, priority, tag, project, list_type,
-          due_time, remind_time, repeat_rule, planned_date, completed_at, snoozed_until,
-          parent_server_id, checklist_json, is_template, template_name, sort_order,
-          version, is_deleted, sync_status, created_at, updated_at, last_sync_at
-        ) VALUES (
-          @localId, @serverId, @title, @content, @status, @priority, @tag, @project, @listType,
-          @dueTime, @remindTime, @repeatRule, @plannedDate, @completedAt, @snoozedUntil,
-          @parentServerId, @checklistJson, @isTemplateInt, @templateName, @sortOrder,
-          @version, @isDeletedInt, @syncStatus, @createdAt, @updatedAt, @lastSyncAt
-        )
-        ON CONFLICT(local_id) DO UPDATE SET
-          server_id = excluded.server_id,
-          title = excluded.title,
-          content = excluded.content,
-          status = excluded.status,
-          priority = excluded.priority,
-          tag = excluded.tag,
-          project = excluded.project,
-          list_type = excluded.list_type,
-          due_time = excluded.due_time,
-          remind_time = excluded.remind_time,
-          repeat_rule = excluded.repeat_rule,
-          planned_date = excluded.planned_date,
-          completed_at = excluded.completed_at,
-          snoozed_until = excluded.snoozed_until,
-          parent_server_id = excluded.parent_server_id,
-          checklist_json = excluded.checklist_json,
-          is_template = excluded.is_template,
-          template_name = excluded.template_name,
-          sort_order = excluded.sort_order,
-          version = excluded.version,
-          is_deleted = excluded.is_deleted,
-          sync_status = excluded.sync_status,
-          updated_at = excluded.updated_at,
-          last_sync_at = excluded.last_sync_at
-        `,
-      )
-      .run({
-        ...normalizedTask,
-        project: normalizedTask.project ?? null,
-        listType: normalizedTask.listType ?? "inbox",
-        plannedDate: normalizedTask.plannedDate ?? null,
-        completedAt: normalizedTask.completedAt ?? null,
-        snoozedUntil: normalizedTask.snoozedUntil ?? null,
-        parentServerId: normalizedTask.parentServerId ?? null,
-        checklistJson: normalizedTask.checklistJson || "[]",
-        isTemplateInt: normalizedTask.isTemplate ? 1 : 0,
-        templateName: normalizedTask.templateName ?? null,
-        sortOrder: normalizedTask.sortOrder ?? 0,
-        isDeletedInt: normalizedTask.isDeleted ? 1 : 0,
-      });
-
-    if (shouldRemoveMergedDuplicate) {
-      target
-        .prepare("DELETE FROM tasks WHERE local_id = ? AND server_id IS NULL")
-        .run(task.localId);
-      target
-        .prepare("DELETE FROM sync_queue WHERE local_id = ?")
-        .run(task.localId);
-    }
-  });
-  saveNormalizedTask();
-  return normalizedTask;
+  return upsertTasks([task])[0] ?? task;
 }
 
 export function upsertTasks(tasks: TaskRecord[]): TaskRecord[] {
-  return tasks.map(upsertTask);
+  if (tasks.length === 0) return [];
+  const target = database();
+  const getByServerId = target.prepare("SELECT * FROM tasks WHERE server_id = ? LIMIT 1");
+  const saveTask = target.prepare(
+    `
+    INSERT INTO tasks (
+      local_id, server_id, title, content, status, priority, tag, project, list_type,
+      due_time, remind_time, repeat_rule, planned_date, completed_at, snoozed_until,
+      parent_server_id, checklist_json, is_template, template_name, sort_order,
+      version, is_deleted, sync_status, created_at, updated_at, last_sync_at
+    ) VALUES (
+      @localId, @serverId, @title, @content, @status, @priority, @tag, @project, @listType,
+      @dueTime, @remindTime, @repeatRule, @plannedDate, @completedAt, @snoozedUntil,
+      @parentServerId, @checklistJson, @isTemplateInt, @templateName, @sortOrder,
+      @version, @isDeletedInt, @syncStatus, @createdAt, @updatedAt, @lastSyncAt
+    )
+    ON CONFLICT(local_id) DO UPDATE SET
+      server_id = excluded.server_id,
+      title = excluded.title,
+      content = excluded.content,
+      status = excluded.status,
+      priority = excluded.priority,
+      tag = excluded.tag,
+      project = excluded.project,
+      list_type = excluded.list_type,
+      due_time = excluded.due_time,
+      remind_time = excluded.remind_time,
+      repeat_rule = excluded.repeat_rule,
+      planned_date = excluded.planned_date,
+      completed_at = excluded.completed_at,
+      snoozed_until = excluded.snoozed_until,
+      parent_server_id = excluded.parent_server_id,
+      checklist_json = excluded.checklist_json,
+      is_template = excluded.is_template,
+      template_name = excluded.template_name,
+      sort_order = excluded.sort_order,
+      version = excluded.version,
+      is_deleted = excluded.is_deleted,
+      sync_status = excluded.sync_status,
+      updated_at = excluded.updated_at,
+      last_sync_at = excluded.last_sync_at
+    `,
+  );
+  const deleteMergedLocalTask = target.prepare("DELETE FROM tasks WHERE local_id = ? AND server_id IS NULL");
+  const deleteMergedQueue = target.prepare("DELETE FROM sync_queue WHERE local_id = ?");
+  const saveMany = target.transaction((items: TaskRecord[]) => {
+    return items.map((item) => saveTaskRecord(item, getByServerId, saveTask, deleteMergedLocalTask, deleteMergedQueue));
+  });
+  return saveMany(tasks) as TaskRecord[];
+}
+
+function saveTaskRecord(
+  task: TaskRecord,
+  getByServerId: Database.Statement,
+  saveTask: Database.Statement,
+  deleteMergedLocalTask: Database.Statement,
+  deleteMergedQueue: Database.Statement,
+): TaskRecord {
+  const existingByServerId = task.serverId === null
+    ? null
+    : (getByServerId.get(task.serverId) as TaskRow | undefined);
+  const existingTask = existingByServerId ? taskFromRow(existingByServerId) : null;
+  const shouldRemoveMergedDuplicate = Boolean(existingTask && existingTask.localId !== task.localId);
+  const normalizedTask = existingTask && existingTask.localId !== task.localId
+    ? {
+        ...task,
+        localId: existingTask.localId,
+        createdAt: existingTask.createdAt,
+      }
+    : task;
+
+  saveTask.run({
+    ...normalizedTask,
+    project: normalizedTask.project ?? null,
+    listType: normalizedTask.listType ?? "inbox",
+    plannedDate: normalizedTask.plannedDate ?? null,
+    completedAt: normalizedTask.completedAt ?? null,
+    snoozedUntil: normalizedTask.snoozedUntil ?? null,
+    parentServerId: normalizedTask.parentServerId ?? null,
+    checklistJson: normalizedTask.checklistJson || "[]",
+    isTemplateInt: normalizedTask.isTemplate ? 1 : 0,
+    templateName: normalizedTask.templateName ?? null,
+    sortOrder: normalizedTask.sortOrder ?? 0,
+    isDeletedInt: normalizedTask.isDeleted ? 1 : 0,
+  });
+
+  if (shouldRemoveMergedDuplicate) {
+    deleteMergedLocalTask.run(task.localId);
+    deleteMergedQueue.run(task.localId);
+  }
+  return normalizedTask;
 }
 
 export function softDeleteLocalTask(localId: string): void {

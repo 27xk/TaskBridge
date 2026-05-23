@@ -343,14 +343,25 @@ def import_tasks(db: Session, current_user: User, payload: TaskImportRequest) ->
     created = 0
     updated = 0
     imported_tasks: list[Task] = []
+    existing_by_id: dict[int, Task] = {}
+    incoming_ids = [item.id for item in payload.tasks if item.id is not None]
+    if incoming_ids:
+        existing_by_id = {
+            task.id: task
+            for task in db.scalars(
+                select(Task).where(
+                    Task.user_id == current_user.id,
+                    Task.id.in_(incoming_ids),
+                ),
+            )
+        }
+    pending_logs: list[tuple[Task, str]] = []
+    now = utc_now()
     for item in payload.tasks:
-        existing = None
-        if item.id is not None:
-            existing = db.scalar(select(Task).where(Task.id == item.id, Task.user_id == current_user.id))
+        existing = existing_by_id.get(item.id) if item.id is not None else None
         if existing is None:
             task = Task(user_id=current_user.id, **_import_item_to_task_data(item))
             db.add(task)
-            db.flush()
             created += 1
             operation = "import_created"
         else:
@@ -358,9 +369,14 @@ def import_tasks(db: Session, current_user: User, payload: TaskImportRequest) ->
             for key, value in _import_item_to_task_data(item).items():
                 setattr(task, key, value)
             task.version += 1
-            task.updated_at = utc_now()
+            task.updated_at = now
             updated += 1
             operation = "import_updated"
+            db.add(task)
+        imported_tasks.append(task)
+        pending_logs.append((task, operation))
+    db.flush()
+    for task, operation in pending_logs:
         append_sync_log(
             db,
             user_id=current_user.id,
@@ -369,7 +385,6 @@ def import_tasks(db: Session, current_user: User, payload: TaskImportRequest) ->
             version=task.version,
             payload=_snapshot(task),
         )
-        imported_tasks.append(task)
     db.commit()
     for task in imported_tasks:
         db.refresh(task)
@@ -841,12 +856,14 @@ def _build_repeat_occurrence(task: Task, user_id: int) -> Task | None:
     )
 
 
-def list_trash(db: Session, current_user: User) -> list[Task]:
+def list_trash(db: Session, current_user: User, *, offset: int = 0, limit: int = 100) -> list[Task]:
     return list(
         db.scalars(
             select(Task)
             .where(Task.user_id == current_user.id, Task.is_deleted.is_(True))
-            .order_by(Task.deleted_at.desc(), Task.updated_at.desc(), Task.id.desc()),
+            .order_by(Task.deleted_at.desc(), Task.updated_at.desc(), Task.id.desc())
+            .offset(offset)
+            .limit(limit),
         ),
     )
 
@@ -871,12 +888,21 @@ def purge_task(db: Session, current_user: User, task_id: int) -> Task:
     return task
 
 
-def list_task_history(db: Session, current_user: User, task_id: int) -> list[TaskHistoryRead]:
+def list_task_history(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    *,
+    offset: int = 0,
+    limit: int = 200,
+) -> list[TaskHistoryRead]:
     _get_owned_task(db, current_user, task_id, include_deleted=True)
     logs = db.scalars(
         select(SyncLog)
         .where(SyncLog.user_id == current_user.id, SyncLog.task_id == task_id)
-        .order_by(SyncLog.created_at.asc(), SyncLog.id.asc()),
+        .order_by(SyncLog.created_at.asc(), SyncLog.id.asc())
+        .offset(offset)
+        .limit(limit),
     )
     return [
         TaskHistoryRead(

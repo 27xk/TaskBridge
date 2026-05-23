@@ -1,7 +1,9 @@
 package com.taskbridge.app.data.repository
 
+import androidx.room.withTransaction
 import com.taskbridge.app.data.local.SyncQueueDao
 import com.taskbridge.app.data.local.SyncQueueEntity
+import com.taskbridge.app.data.local.AppDatabase
 import com.taskbridge.app.data.local.TaskDao
 import com.taskbridge.app.data.local.TaskEntity
 import com.taskbridge.app.domain.model.SyncStatus
@@ -40,6 +42,7 @@ private data class LocalChecklistItem(
 )
 
 class TaskRepository(
+    private val database: AppDatabase,
     private val taskDao: TaskDao,
     private val syncQueueDao: SyncQueueDao,
 ) {
@@ -126,9 +129,9 @@ class TaskRepository(
         val root = runCatching { JsonParser.parseString(raw).asJsonObject }.getOrNull() ?: return 0
         if (root.stringOrNull("format") !in ACCEPTED_BACKUP_FORMATS) return 0
         val tasks = root.get("tasks")?.takeIf { it.isJsonArray }?.asJsonArray ?: return 0
-        var imported = 0
+        val importedTasks = mutableListOf<TaskEntity>()
         tasks.forEach { element ->
-            if (imported >= MAX_IMPORT_TASKS) return@forEach
+            if (importedTasks.size >= MAX_IMPORT_TASKS) return@forEach
             val item = runCatching { element.asJsonObjectOrNull() }.getOrNull() ?: return@forEach
             val title = item.stringOrNull("title")?.trim().orEmpty()
             if (title.isBlank()) return@forEach
@@ -166,11 +169,15 @@ class TaskRepository(
                     lastSyncAt = null,
                 )
             }.getOrNull() ?: return@forEach
-            taskDao.upsert(task)
-            replaceQueue(task, "create")
-            imported += 1
+            importedTasks += task
         }
-        return imported
+        if (importedTasks.isNotEmpty()) {
+            database.withTransaction {
+                taskDao.upsertAll(importedTasks)
+                importedTasks.forEach { task -> replaceQueue(task, "create") }
+            }
+        }
+        return importedTasks.size
     }
 
     suspend fun updateTask(
@@ -259,11 +266,15 @@ class TaskRepository(
     }
 
     suspend fun batchComplete(taskIds: List<String>) {
-        taskIds.distinct().forEach { completeTask(it) }
+        database.withTransaction {
+            taskIds.distinct().forEach { completeTask(it) }
+        }
     }
 
     suspend fun batchDelete(taskIds: List<String>) {
-        taskIds.distinct().forEach { softDeleteTask(it) }
+        database.withTransaction {
+            taskIds.distinct().forEach { softDeleteTask(it) }
+        }
     }
 
     suspend fun undoCompleteTask(localId: String) {
