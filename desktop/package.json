@@ -16,6 +16,7 @@
     "typecheck": "vue-tsc --noEmit",
     "dist": "npm run build && electron-builder --config electron-builder.json",
     "check:task-order": "node ./scripts/check-task-order.mjs",
+    "check:lockfile-registry": "node ./scripts/check-lockfile-registry.mjs",
     "check:desktop-endpoint-config": "node ./scripts/check-desktop-endpoint-config.mjs",
     "check:package-size-config": "node ./scripts/check-package-size-config.mjs",
     "check:security-config": "node ./scripts/check-security-config.mjs",
