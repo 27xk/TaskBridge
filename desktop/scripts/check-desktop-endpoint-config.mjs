@@ -65,25 +65,30 @@ assert.match(
   /networkSettingsDefaultWsUrl/,
   "desktop endpoint migration must remember the previous built-in WebSocket default so later user edits are preserved",
 );
-assert.match(
+assert.doesNotMatch(
   settingsViewSource,
-  /setSetting\("baseUrl", settings\.baseUrl\.trim\(\)\)/,
-  "settings page must save the API base URL",
+  /setSetting\("baseUrl"/,
+  "settings page must not expose API base URL edits",
 );
-assert.match(
+assert.doesNotMatch(
   settingsViewSource,
-  /setSetting\("wsUrl", settings\.wsUrl\.trim\(\)\)/,
-  "settings page must save the sync WebSocket URL",
+  /setSetting\("wsUrl"/,
+  "settings page must not expose sync WebSocket URL edits",
 );
-assert.match(
+assert.doesNotMatch(
   settingsViewSource,
-  /v-model\.trim="settings\.baseUrl"/,
-  "settings page must expose the API base URL field",
+  /v-model(?:\.trim)?="settings\.baseUrl"/,
+  "settings page must hide the API base URL field",
 );
-assert.match(
+assert.doesNotMatch(
+  settingsViewSource,
+  /v-model(?:\.trim)?="settings\.wsUrl"/,
+  "settings page must hide the sync WebSocket URL field",
+);
+assert.doesNotMatch(
   i18nSource,
-  /"settings\.connection"/,
-  "settings page labels must include the backend connection section",
+  /"settings\.(connection|baseUrl|wsUrl|baseUrlHint|wsUrlHint)"/,
+  "settings page labels must not include backend connection copy",
 );
 assert.match(
   httpSource,

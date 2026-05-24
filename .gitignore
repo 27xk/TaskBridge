@@ -112,6 +112,7 @@ lerna-debug.log*
 .eslintcache
 coverage/
 desktop/.vite/
+desktop/.vite-cache/
 desktop/.cache/
 desktop/.electron-gyp/
 desktop/.npm-cache/
@@ -123,6 +124,7 @@ desktop/release/
 desktop/build/
 !desktop/build/
 !desktop/build/icon.ico
+!desktop/build/installer.nsh
 desktop/coverage/
 desktop/.eslintcache
 desktop/.tmp-electron-user-data/

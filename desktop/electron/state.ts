@@ -1,6 +1,7 @@
-import { safeStorage, type BrowserWindow } from "electron";
-import Store from "electron-store";
+import { app, safeStorage, type BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { getSystemTimeZone, normalizeTimeZone } from "../shared/quick-add-parser";
 
 declare const __TASKBRIDGE_BASE_URL__: string;
@@ -72,19 +73,61 @@ export interface StoreSchema {
   floatingHeight?: number;
 }
 
-export const settingsStore = new Store<StoreSchema>({
-  defaults: {
-    baseUrl: DEFAULT_BASE_URL,
-    wsUrl: DEFAULT_WS_URL,
-    language: "zh-CN",
-    displayTimeZone: getSystemTimeZone(),
-    lastSyncTime: "1970-01-01T00:00:00Z",
-    autoStart: false,
-    floatingOpacity: 0.96,
-    floatingVisibleOnStart: true,
-    floatingWidth: 320,
-    floatingHeight: 460,
-  },
+class JsonSettingsStore<T extends object> {
+  private readonly filePath = join(app.getPath("userData"), "config.json");
+  private readonly defaults: T;
+  private data: Partial<T>;
+
+  constructor(defaults: T) {
+    this.defaults = defaults;
+    this.data = this.read();
+  }
+
+  get<Key extends keyof T>(key: Key): T[Key] {
+    return (this.data[key] ?? this.defaults[key]) as T[Key];
+  }
+
+  set<Key extends keyof T>(key: Key, value: T[Key]): void {
+    this.data[key] = value;
+    this.write();
+  }
+
+  delete<Key extends keyof T>(key: Key): void {
+    delete this.data[key];
+    this.write();
+  }
+
+  private read(): Partial<T> {
+    if (!existsSync(this.filePath)) return {};
+    try {
+      const parsed = JSON.parse(readFileSync(this.filePath, "utf8"));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Partial<T>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private write(): void {
+    mkdirSync(app.getPath("userData"), { recursive: true });
+    const tempPath = `${this.filePath}.tmp`;
+    writeFileSync(tempPath, `${JSON.stringify(this.data, null, 2)}\n`, "utf8");
+    renameSync(tempPath, this.filePath);
+  }
+}
+
+export const settingsStore = new JsonSettingsStore<StoreSchema>({
+  baseUrl: DEFAULT_BASE_URL,
+  wsUrl: DEFAULT_WS_URL,
+  language: "zh-CN",
+  displayTimeZone: getSystemTimeZone(),
+  lastSyncTime: "1970-01-01T00:00:00Z",
+  autoStart: false,
+  floatingOpacity: 0.96,
+  floatingVisibleOnStart: true,
+  floatingWidth: 320,
+  floatingHeight: 460,
 });
 
 migrateNetworkSettings();

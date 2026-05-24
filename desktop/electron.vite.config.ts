@@ -15,6 +15,8 @@ export default defineConfig({
       __TASKBRIDGE_WS_URL__: JSON.stringify(taskBridgeWsUrl),
     },
     build: {
+      minify: "esbuild",
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve(__dirname, "electron/main.ts"),
@@ -24,6 +26,8 @@ export default defineConfig({
   },
   preload: {
     build: {
+      minify: "esbuild",
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve(__dirname, "electron/preload.ts"),
@@ -40,6 +44,8 @@ export default defineConfig({
     root: __dirname,
     plugins: [vue()],
     build: {
+      minify: "esbuild",
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: "index.html",

@@ -3,7 +3,17 @@ import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const targets = ["out", "release", ".tmp-electron-user-data", ".vite", ".cache", ".electron-vite"];
+const targets = [
+  "out",
+  "release",
+  ".tmp-electron-user-data",
+  ".vite",
+  ".vite-cache",
+  ".cache",
+  ".electron-vite",
+  ".electron-gyp",
+  ".npm-cache",
+];
 const dryRun = process.argv.includes("--dry-run");
 
 if (process.argv.includes("--all")) {

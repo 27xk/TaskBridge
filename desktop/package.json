@@ -1,6 +1,6 @@
 {
   "name": "taskbridge-desktop",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "private": true,
   "description": "TaskBridge Windows desktop app",
   "type": "module",
@@ -17,17 +17,16 @@
     "dist": "npm run build && electron-builder --config electron-builder.json",
     "check:task-order": "node ./scripts/check-task-order.mjs",
     "check:desktop-endpoint-config": "node ./scripts/check-desktop-endpoint-config.mjs",
+    "check:package-size-config": "node ./scripts/check-package-size-config.mjs",
     "check:security-config": "node ./scripts/check-security-config.mjs",
     "check:quick-add-parser": "node ./scripts/check-quick-add-parser.mjs",
     "check:sync-push": "node ./scripts/check-sync-push-handling.mjs",
     "clean": "node ./scripts/clean.mjs",
+    "clean:dry-run": "node ./scripts/clean.mjs --dry-run",
     "clean:all": "node ./scripts/clean.mjs --all"
   },
   "dependencies": {
-    "better-sqlite3": "^11.7.0",
-    "electron-store": "^10.0.0",
-    "pinia": "^2.3.0",
-    "vue": "^3.5.13"
+    "better-sqlite3": "^11.7.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
@@ -36,8 +35,10 @@
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
     "electron-vite": "^5.0.0",
+    "pinia": "^2.3.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
+    "vue": "^3.5.13",
     "vue-tsc": "^2.1.10"
   }
 }

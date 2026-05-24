@@ -1,6 +1,6 @@
 # TaskBridge Windows 桌面端
 
-`desktop/` 是 TaskBridge 的 Electron 桌面端。应用使用 Vue 3、TypeScript、Pinia、SQLite、electron-store 和 electron-builder，提供主窗口、系统托盘、悬浮窗、全局快捷键和本地提醒。
+`desktop/` 是 TaskBridge 的 Electron 桌面端。应用使用 Vue 3、TypeScript、Pinia、SQLite 和 electron-builder，提供主窗口、系统托盘、悬浮窗、全局快捷键和本地提醒。运行时配置使用轻量 JSON 存储，避免引入额外桌面端配置依赖。
 
 ## 环境要求
 
@@ -21,10 +21,13 @@ npm run dev
 ```powershell
 npm run check:security-config
 npm run check:desktop-endpoint-config
+npm run check:package-size-config
 npm run typecheck
 npm run build
 npm run dist
 npm run rebuild:native
+npm run clean:dry-run
+npm run clean
 ```
 
 如果启动后出现 `Could not locate the bindings file` 或 `better_sqlite3.node` 相关错误，说明 SQLite 原生模块没有为当前 Electron 版本生成。进入 `desktop/` 后执行：
@@ -43,6 +46,8 @@ npm run rebuild:native
 - 悬浮窗使用独立入口，不受主窗口布局样式影响。
 - `npm run check:security-config` 检查 Electron sandbox、IPC 入口、Android release 签名和 Docker 端口配置。
 - `npm run check:desktop-endpoint-config` 检查桌面端是否正确使用构建时注入的后端地址。
+- `npm run check:package-size-config` 检查桌面端生产依赖、Electron locale、asar、native 解包和安装包排除规则，防止体积回退。
+- `npm run clean:dry-run` 查看会清理哪些本地构建缓存；`npm run clean` 会移除 `out/`、`release/`、Electron/Vite/npm 本地缓存等桌面端临时目录。
 
 ## 功能
 
@@ -71,7 +76,13 @@ $env:TASKBRIDGE_WS_URL="ws://192.168.1.10:8000/ws/sync"
 npm run dist
 ```
 
-用户安装后也可以在设置页修改 API 地址和 WebSocket 地址。应用会迁移旧版本内置的默认地址，但会保留用户手动改过的地址。
+用户安装后不在设置页展示或修改后端连接地址。应用会迁移旧版本内置的默认地址，但会保留用户历史版本中已经手动改过的地址。
+
+## 卸载清理
+
+Windows 安装包使用 NSIS。卸载 TaskBridge 时会自动清理本应用在 `%APPDATA%\TaskBridge`、`%APPDATA%\taskbridge-desktop`、`%LOCALAPPDATA%\TaskBridge` 和 `%LOCALAPPDATA%\taskbridge-desktop` 下产生的本地数据，包括 SQLite 数据库、登录态、配置和缓存。
+
+用户主动导出的备份 JSON 不在上述应用数据目录内，卸载时不会自动删除。
 
 ## 安全边界
 

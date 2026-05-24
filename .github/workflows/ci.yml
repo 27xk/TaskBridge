@@ -103,6 +103,9 @@ jobs:
       - name: Verify security-sensitive config
         run: npm run check:security-config
 
+      - name: Verify desktop package size config
+        run: npm run check:package-size-config
+
       - name: Build desktop app
         run: npm run build
 
