@@ -545,7 +545,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.event_name == 'push' || inputs.publish_latest == true }}
 
       - name: Build backend image for vulnerability scan
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/Dockerfile
@@ -562,7 +562,7 @@ jobs:
           exit-code: '1'
 
       - name: Build and push backend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/Dockerfile
