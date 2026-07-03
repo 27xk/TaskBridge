@@ -20,6 +20,7 @@ const [
   codeqlSource,
   ciSource,
   releaseSource,
+  backendDockerfileSource,
   pullRequestTemplateSource,
   scriptsReadmeSource,
   localCheckSource,
@@ -30,6 +31,7 @@ const [
   readFile(requiredPath(".github/workflows/codeql.yml"), "utf8"),
   readFile(requiredPath(".github/workflows/ci.yml"), "utf8"),
   readFile(requiredPath(".github/workflows/release.yml"), "utf8"),
+  readFile(requiredPath("backend/Dockerfile"), "utf8"),
   readFile(requiredPath(".github/PULL_REQUEST_TEMPLATE.md"), "utf8"),
   readFile(requiredPath("scripts/README.md"), "utf8"),
   readFile(requiredPath("scripts/check-local.ps1"), "utf8"),
@@ -104,6 +106,11 @@ assert.match(releaseSource, /aquasecurity\/trivy-action@/, "release workflow mus
 assert.match(releaseSource, /severity:\s*'CRITICAL,HIGH'/, "release Docker scan must fail on high and critical findings");
 assert.match(releaseSource, /ignore-unfixed:\s*true/, "release Docker scan must ignore vulnerabilities that do not have a fixed version");
 assert.match(ciSource, /ignore-unfixed:\s*true/, "CI Docker scan must ignore vulnerabilities that do not have a fixed version");
+assert.match(
+  backendDockerfileSource,
+  /setuptools>=82\.0\.1/,
+  "backend Docker image must upgrade setuptools so Trivy does not scan a vulnerable vendored jaraco.context",
+);
 
 for (const token of [
   "SECURITY.md",

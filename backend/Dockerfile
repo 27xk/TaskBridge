@@ -7,7 +7,8 @@ ENV PIP_NO_CACHE_DIR=1
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
+RUN pip install --no-cache-dir --disable-pip-version-check --upgrade "setuptools>=82.0.1" \
+    && pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 
 COPY . .
 
