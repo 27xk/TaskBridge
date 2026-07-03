@@ -46,7 +46,7 @@ jobs:
 
       - name: Set up JDK for Android analysis
         if: ${{ matrix.language == 'java-kotlin' }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
