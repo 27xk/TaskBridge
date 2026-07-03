@@ -117,7 +117,7 @@ assert.doesNotMatch(ipcSource, /deviceId:\s*settings\.deviceId/, "diagnostics mu
 assert.match(settingsViewSource, /settings\.diagnosticsSensitiveHint/, "settings page must disclose diagnostic package sensitivity");
 assert.match(
   settingsViewSource,
-  /<details class="settings-advanced-details">\s*<summary>\{\{\s*settingsStore\.t\("settings\.syncDiagnostics"\)\s*\}\}<\/summary>[\s\S]*?<div class="sync-diagnostics">/,
+  /<details\b[^>]*class="settings-advanced-details"[^>]*>\s*<summary>\{\{\s*settingsStore\.t\("settings\.syncDiagnostics"\)\s*\}\}<\/summary>[\s\S]*?<div class="sync-diagnostics">/,
   "settings sync diagnostics must be grouped in a collapsed details block",
 );
 assert.doesNotMatch(

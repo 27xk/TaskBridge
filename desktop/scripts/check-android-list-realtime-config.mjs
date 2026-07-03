@@ -71,9 +71,9 @@ assert.match(authRepositorySource, /apiService\.syncStatus\(\)/, "Android connec
 assert.match(retrofitSource, /EndpointInterceptor/, "Android HTTP client must rewrite requests to the saved API endpoint");
 assert.match(retrofitSource, /tokenDataStore\.apiBaseUrl\.first\(\)/, "Android HTTP endpoint interceptor must read the latest saved API URL");
 assert.match(syncManagerSource, /webSocketUrlProvider = \{ tokenDataStore\.webSocketUrl\.first\(\) \}/, "Android WebSocket must read the latest saved URL before connecting");
-assert.match(loginScreenSource, /Connection settings|连接设置/, "Android login screen must expose connection settings before sign-in");
-assert.match(registerScreenSource, /Connection settings|连接设置/, "Android register screen must expose connection settings before registration");
-assert.match(settingsScreenSource, /Connection and sync|连接与同步/, "Android settings screen must expose runtime connection settings");
+assert.match(loginScreenSource, /strings\.connectionSettings|Connection settings|连接设置/, "Android login screen must expose connection settings before sign-in");
+assert.match(registerScreenSource, /strings\.connectionSettings|Connection settings|连接设置/, "Android register screen must expose connection settings before registration");
+assert.match(settingsScreenSource, /strings\.connectionAndSync|Connection and sync|连接与同步/, "Android settings screen must expose runtime connection settings");
 for (const source of [loginViewModelSource, registerViewModelSource]) {
   assert.match(source, /serverBaseUrl/, "Android auth screens must use one user-facing server address");
   assert.match(source, /applyServerBaseUrl/, "Android auth screens must derive endpoints from the server address");
