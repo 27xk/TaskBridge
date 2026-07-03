@@ -222,12 +222,29 @@ def _normalize_request_id(value: str | None) -> str:
 
 def _request_path_template(request: Request, status_code: int) -> str:
     route = request.scope.get("route")
-    path = getattr(route, "path", None)
+    path = getattr(route, "path_format", None) or getattr(route, "path", None)
     if isinstance(path, str) and path:
-        return path
+        return _with_mount_prefix(request.url.path, path, route)
     if status_code == 404:
         return "__unmatched__"
     return request.url.path
+
+
+def _with_mount_prefix(actual_path: str, route_path: str, route) -> str:
+    if actual_path == route_path:
+        return route_path
+
+    route_regex = getattr(route, "path_regex", None)
+    if route_regex is None:
+        return route_path
+
+    for index, char in enumerate(actual_path):
+        if char != "/":
+            continue
+        candidate = actual_path[index:]
+        if route_regex.match(candidate):
+            return f"{actual_path[:index]}{route_path}"
+    return route_path
 
 
 def _metric_labels(method: str, path: str, status_code: int) -> str:

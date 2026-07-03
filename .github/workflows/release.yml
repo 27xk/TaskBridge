@@ -280,6 +280,8 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          TASKBRIDGE_SKIP_NATIVE_REBUILD: "1"
 
       - name: Audit npm dependencies
         run: npm audit --audit-level=high

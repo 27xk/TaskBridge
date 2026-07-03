@@ -90,6 +90,16 @@ assert.match(ciSource, /check-version-source\.mjs/, "CI workflow must run the re
 assert.match(releaseSource, /check-version-source\.mjs/, "release workflow must run the repository version source guard");
 assert.match(ciSource, /npm --prefix \.\. run test:web/, "CI workflow must run Web/PWA unit tests");
 assert.match(releaseSource, /npm --prefix \.\. run test:web/, "release workflow must run Web/PWA unit tests");
+assert.match(
+  ciSource,
+  /TASKBRIDGE_SKIP_NATIVE_REBUILD:\s*"1"/,
+  "CI desktop npm ci must skip Electron native rebuild",
+);
+assert.match(
+  releaseSource,
+  /TASKBRIDGE_SKIP_NATIVE_REBUILD:\s*"1"/,
+  "release desktop npm ci must skip Electron native rebuild",
+);
 assert.match(releaseSource, /Release version must match VERSION/, "release workflow must reject tags that do not match VERSION");
 assert.match(ciSource, /^\s+android:\s*$/m, "CI workflow must include an Android job");
 assert.match(ciSource, /runs-on:\s+ubuntu-latest[\s\S]*working-directory:\s+android/, "CI Android job must run from android/");
