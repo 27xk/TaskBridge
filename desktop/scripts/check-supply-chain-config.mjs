@@ -27,6 +27,11 @@ assert.equal(
   "desktop/package.json must expose check:supply-chain",
 );
 assert.match(requirementsDevSource, /^pip-audit[<>=~!.,0-9a-zA-Z-]+/m, "backend dev dependencies must include pip-audit");
+assert.match(
+  packageJson.dependencies?.["better-sqlite3"] ?? "",
+  /^\^?12\./,
+  "desktop must use better-sqlite3 12.x for Electron 42 native rebuild compatibility",
+);
 assert.match(ciSource, /python -m pip_audit -r requirements-dev\.txt/, "CI must audit Python dependencies");
 assert.match(ciSource, /npm audit --audit-level=high/, "CI must audit npm dependencies");
 assert.match(releaseSource, /npm audit --audit-level=high/, "release workflow must audit npm dependencies before packaging");

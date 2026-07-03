@@ -111,6 +111,11 @@ assert.match(
   /setuptools>=82\.0\.1/,
   "backend Docker image must upgrade setuptools so Trivy does not scan a vulnerable vendored jaraco.context",
 );
+assert.match(
+  backendDockerfileSource,
+  /wheel>=0\.46\.2/,
+  "backend Docker image must upgrade wheel so Trivy does not scan a vulnerable base wheel package",
+);
 
 for (const token of [
   "SECURITY.md",
