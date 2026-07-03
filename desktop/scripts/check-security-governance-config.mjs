@@ -68,7 +68,7 @@ for (const directory of [
 ]) {
   assert.match(dependabotSource, new RegExp(`directory:\\s*"${directory}"`), `Dependabot must cover ${directory}`);
 }
-assert.match(dependabotSource, /open-pull-requests-limit:\s*5/, "Dependabot must cap concurrent update PRs");
+assert.match(dependabotSource, /open-pull-requests-limit:\s*1/, "Dependabot must cap concurrent update PRs");
 
 for (const token of [
   "github/codeql-action/init@v4",
@@ -84,7 +84,7 @@ for (const token of [
 
 for (const token of [
   "actions/dependency-review-action@v4",
-  "ossf/scorecard-action@v2",
+  "ossf/scorecard-action@v2.4.2",
   "github/codeql-action/upload-sarif",
 ]) {
   assert.ok(ciSource.includes(token), `CI workflow must include ${token}`);
