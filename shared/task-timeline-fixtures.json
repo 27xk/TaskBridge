@@ -1,0 +1,101 @@
+{
+  "timeline": {
+    "now": "2026-05-20T08:00:00.000Z",
+    "displayTimeZone": "Asia/Shanghai",
+    "expectedOrder": [
+      "overdue-early",
+      "overdue-late",
+      "upcoming-sooner",
+      "upcoming-later-high",
+      "planned-low-sort",
+      "planned-high-sort",
+      "untimed-high",
+      "untimed-low",
+      "done-alias-newest",
+      "completed-new",
+      "completed-fallback-updated",
+      "completed-old"
+    ],
+    "tasks": [
+      {
+        "id": "done-alias-newest",
+        "status": "done",
+        "due_time": "2026-05-19T09:00:00.000Z",
+        "completed_at": "2026-05-20T08:00:00.000Z",
+        "updated_at": "2026-05-20T08:00:00.000Z"
+      },
+      {
+        "id": "completed-new",
+        "status": "completed",
+        "due_time": "2026-05-19T09:00:00.000Z",
+        "completed_at": "2026-05-20T07:30:00.000Z",
+        "updated_at": "2026-05-20T07:30:00.000Z"
+      },
+      {
+        "id": "completed-fallback-updated",
+        "status": "completed",
+        "updated_at": "2026-05-19T12:00:00.000Z"
+      },
+      {
+        "id": "completed-old",
+        "status": "completed",
+        "due_time": "2026-05-20T07:00:00.000Z",
+        "completed_at": "2026-05-18T10:00:00.000Z",
+        "updated_at": "2026-05-18T10:00:00.000Z"
+      },
+      {
+        "id": "overdue-late",
+        "status": "todo",
+        "due_time": "2026-05-20T07:30:00.000Z",
+        "updated_at": "2026-05-20T07:00:00.000Z"
+      },
+      {
+        "id": "overdue-early",
+        "status": "todo",
+        "due_time": "2026-05-19T10:00:00.000Z",
+        "updated_at": "2026-05-20T06:00:00.000Z"
+      },
+      {
+        "id": "upcoming-sooner",
+        "status": "todo",
+        "due_time": "2026-05-20T09:00:00.000Z",
+        "updated_at": "2026-05-20T07:00:00.000Z"
+      },
+      {
+        "id": "upcoming-later-high",
+        "status": "todo",
+        "priority": 5,
+        "due_time": "2026-05-21T01:00:00.000Z",
+        "updated_at": "2026-05-20T07:30:00.000Z"
+      },
+      {
+        "id": "planned-high-sort",
+        "status": "todo",
+        "priority": 5,
+        "sort_order": 1,
+        "planned_date": "2026-05-20",
+        "updated_at": "2026-05-20T07:30:00.000Z"
+      },
+      {
+        "id": "planned-low-sort",
+        "status": "todo",
+        "priority": 0,
+        "sort_order": 0,
+        "planned_date": "2026-05-20",
+        "updated_at": "2026-05-20T07:00:00.000Z"
+      },
+      {
+        "id": "untimed-low",
+        "status": "todo",
+        "priority": 1,
+        "updated_at": "2026-05-20T09:00:00.000Z"
+      },
+      {
+        "id": "untimed-high",
+        "status": "todo",
+        "priority": 5,
+        "updated_at": "2026-05-20T07:00:00.000Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TaskBridge 自托管部署说明</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="startup-fallback local-trial-page">
+      <p class="eyebrow">TaskBridge</p>
+      <h1>自托管部署说明</h1>
+      <p>这页用于从 Web/PWA 首屏直接完成部署准备。正式对外使用时，请先准备域名、HTTPS 反向代理、强密码和明确的 Web 跨域来源。</p>
+
+      <ol class="local-trial-steps">
+        <li>
+          <span>下载项目并进入部署目录</span>
+          <pre class="command-snippet"><code>git clone https://github.com/27xk/TaskBridge.git
+cd TaskBridge/deploy</code></pre>
+        </li>
+        <li>
+          <span>复制生产环境配置</span>
+          <pre class="command-snippet"><code>cp .env.example .env</code></pre>
+          <p>Windows PowerShell 使用 <code>Copy-Item .env.example .env</code>。</p>
+        </li>
+        <li>
+          <span>修改关键配置</span>
+          <pre class="command-snippet"><code>JWT_SECRET=replace-with-a-random-secret-at-least-32-chars
+MYSQL_ROOT_PASSWORD=replace-with-a-strong-password
+MYSQL_PASSWORD=replace-with-a-strong-password
+DATABASE_URL=mysql+pymysql://taskbridge:replace-with-a-strong-password@mysql:3306/taskbridge
+REGISTRATION_ENABLED=false
+WEB_CORS_ORIGINS=https://taskbridge.example.com</code></pre>
+          <p><code>DATABASE_URL</code> 里的密码必须和 <code>MYSQL_PASSWORD</code> 一致。<code>WEB_CORS_ORIGINS</code> 应写成真实 Web/PWA 地址，例如 <code>https://taskbridge.example.com</code>，不要在生产环境继续使用通配来源。</p>
+        </li>
+        <li>
+          <span>启动服务</span>
+          <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml up -d</code></pre>
+        </li>
+        <li>
+          <span>检查健康状态</span>
+          <pre class="command-snippet"><code>curl http://127.0.0.1:8000/ready</code></pre>
+          <p><code>/ready</code> 返回可用后，再在客户端填写服务器根地址；如果通过 Nginx 或 Caddy 暴露 HTTPS，请填写反向代理后的域名。</p>
+        </li>
+        <li>
+          <span>创建首个账号</span>
+          <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml exec api python -m tools.create_user --username owner --email owner@example.com</code></pre>
+          <p>生产环境默认关闭公开注册。首个账号创建成功后，用这个账号在 Web、桌面端或 Android 端登录。</p>
+        </li>
+      </ol>
+
+      <section lang="en">
+        <h2>Self-hosting</h2>
+        <p>Copy <code>.env.example</code>, set strong secrets, pin <code>WEB_CORS_ORIGINS</code> to your HTTPS Web origin, start Compose, and verify <code>/ready</code> before signing in.</p>
+        <ol class="local-trial-steps">
+          <li>
+            <span>Download the project and enter the deployment directory</span>
+            <pre class="command-snippet"><code>git clone https://github.com/27xk/TaskBridge.git
+cd TaskBridge/deploy</code></pre>
+          </li>
+          <li>
+            <span>Copy the production environment</span>
+            <pre class="command-snippet"><code>cp .env.example .env</code></pre>
+            <p>Windows PowerShell uses <code>Copy-Item .env.example .env</code>.</p>
+          </li>
+          <li>
+            <span>Set production values</span>
+            <pre class="command-snippet"><code>JWT_SECRET=replace-with-a-random-secret-at-least-32-chars
+MYSQL_ROOT_PASSWORD=replace-with-a-strong-password
+MYSQL_PASSWORD=replace-with-a-strong-password
+DATABASE_URL=mysql+pymysql://taskbridge:replace-with-a-strong-password@mysql:3306/taskbridge
+METRICS_TOKEN=replace-with-a-random-metrics-token
+REGISTRATION_ENABLED=false
+WEB_CORS_ORIGINS=https://taskbridge.example.com</code></pre>
+          </li>
+          <li>
+            <span>Start services and check readiness</span>
+            <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml up -d
+curl http://127.0.0.1:8000/ready</code></pre>
+          </li>
+          <li>
+            <span>Create the first account</span>
+            <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml exec api python -m tools.create_user --username owner --email owner@example.com</code></pre>
+          </li>
+        </ol>
+      </section>
+
+      <a class="primary-button" href="./index.html">返回登录页 / Back to sign-in</a>
+    </main>
+  </body>
+</html>

@@ -78,6 +78,17 @@ TaskBridge 使用「HTTP 同步 + WebSocket 通知」的架构。
 7. 每条成功变更都会写入 `sync_logs`。
 8. 处理完成后通知同一用户下除当前设备外的在线设备。
 
+## 幂等与回放
+
+同步上传必须支持客户端安全重试。服务端以 `user_id + device_id + local_id + action + version` 识别一次客户端变更：
+
+- 同一幂等键、同一 payload 重放时，服务端返回第一次成功应用后的任务结果，不重复创建任务，也不重复写成功日志。
+- 同一幂等键但 payload 被篡改或队列项被错误复用时，`create` 会返回 `failed`，消息为 `idempotency key reused with different payload`。
+- 同一幂等键的 `update` 已经落后于当前服务端版本时，服务端返回正常 `conflict` 和服务端任务快照，客户端按冲突流程处理。
+- 客户端不应把 `local_id` 当成“可反复覆盖的草稿 ID”；如果要表达一条新的本地变更，必须使用新的队列项版本或在本地合并后再上传。
+
+这条规则的回归测试在 `backend/tests/test_sync.py::test_sync_push_rejects_reused_idempotency_key_with_different_payload`，用于确保非法重放不会退化成数据库唯一约束错误。
+
 ## 拉取流程
 
 `GET /api/v1/sync/pull?last_sync_time=...` 返回服务端在该时间之后变化的任务。
@@ -98,7 +109,7 @@ TaskBridge 使用「HTTP 同步 + WebSocket 通知」的架构。
 
 - 客户端 `version` 等于服务端 `version` 时，可以提交修改。
 - 客户端 `version` 小于服务端 `version` 时，服务端返回冲突。
-- 客户端将本地任务标记为 `conflict`，由用户选择采用云端或覆盖云端。
+- 客户端将本地任务标记为 `conflict`，对比这台设备版本和同步来的版本，由用户选择保留哪一版。
 
 后续可以扩展字段级合并，例如标题采用最新值、子清单按 item ID 合并。
 

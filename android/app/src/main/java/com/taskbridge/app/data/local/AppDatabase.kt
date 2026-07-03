@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 
 @Database(
     entities = [TaskEntity::class, SyncQueueEntity::class],
-    version = 4,
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -22,7 +22,7 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var instance: AppDatabase? = null
 
-        @OptIn(ExperimentalRoomApi::class)
+        @androidx.annotation.OptIn(ExperimentalRoomApi::class)
         fun getInstance(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -32,7 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                     .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                     .setAutoCloseTimeout(5, TimeUnit.MINUTES)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                     .also { instance = it }
             }
@@ -83,6 +83,31 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS index_sync_queue_attemptCount_createdAt " +
                         "ON sync_queue(attemptCount, createdAt)",
                 )
+            }
+        }
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN ownerUserId TEXT NOT NULL DEFAULT 'legacy'")
+                db.execSQL("ALTER TABLE sync_queue ADD COLUMN ownerUserId TEXT NOT NULL DEFAULT 'legacy'")
+                db.execSQL("DROP INDEX IF EXISTS index_tasks_serverId")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_ownerUserId ON tasks(ownerUserId)")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_tasks_ownerUserId_serverId " +
+                        "ON tasks(ownerUserId, serverId)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_queue_ownerUserId ON sync_queue(ownerUserId)")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_sync_queue_ownerUserId_localId " +
+                        "ON sync_queue(ownerUserId, localId)",
+                )
+            }
+        }
+
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN conflictServerJson TEXT")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN conflictLocalJson TEXT")
             }
         }
     }

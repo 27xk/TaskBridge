@@ -1,7 +1,13 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
-import { getMe, login as loginApi, register as registerApi, type UserDto } from "../api/auth";
+import {
+  getMe,
+  getRegistrationStatus,
+  login as loginApi,
+  register as registerApi,
+  type UserDto,
+} from "../api/auth";
 import { bridge } from "../db/sqlite";
 
 export const useAuthStore = defineStore("auth", () => {
@@ -9,6 +15,8 @@ export const useAuthStore = defineStore("auth", () => {
   const authenticated = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  const registrationEnabled = ref(false);
+  const registrationStatusKnown = ref(false);
 
   const isAuthenticated = computed(() => authenticated.value);
 
@@ -41,7 +49,7 @@ export const useAuthStore = defineStore("auth", () => {
       authenticated.value = true;
       user.value = response.user;
     } catch (err) {
-      error.value = err instanceof Error ? err.message : "登录失败";
+      error.value = normalizeAuthErrorMessage(err, "登录失败");
       throw err;
     } finally {
       loading.value = false;
@@ -49,6 +57,14 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function register(username: string, email: string, password: string): Promise<void> {
+    if (!registrationStatusKnown.value) {
+      error.value = "registration unknown";
+      throw new Error("registration unknown");
+    }
+    if (!registrationEnabled.value) {
+      error.value = "registration disabled";
+      throw new Error("registration disabled");
+    }
     loading.value = true;
     error.value = null;
     try {
@@ -57,7 +73,7 @@ export const useAuthStore = defineStore("auth", () => {
       authenticated.value = true;
       user.value = response.user;
     } catch (err) {
-      error.value = err instanceof Error ? err.message : "注册失败";
+      error.value = normalizeAuthErrorMessage(err, "注册失败");
       throw err;
     } finally {
       loading.value = false;
@@ -75,14 +91,58 @@ export const useAuthStore = defineStore("auth", () => {
     await bridge().auth.clearTokens();
   }
 
+  async function loadRegistrationStatus(): Promise<void> {
+    try {
+      const status = await getRegistrationStatus();
+      registrationEnabled.value = status.registration_enabled;
+      registrationStatusKnown.value = true;
+    } catch {
+      registrationEnabled.value = false;
+      registrationStatusKnown.value = false;
+    }
+  }
+
   return {
     user,
     loading,
     error,
+    registrationEnabled,
+    registrationStatusKnown,
     isAuthenticated,
     loadSession,
+    loadRegistrationStatus,
     login,
     register,
     logout,
   };
 });
+
+function normalizeAuthErrorMessage(error: unknown, fallback: "登录失败" | "注册失败"): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const normalized = message.toLowerCase();
+  if (normalized.includes("registration disabled") || normalized.includes("open registration is disabled")) {
+    return "registration disabled";
+  }
+  if (
+    normalized.includes("failed to fetch") ||
+    normalized.includes("network") ||
+    normalized.includes("econnrefused") ||
+    normalized.includes("enotfound") ||
+    normalized.includes("timeout") ||
+    normalized.includes("socket") ||
+    normalized.includes("connect")
+  ) {
+    return "network_error";
+  }
+  if (
+    normalized.includes("500") ||
+    normalized.includes("502") ||
+    normalized.includes("503") ||
+    normalized.includes("504") ||
+    normalized.includes("internal server error") ||
+    normalized.includes("server error")
+  ) {
+    return "server_error";
+  }
+  return fallback;
+}

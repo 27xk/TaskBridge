@@ -2,6 +2,7 @@ export interface ParsedQuickTask {
   title: string;
   priority: number;
   tag: string | null;
+  project: string | null;
   dueTime: string | null;
   plannedDate: string | null;
 }
@@ -11,6 +12,7 @@ export const TASKBRIDGE_TIME_ZONE = DEFAULT_TIME_ZONE;
 
 const priorityPattern = /\bP([0-5])\b/i;
 const tagPattern = /#([\p{L}\p{N}_-]{1,32})/u;
+const projectPattern = /(^|\s)@([\p{L}\p{N}_-]{1,64})(?=\s|$)/u;
 const timePattern = /(?:(上午|下午|晚上|中午|am|pm)\s*)?(\d{1,2})(?::(\d{2}))?\s*(?:点)?/iu;
 
 export function parseQuickTask(input: string, now = new Date(), timeZone = DEFAULT_TIME_ZONE): ParsedQuickTask {
@@ -25,6 +27,10 @@ export function parseQuickTask(input: string, now = new Date(), timeZone = DEFAU
   const tagMatch = working.match(tagPattern);
   const tag = tagMatch?.[1]?.toLowerCase() ?? null;
   working = working.replace(tagPattern, "").trim();
+
+  const projectMatch = working.match(projectPattern);
+  const project = projectMatch?.[2] ?? null;
+  working = working.replace(projectPattern, "$1").trim();
 
   const date = parseDateWord(working, now, zone);
   working = working.replace(/后天|明天|今天|今晚/g, "").trim();
@@ -43,6 +49,7 @@ export function parseQuickTask(input: string, now = new Date(), timeZone = DEFAU
     title: working || raw,
     priority,
     tag,
+    project,
     dueTime,
     plannedDate,
   };

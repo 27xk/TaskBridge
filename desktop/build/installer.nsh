@@ -1,6 +1,4 @@
 !macro customUnInstall
-  RMDir /r "$APPDATA\TaskBridge"
-  RMDir /r "$APPDATA\taskbridge-desktop"
-  RMDir /r "$LOCALAPPDATA\TaskBridge"
-  RMDir /r "$LOCALAPPDATA\taskbridge-desktop"
+  ; Keep user data by default. Users may reinstall without losing local tasks,
+  ; settings, tokens, or exported/imported backup state.
 !macroend

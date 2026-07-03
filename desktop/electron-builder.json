@@ -4,6 +4,13 @@
   "directories": {
     "output": "release"
   },
+  "publish": [
+    {
+      "provider": "github",
+      "releaseType": "release",
+      "channel": "latest"
+    }
+  ],
   "files": [
     "out/**/*",
     "build/icon.ico",
@@ -108,7 +115,7 @@
   },
   "nsis": {
     "include": "build/installer.nsh",
-    "differentialPackage": false,
+    "differentialPackage": true,
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,

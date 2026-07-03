@@ -6,6 +6,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.repository.SyncRepository
 import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
 import kotlinx.coroutines.CoroutineScope
@@ -13,18 +14,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 
 class SyncManager(
     private val context: Context,
     private val syncRepository: SyncRepository,
+    private val tokenDataStore: TokenDataStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val deviceIdProvider = DeviceIdProvider(context)
-    private val webSocketClient = WebSocketClient(scope) { deviceId ->
-        syncRepository.createWebSocketTicket(deviceId).getOrNull()
-    }
+    private val webSocketClient = WebSocketClient(
+        scope = scope,
+        webSocketUrlProvider = { tokenDataStore.webSocketUrl.first() },
+        ticketProvider = { deviceId -> syncRepository.createWebSocketTicket(deviceId).getOrNull() },
+    )
     private val syncMutex = Mutex()
     @Volatile
     private var syncRequested = false

@@ -11,12 +11,16 @@ import com.google.gson.Gson
 private val mapperGson = Gson()
 
 fun TaskDto.toEntity(
+    ownerUserId: String,
     localId: String,
     syncStatus: SyncStatus = SyncStatus.Synced,
     lastSyncAt: String?,
+    conflictServerJson: String? = null,
+    conflictLocalJson: String? = null,
 ): TaskEntity {
     return TaskEntity(
         localId = localId,
+        ownerUserId = ownerUserId,
         serverId = id,
         title = title,
         content = content,
@@ -39,6 +43,8 @@ fun TaskDto.toEntity(
         version = version,
         isDeleted = isDeleted,
         syncStatus = syncStatus.wireName,
+        conflictServerJson = conflictServerJson,
+        conflictLocalJson = conflictLocalJson,
         createdAt = createdAt,
         updatedAt = updatedAt,
         lastSyncAt = lastSyncAt,

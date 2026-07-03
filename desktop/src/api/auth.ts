@@ -35,6 +35,10 @@ export interface WebSocketTicketDto {
   expires_in: number;
 }
 
+export interface RegistrationStatusDto {
+  registration_enabled: boolean;
+}
+
 export function register(payload: RegisterPayload): Promise<TokenPairDto> {
   return unwrap(request.post("/auth/register", payload));
 }
@@ -45,6 +49,10 @@ export function login(payload: LoginPayload): Promise<TokenPairDto> {
 
 export function getMe(): Promise<UserDto> {
   return unwrap(request.get("/auth/me"));
+}
+
+export function getRegistrationStatus(): Promise<RegistrationStatusDto> {
+  return unwrap(request.get("/auth/registration"));
 }
 
 export function createWebSocketTicket(deviceId: string): Promise<WebSocketTicketDto> {

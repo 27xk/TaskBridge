@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TaskBridge Docker 本机试用说明</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="startup-fallback local-trial-page">
+      <p class="eyebrow">TaskBridge</p>
+      <h1>Docker 本机试用说明</h1>
+      <p>在运行后端的电脑上执行这些命令。服务启动后，回到登录页填写服务器地址并登录，客户端会自动检查连接。</p>
+
+      <ol class="local-trial-steps">
+        <li>
+          <span>下载或解压源码/部署包，并进入部署目录</span>
+          <p>如果你拿到的是 Release 部署包，先解压到 <code>TaskBridge</code> 目录；如果使用源码包，也只需要进入其中的 <code>deploy</code> 目录。</p>
+          <p>macOS / Linux</p>
+          <pre class="command-snippet"><code>cd TaskBridge/deploy</code></pre>
+          <p>Windows PowerShell</p>
+          <pre class="command-snippet"><code>cd TaskBridge\deploy</code></pre>
+        </li>
+        <li>
+          <span>复制 Docker 本机试用环境</span>
+          <p>macOS / Linux</p>
+          <pre class="command-snippet"><code>cp .env.local.example .env</code></pre>
+          <p>Windows PowerShell</p>
+          <pre class="command-snippet"><code>Copy-Item .env.local.example .env</code></pre>
+        </li>
+        <li>
+          <span>启动后端</span>
+          <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml up -d</code></pre>
+        </li>
+        <li>
+          <span>确认服务可用</span>
+          <pre class="command-snippet"><code>curl http://127.0.0.1:8000/ready</code></pre>
+          <p><code>/ready</code> 会检查数据库和 Redis；如果这里不可用，客户端登录通常也不会成功。</p>
+        </li>
+        <li>
+          <span>填写地址</span>
+          <p>同一台电脑使用 <code>http://127.0.0.1:8000</code>。Android 模拟器使用 <code>http://10.0.2.2:8000</code>。手机或另一台电脑使用后端电脑的局域网 IP。</p>
+        </li>
+      </ol>
+
+      <section lang="en">
+        <h2>Docker Local Trial</h2>
+        <p>Run these commands on the backend computer, then return to sign-in and save/test the server address.</p>
+        <ol class="local-trial-steps">
+          <li>
+            <span>Download or extract the source or deployment package, then enter the deployment directory</span>
+            <p>If you already have a release or deployment package, extract it to the <code>TaskBridge</code> directory first. Git is not required for the local trial.</p>
+            <p>macOS / Linux</p>
+            <pre class="command-snippet"><code>cd TaskBridge/deploy</code></pre>
+            <p>Windows PowerShell</p>
+            <pre class="command-snippet"><code>cd TaskBridge\deploy</code></pre>
+          </li>
+          <li>
+            <span>Copy the local-trial environment</span>
+            <p>macOS / Linux</p>
+            <pre class="command-snippet"><code>cp .env.local.example .env</code></pre>
+            <p>Windows PowerShell</p>
+            <pre class="command-snippet"><code>Copy-Item .env.local.example .env</code></pre>
+          </li>
+          <li>
+            <span>Start the backend</span>
+            <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml up -d</code></pre>
+          </li>
+          <li>
+            <span>Check readiness</span>
+            <pre class="command-snippet"><code>curl http://127.0.0.1:8000/ready</code></pre>
+          </li>
+        </ol>
+        <p>Use <code>http://127.0.0.1:8000</code> on the same computer, <code>http://10.0.2.2:8000</code> from an Android emulator, or the backend computer's LAN IP from a phone or another computer.</p>
+      </section>
+
+      <a class="primary-button" href="./index.html">返回登录页 / Back to sign-in</a>
+    </main>
+  </body>
+</html>

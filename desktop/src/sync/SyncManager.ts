@@ -139,7 +139,7 @@ export class SyncManager {
 
         if (result.status === "failed") {
           await this.markQueueItemFailed(queueItem);
-          await removeQueueItem(queueItem.id);
+          await incrementQueueAttempt(queueItem.id);
           continue;
         }
 
@@ -167,15 +167,35 @@ export class SyncManager {
       version: result.version ?? task.version,
       syncStatus: "synced",
       lastSyncAt: nowIso(),
+      conflictServerJson: null,
+      conflictLocalJson: null,
     });
   }
 
   private async markQueueItemConflict(queueItem: SyncQueueRecord, result: SyncPushResult): Promise<void> {
-    if (result.server_task) {
-      await saveTask(serverTaskToLocal(result.server_task, queueItem.localId, "conflict"));
+    const task = await getTask(queueItem.localId);
+    if (!task) {
+      if (result.server_task) {
+        await saveTask({
+          ...serverTaskToLocal(result.server_task, queueItem.localId, "conflict"),
+          conflictServerJson: JSON.stringify(result.server_task),
+          conflictLocalJson: null,
+        });
+        return;
+      }
+      await this.markQueueItemFailed(queueItem);
       return;
     }
-    await this.markQueueItemFailed(queueItem);
+
+    await saveTask({
+      ...task,
+      serverId: result.server_id ?? task.serverId ?? result.server_task?.id ?? null,
+      version: result.version ?? result.server_task?.version ?? task.version,
+      syncStatus: "conflict",
+      lastSyncAt: nowIso(),
+      conflictServerJson: result.server_task ? JSON.stringify(result.server_task) : null,
+      conflictLocalJson: JSON.stringify(task),
+    });
   }
 
   private async markQueueItemFailed(queueItem: SyncQueueRecord): Promise<void> {
@@ -183,8 +203,10 @@ export class SyncManager {
     if (!task) return;
     await saveTask({
       ...task,
-      syncStatus: "conflict",
+      syncStatus: "sync_failed",
       lastSyncAt: nowIso(),
+      conflictServerJson: null,
+      conflictLocalJson: null,
     });
   }
 

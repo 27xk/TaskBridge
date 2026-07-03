@@ -28,13 +28,13 @@
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-本地临时实验可以使用：
+本地临时实验请使用 debug 构建，不要把未签名的 release 产物当正式产物：
 
 ```powershell
-.\gradlew.bat :app:assembleRelease -PTASKBRIDGE_ALLOW_UNSIGNED_RELEASE=true
+.\gradlew.bat :app:assembleDebug
 ```
 
-这只适合本机验证，不适合公开发布。
+Release workflow 不允许发布 unsigned Android artifacts。
 
 ## Gradle JDK 配置无效
 
@@ -52,11 +52,11 @@
 常见原因：
 
 - Release 构建时没有设置 `TASKBRIDGE_BASE_URL` 和 `TASKBRIDGE_WS_URL`。
-- 用户机器上保留了旧版本配置。
+- 用户机器上安装的是旧构建，内置的默认后端地址仍指向旧环境。
 - API 地址缺少 `/api/v1/`。
 - WebSocket 地址没有指向 `/ws/sync`。
 
-桌面端可在设置页直接修改 API 地址和 WebSocket 地址。发布构建默认值来自仓库 Variables：
+桌面端可以在设置页直接修改服务器地址。Android 端可以在登录 / 注册页的「连接设置」或设置页修改服务器地址。发布版会把构建时注入的地址作为默认值；如果默认值错了，可以先在客户端覆盖，后续发布再重新设置仓库 Variables 并构建安装包：
 
 ```text
 TASKBRIDGE_BASE_URL=http://example.com:8000/api/v1/
@@ -110,9 +110,9 @@ alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 对手机来说，`127.0.0.1` 是手机自己，不是电脑。
 
-- Android 模拟器访问电脑：`http://10.0.2.2:8000/api/v1/`
-- 真机访问电脑：使用电脑局域网 IP，例如 `http://192.168.1.10:8000/api/v1/`
-- Windows 桌面端访问本机：`http://127.0.0.1:8000/api/v1/`
+- Android 模拟器访问电脑：`http://10.0.2.2:8000`
+- 真机访问电脑：使用电脑局域网 IP，例如 `http://192.168.1.10:8000`
+- Windows 桌面端访问本机：`http://127.0.0.1:8000`
 
 后端启动时如需允许局域网访问，请使用：
 

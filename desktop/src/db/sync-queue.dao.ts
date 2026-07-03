@@ -4,6 +4,10 @@ export async function listSyncQueue(limit = 100, includeExhausted = false): Prom
   return bridge().db.listQueue(limit, includeExhausted);
 }
 
+export async function getSyncQueueCounts(): Promise<SyncQueueCounts> {
+  return bridge().db.getQueueCounts();
+}
+
 export async function enqueueChange(change: SyncQueueRecord): Promise<number> {
   return bridge().db.enqueueChange(change);
 }

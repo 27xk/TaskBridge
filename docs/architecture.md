@@ -1,25 +1,33 @@
 # 架构说明
 
-TaskBridge 由后端服务、Android App 和 Windows 桌面端组成。系统采用本地优先架构，客户端先写本地数据库，再通过同步队列与云端保持一致。
+TaskBridge 由后端服务、Web/PWA、Android App 和 Windows 桌面端组成。系统采用本地优先架构，客户端先写本地数据库，再通过同步队列与服务器保持一致。
 
 ## 产品边界
 
 - **后端服务：** 负责账号、设备、任务持久化、同步顺序、同步日志和 WebSocket 通知。
 - **Android App：** 负责移动端任务管理、本地缓存、后台同步、系统提醒和桌面小组件。
+- **Web/PWA：** 负责浏览器端任务查看、新建、编辑、搜索、完成、删除、恢复和后端同步状态查看；远程任务列表通过 `cursor_id` / `cursor_updated_at` 分页拉取，避免只展示第一页；通过 IndexedDB 保存任务快照和离线队列，恢复在线后自动同步本地 mutation。
 - **Windows 桌面端：** 负责桌面端任务管理、本地缓存、托盘、悬浮窗、全局快捷键和常驻 WebSocket。
-
-当前版本不提供独立 Web 端。Vue 只作为 Electron renderer 使用。
 
 ## 架构原则
 
-1. 客户端本地优先，所有用户操作先写入本地数据库。
+1. 客户端本地优先，所有用户操作先写入本地数据库；Web/PWA 使用 IndexedDB 承载浏览器端缓存和 offline queue。
 2. HTTP API 是唯一真实同步通道。
 3. WebSocket 只发送通知，不承载完整任务数据。
-4. 服务端是云端权威数据源，任务归属必须按 `user_id` 校验。
+4. 服务端是服务器侧权威数据源，任务归属必须按 `user_id` 校验。
 5. 同步冲突通过任务 `version` 做乐观锁检测。
 6. Android 后台同步交给 WorkManager，不长期保活 WebSocket。
 7. Windows 桌面端可常驻 WebSocket，并在断线后自动重连。
 8. 客户端渲染层不直接持有数据库、Token 和系统能力，敏感操作必须经过受控桥接层。
+9. 任务时间线排序属于跨端契约，后端、Android、Windows 桌面端必须使用 `shared/task-timeline-fixtures.json` 的同一组样本验证完成态别名、逾期、计划日期、优先级、手动排序和完成时间倒序。
+
+## 跨端排序契约
+
+任务列表默认按“逾期、即将到期、计划日期、无时间、已完成”排序；完成状态读取时同时接受 `completed` 和历史别名 `done`，写入时统一写 canonical `completed`。`shared/task-timeline-fixtures.json` 是这套行为的共享测试向量：
+
+- 后端通过 `backend/tests/test_task_timeline_fixtures.py` 验证 `/api/v1/tasks` 普通列表、cursor 分页、today 视图和 meta 计数。
+- Android 通过 `TaskTimelineTest` 和 `TodayTaskWidgetRepositoryTest` 验证领域排序和小组件 raw projection 排序。
+- Windows 桌面端通过 `npm run check:task-order` 验证 Vue 排序工具和 Electron SQLite 查询不会退回单值 `completed` 判断。
 
 ## 模块图
 

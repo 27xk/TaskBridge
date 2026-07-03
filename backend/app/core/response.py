@@ -17,13 +17,18 @@ def api_success(data: Any = None, message: str = "success", status_code: int = 2
     )
 
 
-def api_error(code: int, message: str, status_code: int) -> JSONResponse:
+def api_error(
+    code: int,
+    message: str,
+    status_code: int,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
+        headers=headers,
         content={
             "code": code,
             "message": message,
             "data": None,
         },
     )
-

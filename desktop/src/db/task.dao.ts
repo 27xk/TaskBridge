@@ -1,10 +1,28 @@
 import { bridge } from "./sqlite";
 
-export async function listTasks(limit = 200, offset = 0, includeDeleted = false): Promise<TaskRecord[]> {
+const TASK_PAGE_SIZE = 1_000;
+const TODAY_TASK_LIMIT = 5_000;
+
+export async function listTasks(limit?: number, offset = 0, includeDeleted = false): Promise<TaskRecord[]> {
+  if (limit === undefined && offset === 0) {
+    return listAllTasks(includeDeleted);
+  }
   return bridge().db.listTasks(limit, offset, includeDeleted);
 }
 
-export async function listTodayTasks(limit = 120): Promise<TaskRecord[]> {
+async function listAllTasks(includeDeleted = false): Promise<TaskRecord[]> {
+  const tasks: TaskRecord[] = [];
+  let offset = 0;
+
+  while (true) {
+    const page = await bridge().db.listTasks(TASK_PAGE_SIZE, offset, includeDeleted);
+    tasks.push(...page);
+    if (page.length < TASK_PAGE_SIZE) return tasks;
+    offset += page.length;
+  }
+}
+
+export async function listTodayTasks(limit = TODAY_TASK_LIMIT): Promise<TaskRecord[]> {
   return bridge().db.listTodayTasks(limit);
 }
 
@@ -31,6 +49,10 @@ export async function saveTasks(tasks: TaskRecord[]): Promise<void> {
 
 export async function softDeleteLocalTask(localId: string): Promise<void> {
   return bridge().db.deleteLocalTask(localId);
+}
+
+export async function purgeLocalTask(localId: string): Promise<void> {
+  return bridge().db.purgeLocalTask(localId);
 }
 
 export async function quickAddTodayTask(title: string): Promise<TaskRecord | null> {

@@ -23,6 +23,22 @@ class ApiHttpError extends Error {
   }
 }
 
+type TokenRefreshResponse = {
+  access_token: string;
+  refresh_token: string;
+};
+
+const ALLOWED_API_PATH_PREFIXES = [
+  "/auth/",
+  "/devices",
+  "/devices/",
+  "/tasks",
+  "/tasks/",
+  "/sync/",
+] as const;
+
+let refreshInFlight: Promise<TokenRefreshResponse> | null = null;
+
 function isInvalidRefreshTokenError(error: unknown): boolean {
   return error instanceof ApiHttpError && (error.status === 401 || error.status === 403);
 }
@@ -44,7 +60,7 @@ export async function performApiRequest<T = unknown>(
   }
 
   try {
-    const refreshed = await refreshToken(tokens.refreshToken);
+    const refreshed = await refreshTokenOnce(tokens.refreshToken);
     setTokens({
       accessToken: refreshed.access_token,
       refreshToken: refreshed.refresh_token,
@@ -57,6 +73,15 @@ export async function performApiRequest<T = unknown>(
     }
     throw refreshError;
   }
+}
+
+function refreshTokenOnce(refreshTokenValue: string): Promise<TokenRefreshResponse> {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshToken(refreshTokenValue).finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
 }
 
 function persistAuthTokensFromResponse(path: string, response: ApiEnvelope<unknown>): void {
@@ -97,10 +122,7 @@ async function sendApiRequest<T>(
   });
 }
 
-async function refreshToken(refreshTokenValue: string): Promise<{
-  access_token: string;
-  refresh_token: string;
-}> {
+async function refreshToken(refreshTokenValue: string): Promise<TokenRefreshResponse> {
   const settings = getSettings();
   const response = await requestJson<{ access_token: string; refresh_token: string }>(
     settings.baseUrl,
@@ -117,7 +139,26 @@ function normalizeApiPath(path: string): string {
   if (!path.startsWith("/") || path.startsWith("//")) {
     throw new Error("Only relative API paths are allowed");
   }
-  return path;
+  if (path.includes("?") || path.includes("#")) {
+    throw new Error("API query strings must be passed via params");
+  }
+  assertAllowedApiPath(path);
+  const normalizedPath = new URL(path, "https://taskbridge.local").pathname;
+  if (normalizedPath !== path) {
+    throw new Error("Invalid API path");
+  }
+  return normalizedPath;
+}
+
+function assertAllowedApiPath(path: string): void {
+  const allowed = ALLOWED_API_PATH_PREFIXES.some((prefix) => {
+    return prefix.endsWith("/")
+      ? path.startsWith(prefix)
+      : path === prefix || path.startsWith(`${prefix}/`);
+  });
+  if (!allowed) {
+    throw new Error("API path is not allowed");
+  }
 }
 
 async function requestJson<T>(

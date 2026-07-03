@@ -3,12 +3,12 @@ import json
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_current_user_session_from_payload, get_db
 from app.core.exceptions import AppException
 from app.core.security import decode_access_token
 from app.services.device_service import ensure_device_registered_by_user_id
-from app.services.websocket_ticket_service import consume_websocket_ticket
 from app.services.websocket_manager import websocket_manager
+from app.services.websocket_ticket_service import consume_websocket_ticket
 from app.utils.time import utc_iso
 
 router = APIRouter(tags=["websocket"])
@@ -22,7 +22,7 @@ async def sync_socket(
     db: Session = Depends(get_db),
 ):
     try:
-        user_id = _authenticate_sync_socket(websocket, device_id, ticket)
+        user_id = _authenticate_sync_socket(websocket, device_id, ticket, db)
         ensure_device_registered_by_user_id(db, user_id, device_id)
     except (AppException, KeyError, ValueError):
         await websocket.close(code=4401)
@@ -68,15 +68,24 @@ def _authenticate_sync_socket(
     websocket: WebSocket,
     device_id: str,
     ticket: str | None,
+    db: Session,
 ) -> int:
     if ticket:
-        user_id = consume_websocket_ticket(ticket, device_id)
-        if user_id is None:
+        ticket_session = consume_websocket_ticket(ticket, device_id)
+        if ticket_session is None:
             raise AppException(status_code=401, message="invalid websocket ticket")
-        return user_id
+        user_id, session_id = ticket_session
+        current_session = get_current_user_session_from_payload(
+            db,
+            {"sub": str(user_id), "device_id": device_id, "session_id": session_id},
+        )
+        return current_session.user.id
 
     payload = decode_access_token(_access_token_from_authorization_header(websocket))
-    return int(payload["sub"])
+    current_session = get_current_user_session_from_payload(db, payload)
+    if current_session.refresh_token.device_id != device_id:
+        raise AppException(status_code=401, message="current session not found")
+    return current_session.user.id
 
 
 def _access_token_from_authorization_header(websocket: WebSocket) -> str:

@@ -17,5 +17,13 @@ class TaskBridgeI18nTest {
         assertEquals("Language", strings.language)
         assertEquals("Settings", strings.settings)
         assertEquals("Sign in", strings.signIn)
+        assertEquals("Location", strings.list)
+        assertEquals("Show password", strings.showPassword)
+        assertEquals("Hide password", strings.hidePassword)
+        assertEquals("Current filters", strings.currentFilters)
+        assertEquals("Restore selected", strings.restoreSelected)
+        assertEquals("Delete selected permanently", strings.deleteSelectedPermanently)
+        assertEquals("More properties", strings.moreSettings)
+        assertEquals("Hide properties", strings.hideSettings)
     }
 }

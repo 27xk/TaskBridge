@@ -46,6 +46,24 @@ class WebSocketTicketResponse(BaseModel):
     expires_in: int
 
 
+class RefreshSessionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    device_id: str | None
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+
+
+class RevokeOtherSessionsRequest(BaseModel):
+    device_id: str = Field(min_length=1, max_length=128)
+
+
+class RevokeSessionsResponse(BaseModel):
+    revoked: int
+
+
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

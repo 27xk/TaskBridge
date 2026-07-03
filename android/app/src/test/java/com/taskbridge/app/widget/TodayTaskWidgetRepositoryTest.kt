@@ -1,6 +1,7 @@
 package com.taskbridge.app.widget
 
 import com.taskbridge.app.data.local.TodayWidgetTaskProjection
+import com.taskbridge.app.fixtures.SharedTimelineFixtures
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -66,10 +67,17 @@ class TodayTaskWidgetRepositoryTest {
     }
 
     @Test
-    fun excludesLowPriorityOpenTasksWithoutTodayOrOverdueTime() {
+    fun excludesUnscheduledOpenTasksWithoutTodayOrOverdueTime() {
         assertFalse(
             TodayTaskWidgetRepository.isWidgetCandidate(
                 task = task(priority = 1),
+                today = "2026-05-20",
+                now = now,
+            ),
+        )
+        assertFalse(
+            TodayTaskWidgetRepository.isWidgetCandidate(
+                task = task(priority = 3),
                 today = "2026-05-20",
                 now = now,
             ),
@@ -89,6 +97,29 @@ class TodayTaskWidgetRepositoryTest {
         val sorted = tasks.sortedForWidget(now, "Asia/Shanghai")
 
         assertEquals(listOf("overdue", "upcoming", "planned", "high", "done"), sorted.map { it.localId })
+    }
+
+    @Test
+    fun widgetOrderingMatchesSharedTimelineFixture() {
+        val fixture = SharedTimelineFixtures.load()
+        val sorted = fixture.tasks
+            .map { item ->
+                TodayWidgetTaskProjection(
+                    localId = item.id,
+                    title = item.id,
+                    status = item.status,
+                    priority = item.priority,
+                    dueTime = item.dueTime,
+                    remindTime = null,
+                    plannedDate = item.plannedDate,
+                    completedAt = item.completedAt,
+                    sortOrder = item.sortOrder,
+                    updatedAt = item.updatedAt,
+                )
+            }
+            .sortedForWidget(Instant.parse(fixture.now), fixture.displayTimeZone)
+
+        assertEquals(fixture.expectedOrder, sorted.map { it.localId })
     }
 
     private fun task(

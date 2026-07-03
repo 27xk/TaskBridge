@@ -43,25 +43,46 @@ def upgrade() -> None:
               )
             """,
         )
-    op.drop_constraint("fk_tasks_parent_task_id_tasks", "tasks", type_="foreignkey")
-    op.create_foreign_key(
-        "fk_tasks_parent_task_id_tasks",
-        "tasks",
-        "tasks",
-        ["parent_task_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+    if bind.dialect.name == "sqlite":
+        with op.batch_alter_table("tasks") as batch_op:
+            batch_op.drop_constraint("fk_tasks_parent_task_id_tasks", type_="foreignkey")
+            batch_op.create_foreign_key(
+                "fk_tasks_parent_task_id_tasks",
+                "tasks",
+                ["parent_task_id"],
+                ["id"],
+                ondelete="SET NULL",
+            )
+    else:
+        op.drop_constraint("fk_tasks_parent_task_id_tasks", "tasks", type_="foreignkey")
+        op.create_foreign_key(
+            "fk_tasks_parent_task_id_tasks",
+            "tasks",
+            "tasks",
+            ["parent_task_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("fk_tasks_parent_task_id_tasks", "tasks", type_="foreignkey")
-    op.create_foreign_key(
-        "fk_tasks_parent_task_id_tasks",
-        "tasks",
-        "tasks",
-        ["parent_task_id"],
-        ["id"],
-    )
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("tasks") as batch_op:
+            batch_op.drop_constraint("fk_tasks_parent_task_id_tasks", type_="foreignkey")
+            batch_op.create_foreign_key(
+                "fk_tasks_parent_task_id_tasks",
+                "tasks",
+                ["parent_task_id"],
+                ["id"],
+            )
+    else:
+        op.drop_constraint("fk_tasks_parent_task_id_tasks", "tasks", type_="foreignkey")
+        op.create_foreign_key(
+            "fk_tasks_parent_task_id_tasks",
+            "tasks",
+            "tasks",
+            ["parent_task_id"],
+            ["id"],
+        )
     op.drop_index("ix_refresh_tokens_device_id", table_name="refresh_tokens")
     op.drop_column("refresh_tokens", "device_id")

@@ -1,7 +1,6 @@
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 

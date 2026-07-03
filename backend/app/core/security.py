@@ -21,7 +21,12 @@ def verify_password(password: str, password_hash: str) -> bool:
     return password_context.verify(password, password_hash)
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(
+    user_id: int,
+    *,
+    device_id: str | None = None,
+    session_id: int | None = None,
+) -> str:
     expires_at = utc_now() + timedelta(minutes=settings.access_token_expire_minutes)
     payload: dict[str, Any] = {
         "sub": str(user_id),
@@ -29,6 +34,10 @@ def create_access_token(user_id: int) -> str:
         "exp": expires_at,
         "iat": utc_now(),
     }
+    if device_id is not None:
+        payload["device_id"] = device_id
+    if session_id is not None:
+        payload["session_id"] = session_id
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
@@ -49,4 +58,3 @@ def create_refresh_token() -> str:
 
 def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-

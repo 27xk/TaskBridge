@@ -5,9 +5,11 @@ import { join } from "node:path";
 import { resolveAppIconPath } from "./app-icon";
 import { createFloatingWindow, showFloatingWindow } from "./floating-window";
 import { registerIpcHandlers } from "./ipc";
+import { showTaskNotification } from "./notification";
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "./shortcut";
-import { getSettings, windows } from "./state";
+import { consumeSettingsRecoveryNotice, getSettings, windows } from "./state";
 import { createAppTray } from "./tray";
+import { initializeAutoUpdater } from "./updater";
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu");
@@ -22,7 +24,7 @@ function createMainWindow(showOnReady = true): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1120,
     height: 760,
-    minWidth: 900,
+    minWidth: 760,
     minHeight: 600,
     title: "TaskBridge",
     icon: resolveAppIconPath(),
@@ -106,6 +108,8 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   const launchedHidden = app.getLoginItemSettings().wasOpenedAsHidden;
   const mainWindow = createMainWindow(!launchedHidden);
+  initializeAutoUpdater(mainWindow);
+  showSettingsRecoveryNotice();
 
   if (process.env.TASKBRIDGE_SMOKE_TEST === "1") {
     const floatingWindow = createFloatingWindow();
@@ -154,3 +158,14 @@ function waitForRendererLoad(window: BrowserWindow): Promise<void> {
 app.on("will-quit", () => {
   unregisterGlobalShortcuts();
 });
+
+function showSettingsRecoveryNotice(): void {
+  const backupPath = consumeSettingsRecoveryNotice();
+  if (!backupPath) return;
+  const settings = getSettings();
+  const body =
+    settings.language === "en-US"
+      ? `Your settings file was corrupted and has been restored. A backup was saved to ${backupPath}.`
+      : `设置文件已损坏并已自动恢复，原文件备份在 ${backupPath}。`;
+  showTaskNotification("TaskBridge", body);
+}

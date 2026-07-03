@@ -8,27 +8,33 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.taskbridge.app.MainActivity
+import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
+import com.taskbridge.app.ui.i18n.AppLanguage
+import com.taskbridge.app.ui.i18n.stringsFor
 import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
 import com.taskbridge.app.widget.WidgetConstants
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import java.time.Instant
 
 class ReminderManager(
     private val context: Context,
+    private val tokenDataStore: TokenDataStore,
 ) {
     fun ensureChannel() {
+        val copy = reminderCopy()
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Task reminders",
+            copy.channelName,
             NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
-            description = "TaskBridge due task reminders"
+            description = copy.channelDescription
         }
         context.getSystemService(NotificationManager::class.java)
             .createNotificationChannel(channel)
@@ -50,11 +56,7 @@ class ReminderManager(
             pendingIntentFlags(),
         )
         val alarmManager = context.getSystemService(AlarmManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-        } else {
-            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
-        }
+        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
     }
 
     fun cancel(task: Task) {
@@ -79,14 +81,15 @@ class ReminderManager(
             return
         }
 
+        val copy = reminderCopy()
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(task.title)
-            .setContentText(task.content ?: "Task reminder")
+            .setContentText(task.content ?: copy.fallbackContent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(openTaskIntent(task.localId))
-            .addAction(0, "完成", actionIntent(task.localId, WidgetConstants.ACTION_COMPLETE, 11_000))
-            .addAction(0, "稍后 1 小时", actionIntent(task.localId, WidgetConstants.ACTION_SNOOZE, 12_000))
+            .addAction(0, copy.completeAction, actionIntent(task.localId, WidgetConstants.ACTION_COMPLETE, 11_000))
+            .addAction(0, copy.snoozeAction, actionIntent(task.localId, WidgetConstants.ACTION_SNOOZE, 12_000))
             .setAutoCancel(true)
             .build()
 
@@ -117,9 +120,30 @@ class ReminderManager(
     }
 
     private fun pendingIntentFlags(): Int {
-        return PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+        return PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     }
+
+    private fun reminderCopy(): ReminderCopy {
+        val language = runBlocking { tokenDataStore.language.first() }
+        val appLanguage = AppLanguage.fromCode(language)
+        val strings = stringsFor(AppLanguage.fromCode(language))
+        val isEnglish = appLanguage == AppLanguage.English
+        return ReminderCopy(
+            channelName = if (isEnglish) "Reminders" else "任务提醒",
+            channelDescription = if (isEnglish) "Due task notifications" else "到期任务通知",
+            fallbackContent = if (isEnglish) strings.reminder else "任务提醒",
+            completeAction = strings.complete,
+            snoozeAction = strings.snoozeOneHour,
+        )
+    }
+
+    private data class ReminderCopy(
+        val channelName: String,
+        val channelDescription: String,
+        val fallbackContent: String,
+        val completeAction: String,
+        val snoozeAction: String,
+    )
 
     companion object {
         const val CHANNEL_ID = "taskbridge_reminders"

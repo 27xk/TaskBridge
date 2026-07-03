@@ -50,6 +50,24 @@ export interface TaskCreatePayload {
 
 export interface TaskUpdatePayload extends Partial<TaskCreatePayload> {
   status?: string;
+  expected_version?: number;
+}
+
+export interface TaskListQuery {
+  q?: string;
+  view?: string;
+  now?: string;
+  status?: string;
+  tag?: string;
+  project?: string;
+  listType?: string;
+  plannedDate?: string;
+  includeDeleted?: boolean;
+  templatesOnly?: boolean;
+  cursorId?: number;
+  cursorUpdatedAt?: string;
+  offset?: number;
+  limit?: number;
 }
 
 export interface ChecklistItemPayload {
@@ -87,8 +105,9 @@ export interface TemplateInstantiatePayload {
   planned_date?: string | null;
 }
 
-export function fetchTasks(): Promise<ServerTaskDto[]> {
-  return unwrap(request.get("/tasks"));
+export function fetchTasks(query: TaskListQuery = {}): Promise<ServerTaskDto[]> {
+  const params = taskListQueryString(query);
+  return unwrap(request.get(params ? `/tasks?${params}` : "/tasks"));
 }
 
 export function fetchTask(taskId: number): Promise<ServerTaskDto> {
@@ -107,8 +126,8 @@ export function updateTask(taskId: number, payload: TaskUpdatePayload): Promise<
   return unwrap(request.put(`/tasks/${taskId}`, payload));
 }
 
-export function deleteTask(taskId: number): Promise<ServerTaskDto> {
-  return unwrap(request.delete(`/tasks/${taskId}`));
+export function deleteTask(taskId: number, expectedVersion?: number): Promise<ServerTaskDto> {
+  return unwrap(request.delete(`/tasks/${taskId}${expectedVersionQuery(expectedVersion)}`));
 }
 
 export function purgeTask(taskId: number): Promise<ServerTaskDto> {
@@ -131,12 +150,12 @@ export function deleteChecklistItem(taskId: number, itemId: string): Promise<Ser
   return unwrap(request.delete(`/tasks/${taskId}/checklist/${itemId}`));
 }
 
-export function completeTask(taskId: number): Promise<ServerTaskDto> {
-  return unwrap(request.post(`/tasks/${taskId}/complete`));
+export function completeTask(taskId: number, expectedVersion?: number): Promise<ServerTaskDto> {
+  return unwrap(request.post(`/tasks/${taskId}/complete${expectedVersionQuery(expectedVersion)}`));
 }
 
-export function restoreTask(taskId: number): Promise<ServerTaskDto> {
-  return unwrap(request.post(`/tasks/${taskId}/restore`));
+export function restoreTask(taskId: number, expectedVersion?: number): Promise<ServerTaskDto> {
+  return unwrap(request.post(`/tasks/${taskId}/restore${expectedVersionQuery(expectedVersion)}`));
 }
 
 export function createNextOccurrence(taskId: number): Promise<ServerTaskDto> {
@@ -148,4 +167,40 @@ export function instantiateTemplate(
   payload: TemplateInstantiatePayload,
 ): Promise<ServerTaskDto> {
   return unwrap(request.post(`/tasks/templates/${templateId}/instantiate`, payload));
+}
+
+function expectedVersionQuery(expectedVersion?: number): string {
+  return Number.isFinite(expectedVersion) ? `?expected_version=${encodeURIComponent(String(expectedVersion))}` : "";
+}
+
+function taskListQueryString(query: TaskListQuery): string {
+  const params = new URLSearchParams();
+  appendStringParam(params, "q", query.q);
+  appendStringParam(params, "view", query.view);
+  appendStringParam(params, "now", query.now);
+  appendStringParam(params, "status", query.status);
+  appendStringParam(params, "tag", query.tag);
+  appendStringParam(params, "project", query.project);
+  appendStringParam(params, "list_type", query.listType);
+  appendStringParam(params, "planned_date", query.plannedDate);
+  appendBooleanParam(params, "include_deleted", query.includeDeleted);
+  appendBooleanParam(params, "templates_only", query.templatesOnly);
+  appendNumberParam(params, "cursor_id", query.cursorId);
+  appendStringParam(params, "cursor_updated_at", query.cursorUpdatedAt);
+  appendNumberParam(params, "offset", query.offset);
+  appendNumberParam(params, "limit", query.limit);
+  return params.toString();
+}
+
+function appendStringParam(params: URLSearchParams, key: string, value: string | undefined): void {
+  const trimmed = value?.trim();
+  if (trimmed) params.set(key, trimmed);
+}
+
+function appendBooleanParam(params: URLSearchParams, key: string, value: boolean | undefined): void {
+  if (value !== undefined) params.set(key, String(value));
+}
+
+function appendNumberParam(params: URLSearchParams, key: string, value: number | undefined): void {
+  if (Number.isFinite(value)) params.set(key, String(value));
 }

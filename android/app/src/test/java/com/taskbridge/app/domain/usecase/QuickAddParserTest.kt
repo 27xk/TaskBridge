@@ -34,4 +34,19 @@ class QuickAddParserTest {
 
         assertEquals("2026-05-20T08:00:00Z", parsed.dueTime)
     }
+
+    @Test
+    fun extractsProjectShorthandWithoutPollutingTitle() {
+        val parsed = QuickAddParser.parse(
+            input = "明天 9 write launch notes @Growth #release P3",
+            now = LocalDateTime.of(2026, 5, 20, 14, 50),
+        )
+
+        assertEquals("write launch notes", parsed.title)
+        assertEquals("Growth", parsed.project)
+        assertEquals("release", parsed.tag)
+        assertEquals(3, parsed.priority)
+        assertEquals("2026-05-21", parsed.plannedDate)
+        assertEquals("2026-05-21T01:00:00Z", parsed.dueTime)
+    }
 }

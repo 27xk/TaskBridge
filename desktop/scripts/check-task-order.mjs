@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { workspaceRoot } from "./script-helpers.mjs";
 import ts from "typescript";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const root = workspaceRoot(import.meta.url);
+const repoRoot = resolve(root, "..");
 const sourcePath = resolve(root, "src/utils/task-order.ts");
 const source = await readFile(sourcePath, "utf8");
 const parserSource = await readFile(resolve(root, "shared/quick-add-parser.ts"), "utf8");
 const dbSource = await readFile(resolve(root, "electron/db.ts"), "utf8");
+const timelineFixtures = JSON.parse(
+  await readFile(resolve(repoRoot, "shared/task-timeline-fixtures.json"), "utf8"),
+);
 const parserCompiled = ts.transpileModule(parserSource, {
   compilerOptions: {
     module: ts.ModuleKind.ES2022,
@@ -24,7 +28,7 @@ const compiled = ts.transpileModule(source.replace('../../shared/quick-add-parse
 }).outputText;
 
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`;
-const { isTaskOverdue, sortCompletedTasksByRecency, sortTasksByTimeline } = await import(moduleUrl);
+const { isCompletedStatus, isTaskOverdue, sortCompletedTasksByRecency, sortTasksByTimeline } = await import(moduleUrl);
 
 const tasks = [
   task("old-due-new-completed", {
@@ -84,8 +88,18 @@ assert.deepEqual(
   }).map((item) => item.localId),
   ["yesterday-late", "today-upcoming", "tomorrow-early", "planned-today", "completed-newest"],
 );
+assert.deepEqual(
+  sortTasksByTimeline(timelineFixtures.timeline.tasks.map(fixtureTask), {
+    now: new Date(timelineFixtures.timeline.now),
+    displayTimeZone: timelineFixtures.timeline.displayTimeZone,
+  }).map((item) => item.localId),
+  timelineFixtures.timeline.expectedOrder,
+  "desktop timeline sort must match the shared cross-client fixture",
+);
 assert.equal(isTaskOverdue(timelineTasks[1], new Date("2026-05-20T08:00:00.000Z")), true);
 assert.equal(isTaskOverdue(timelineTasks[0], new Date("2026-05-20T08:00:00.000Z")), false);
+assert.equal(isCompletedStatus("done"), true, "legacy done status must be treated as completed");
+assert.equal(isTaskOverdue(task("done-overdue", { status: "done", dueTime: "2026-05-01T00:00:00.000Z" })), false);
 assert.equal(
   isTaskOverdue(
     task("same-day-morning-upcoming", {
@@ -120,16 +134,21 @@ assert.equal(
 );
 
 const completedRecencySqlCount = (
-  dbSource.match(/CASE WHEN status = 'completed' THEN COALESCE\(datetime\(completed_at\)/g) ?? []
+  dbSource.match(/CASE WHEN status IN \('completed', 'done'\) THEN COALESCE\(datetime\(completed_at\)/g) ?? []
 ).length;
 assert.ok(completedRecencySqlCount >= 3, "Electron task queries should sort completed tasks by completion recency");
+assert.doesNotMatch(
+  dbSource,
+  /status\s*(?:=|!=)\s*'completed'/,
+  "Electron SQL should use the shared completed-status set instead of single-value completed checks",
+);
 const todayTaskQuery = dbSource.slice(
   dbSource.indexOf("export function listTodayTasks"),
   dbSource.indexOf("export function listTodayFloatingTasks"),
 );
 assert.match(
   todayTaskQuery,
-  /status != 'completed' AND due_time IS NOT NULL AND datetime\(due_time\) < datetime\(@nowTime\)/,
+  /status NOT IN \('completed', 'done'\) AND due_time IS NOT NULL AND datetime\(due_time\) < datetime\(@nowTime\)/,
   "Desktop today tasks should include overdue open tasks by full due date-time",
 );
 
@@ -163,6 +182,20 @@ function task(localId, overrides = {}) {
     createdAt: "2026-05-01T00:00:00.000Z",
     updatedAt: "2026-05-01T00:00:00.000Z",
     lastSyncAt: null,
+    conflictServerJson: null,
+    conflictLocalJson: null,
     ...overrides,
   };
+}
+
+function fixtureTask(item) {
+  return task(item.id, {
+    status: item.status ?? "todo",
+    priority: item.priority ?? 0,
+    dueTime: item.due_time ?? null,
+    plannedDate: item.planned_date ?? null,
+    completedAt: item.completed_at ?? null,
+    sortOrder: item.sort_order ?? 0,
+    updatedAt: item.updated_at ?? "2026-05-01T00:00:00.000Z",
+  });
 }

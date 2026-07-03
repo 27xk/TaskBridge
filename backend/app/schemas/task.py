@@ -1,6 +1,5 @@
 from datetime import date, datetime
-
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -54,6 +53,10 @@ class TaskUpdate(BaseModel):
     is_template: bool | None = None
     template_name: str | None = Field(default=None, max_length=128)
     sort_order: int | None = Field(default=None, ge=0, le=10_000)
+
+
+class TaskUpdateWithVersion(TaskUpdate):
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 class TaskPostponeRequest(BaseModel):
@@ -113,6 +116,26 @@ class TaskImportItem(BaseModel):
 
 class TaskImportRequest(BaseModel):
     tasks: list[TaskImportItem] = Field(min_length=1, max_length=500)
+
+
+class TaskImportPreviewChange(BaseModel):
+    before: Any
+    after: Any
+
+
+class TaskImportPreviewItem(BaseModel):
+    index: int = Field(ge=0)
+    action: Literal["create", "update"]
+    incoming_id: int | None = None
+    existing_id: int | None = None
+    title: str
+    changes: dict[str, TaskImportPreviewChange] = Field(default_factory=dict)
+
+
+class TaskImportPreviewResult(BaseModel):
+    created_count: int = Field(ge=0)
+    updated_count: int = Field(ge=0)
+    items: list[TaskImportPreviewItem]
 
 
 class TaskConflictResolveRequest(BaseModel):

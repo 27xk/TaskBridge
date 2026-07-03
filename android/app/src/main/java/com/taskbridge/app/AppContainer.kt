@@ -21,7 +21,7 @@ class AppContainer(context: Context) {
     private val deviceIdProvider = DeviceIdProvider(appContext)
 
     val authRepository = AuthRepository(apiService, tokenDataStore, deviceIdProvider)
-    val taskRepository = TaskRepository(database, database.taskDao(), database.syncQueueDao())
+    val taskRepository = TaskRepository(apiService, database, database.taskDao(), database.syncQueueDao(), tokenDataStore)
     val syncRepository = SyncRepository(
         apiService = apiService,
         database = database,
@@ -29,6 +29,6 @@ class AppContainer(context: Context) {
         syncQueueDao = database.syncQueueDao(),
         tokenDataStore = tokenDataStore,
     )
-    val syncManager = SyncManager(appContext, syncRepository)
-    val reminderManager = ReminderManager(appContext)
+    val syncManager = SyncManager(appContext, syncRepository, tokenDataStore)
+    val reminderManager = ReminderManager(appContext, tokenDataStore)
 }

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { workspaceRoot } from "./script-helpers.mjs";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const root = workspaceRoot(import.meta.url);
 const stateSource = await readFile(resolve(root, "electron/state.ts"), "utf8");
 const httpSource = await readFile(resolve(root, "electron/http.ts"), "utf8");
 const settingsViewSource = await readFile(resolve(root, "src/views/SettingsView.vue"), "utf8");
@@ -65,30 +65,55 @@ assert.match(
   /networkSettingsDefaultWsUrl/,
   "desktop endpoint migration must remember the previous built-in WebSocket default so later user edits are preserved",
 );
-assert.doesNotMatch(
+assert.match(
+  settingsViewSource,
+  /serverUrlDraft/,
+  "settings page must expose a single user-facing server address draft",
+);
+assert.match(
+  settingsViewSource,
+  /deriveConnectionEndpoints/,
+  "settings page must derive API and WebSocket endpoints from one server address",
+);
+assert.match(
+  settingsViewSource,
+  /testConnection/,
+  "settings page must include a connection test action",
+);
+assert.match(
+  settingsViewSource,
+  /saveConnection/,
+  "settings page must include a dedicated save connection action",
+);
+assert.match(
+  settingsViewSource,
+  /bridge\(\)\.api\.request[\s\S]*\/sync\/status/,
+  "settings page connection test must call the backend sync status endpoint",
+);
+assert.match(
   settingsViewSource,
   /setSetting\("baseUrl"/,
-  "settings page must not expose API base URL edits",
+  "settings page must persist API base URL edits",
 );
-assert.doesNotMatch(
+assert.match(
   settingsViewSource,
   /setSetting\("wsUrl"/,
-  "settings page must not expose sync WebSocket URL edits",
+  "settings page must persist sync WebSocket URL edits",
 );
-assert.doesNotMatch(
+assert.match(
   settingsViewSource,
   /v-model(?:\.trim)?="settings\.baseUrl"/,
-  "settings page must hide the API base URL field",
+  "settings page must expose the API base URL field",
 );
-assert.doesNotMatch(
+assert.match(
   settingsViewSource,
   /v-model(?:\.trim)?="settings\.wsUrl"/,
-  "settings page must hide the sync WebSocket URL field",
+  "settings page must expose the sync WebSocket URL field",
 );
-assert.doesNotMatch(
+assert.match(
   i18nSource,
-  /"settings\.(connection|baseUrl|wsUrl|baseUrlHint|wsUrlHint)"/,
-  "settings page labels must not include backend connection copy",
+  /"settings\.(connection|serverUrl|serverUrlHint|applyServerUrl|saveConnection|connectionSaved|testConnection|connectionTesting|connectionReady|connectionFailed|baseUrl|wsUrl|baseUrlHint|wsUrlHint)"/,
+  "settings page labels must include user-facing server connection copy",
 );
 assert.match(
   httpSource,

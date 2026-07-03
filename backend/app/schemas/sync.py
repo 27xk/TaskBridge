@@ -1,11 +1,14 @@
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.task import ChecklistItem, TaskRead
 
 SyncAction = Literal["create", "update", "delete", "complete", "restore"]
+SYNC_PUSH_MAX_CHANGES = 100
+SYNC_PULL_DEFAULT_LIMIT = 200
+SYNC_PULL_MAX_LIMIT = 500
 
 
 class SyncChange(BaseModel):
@@ -36,7 +39,7 @@ class SyncChange(BaseModel):
 
 class SyncPushRequest(BaseModel):
     device_id: str = Field(min_length=1, max_length=128)
-    changes: list[SyncChange] = Field(min_length=1, max_length=100)
+    changes: list[SyncChange] = Field(min_length=1, max_length=SYNC_PUSH_MAX_CHANGES)
 
 
 class SyncChangeResult(BaseModel):

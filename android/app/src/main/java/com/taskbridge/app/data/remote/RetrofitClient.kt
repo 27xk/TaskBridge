@@ -16,6 +16,7 @@ import okhttp3.Response
 import okhttp3.Route
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.net.URI
 import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
@@ -24,16 +25,23 @@ object RetrofitClient {
         tokenDataStore: TokenDataStore,
         baseUrl: String = BuildConfig.TASKBRIDGE_BASE_URL,
     ): ApiService {
+        val retrofitBaseUrl = normalizeHttpBaseUrl(baseUrl)
         val gson = GsonBuilder().create()
+        val endpointInterceptor = EndpointInterceptor(tokenDataStore, retrofitBaseUrl)
+        val refreshClient = baseHttpClient()
+            .newBuilder()
+            .addInterceptor(endpointInterceptor)
+            .build()
         val refreshApi = Retrofit.Builder()
-            .baseUrl(baseUrl)
+            .baseUrl(retrofitBaseUrl)
             .addConverterFactory(GsonConverterFactory.create(gson))
-            .client(baseHttpClient())
+            .client(refreshClient)
             .build()
             .create(TokenRefreshApi::class.java)
 
         val client = baseHttpClient()
             .newBuilder()
+            .addInterceptor(endpointInterceptor)
             .addInterceptor(AuthInterceptor(tokenDataStore))
             .authenticator(
                 RefreshTokenAuthenticator(
@@ -45,7 +53,7 @@ object RetrofitClient {
             .build()
 
         return Retrofit.Builder()
-            .baseUrl(baseUrl)
+            .baseUrl(retrofitBaseUrl)
             .addConverterFactory(GsonConverterFactory.create(gson))
             .client(client)
             .build()
@@ -59,6 +67,55 @@ object RetrofitClient {
             .writeTimeout(30, TimeUnit.SECONDS)
             .build()
     }
+}
+
+private class EndpointInterceptor(
+    private val tokenDataStore: TokenDataStore,
+    defaultBaseUrl: String,
+) : Interceptor {
+    private val defaultBase = endpointUri(defaultBaseUrl)
+        ?: endpointUri(BuildConfig.TASKBRIDGE_BASE_URL)
+        ?: error("Invalid TASKBRIDGE_BASE_URL")
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val targetBase = endpointUri(runBlocking { tokenDataStore.apiBaseUrl.first() }) ?: defaultBase
+        val original = chain.request()
+        val rewrittenUrl = rewriteUrl(original.url().toString(), targetBase)
+        return chain.proceed(original.newBuilder().url(rewrittenUrl).build())
+    }
+
+    private fun rewriteUrl(originalUrl: String, targetBase: URI): String {
+        val original = URI(originalUrl)
+        val defaultPath = defaultBase.rawPath.trimEnd('/')
+        val relativePath = original.rawPath
+            .removePrefix(defaultPath)
+            .trimStart('/')
+        val targetPath = targetBase.rawPath.trimEnd('/')
+        val nextPath = listOf(targetPath, relativePath)
+            .map { it.trim('/') }
+            .filter { it.isNotBlank() }
+            .joinToString("/", prefix = "/")
+        return URI(
+            targetBase.scheme,
+            targetBase.userInfo,
+            targetBase.host,
+            targetBase.port,
+            nextPath,
+            original.rawQuery,
+            null,
+        ).toASCIIString()
+    }
+}
+
+private fun normalizeHttpBaseUrl(value: String): String {
+    return value.trim().trimEnd('/') + "/"
+}
+
+private fun endpointUri(value: String): URI? {
+    return runCatching {
+        val uri = URI(normalizeHttpBaseUrl(value))
+        if ((uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrBlank()) uri else null
+    }.getOrNull()
 }
 
 private class AuthInterceptor(
@@ -82,27 +139,42 @@ private class RefreshTokenAuthenticator(
     private val refreshApi: TokenRefreshApi,
     private val deviceIdProvider: DeviceIdProvider,
 ) : Authenticator {
+    private val refreshLock = Any()
+
     override fun authenticate(route: Route?, response: Response): Request? {
         if (responseCount(response) >= 2) return null
-        val refreshToken = runBlocking { tokenDataStore.refreshToken.first() } ?: return null
 
-        val tokenPair = try {
-            refreshApi
-                .refresh(RefreshTokenRequestDto(refreshToken, deviceIdProvider.getDeviceId()))
-                .execute()
-                .body()
-                ?.data
-        } catch (_: Exception) {
-            null
-        } ?: return null
+        return synchronized(refreshLock) {
+            val requestAccessToken = response.request().header("Authorization")
+                ?.removePrefix("Bearer ")
+                ?.takeIf { it.isNotBlank() }
+            val currentAccessToken = runBlocking { tokenDataStore.accessToken.first() }
+            if (!currentAccessToken.isNullOrBlank() && currentAccessToken != requestAccessToken) {
+                return@synchronized response.request().newBuilder()
+                    .header("Authorization", "Bearer $currentAccessToken")
+                    .build()
+            }
 
-        runBlocking {
-            tokenDataStore.saveTokens(tokenPair.accessToken, tokenPair.refreshToken)
+            val refreshToken = runBlocking { tokenDataStore.refreshToken.first() } ?: return@synchronized null
+
+            val tokenPair = try {
+                refreshApi
+                    .refresh(RefreshTokenRequestDto(refreshToken, deviceIdProvider.getDeviceId()))
+                    .execute()
+                    .body()
+                    ?.data
+            } catch (_: Exception) {
+                null
+            } ?: return@synchronized null
+
+            runBlocking {
+                tokenDataStore.saveTokens(tokenPair.accessToken, tokenPair.refreshToken)
+            }
+
+            response.request().newBuilder()
+                .header("Authorization", "Bearer ${tokenPair.accessToken}")
+                .build()
         }
-
-        return response.request().newBuilder()
-            .header("Authorization", "Bearer ${tokenPair.accessToken}")
-            .build()
     }
 
     private fun responseCount(response: Response): Int {

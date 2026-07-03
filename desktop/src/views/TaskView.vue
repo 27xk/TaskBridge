@@ -1,47 +1,93 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
+import ConfirmDialog from "../components/ConfirmDialog.vue";
 import TaskEditor from "../components/TaskEditor.vue";
-import TaskItem from "../components/TaskItem.vue";
+import TaskListSection from "../components/TaskListSection.vue";
+import TaskSyncHealthBar from "../components/TaskSyncHealthBar.vue";
+import { useConfirmDialog } from "../composables/useConfirmDialog";
 import { useSettingsStore } from "../stores/settings";
+import { useSyncStore } from "../stores/sync";
 import { useTaskStore, type TaskDraft } from "../stores/task";
-import { isTaskOverdue, sortCompletedTasksByRecency } from "../utils/task-order";
+import { isCompletedStatus, isTaskOverdue, sortCompletedTasksByRecency } from "../utils/task-order";
 import { parseTaskBridgeDate, todayLocalDate } from "../../shared/quick-add-parser";
+import { getTaskActionConfirmationMessage } from "../../shared/task-ui-policy";
 
 const props = defineProps<{
   quickAddSignal?: number;
   openTaskRequest?: { localId: string; nonce: number } | null;
 }>();
 
+const emit = defineEmits<{
+  openSettings: [];
+}>();
+
 const taskStore = useTaskStore();
 const settingsStore = useSettingsStore();
+const syncStore = useSyncStore();
 const editorOpen = ref(false);
+const editorDirty = ref(false);
 const editingTask = ref<TaskRecord | null>(null);
 const search = ref("");
-type TaskFilter = "all" | "inbox" | "today" | "overdue" | "week" | "high" | "completed" | "pending" | "conflict" | "templates";
+type TaskFilter = "all" | "inbox" | "today" | "overdue" | "week" | "high" | "completed" | "pending" | "conflict" | "templates" | "trash";
 
 const filter = ref<TaskFilter>("all");
 const selectedProject = ref("");
 const selectedTag = ref("");
 const notice = ref("");
+const SHORT_NOTICE_MS = 1800;
+const IMPORTANT_NOTICE_MS = 4500;
+const createVisibleEmptyFilters = new Set<TaskFilter>(["all", "inbox", "today"]);
 let noticeTimer: number | undefined;
+const {
+  confirmDialog,
+  requestConfirmation,
+  confirmRequestedAction,
+  cancelRequestedAction,
+} = useConfirmDialog(() => settingsStore.language);
 
-const filterOptions = computed<Array<{ value: TaskFilter; label: string }>>(() => [
+const primaryFilterValues: TaskFilter[] = ["all", "today", "overdue", "completed"];
+const primaryFilterOptions = computed<Array<{ value: TaskFilter; label: string }>>(() => [
   { value: "all", label: settingsStore.t("nav.all") },
-  { value: "inbox", label: settingsStore.t("task.inbox") },
   { value: "today", label: settingsStore.t("nav.today") },
   { value: "overdue", label: settingsStore.t("task.filterOverdue") },
+  { value: "completed", label: settingsStore.t("task.completedCountPrefix") },
+]);
+const secondaryFilterOptions = computed<Array<{ value: TaskFilter; label: string }>>(() => [
+  { value: "inbox", label: settingsStore.t("task.inbox") },
   { value: "week", label: settingsStore.t("task.filterWeek") },
   { value: "high", label: settingsStore.t("task.filterHigh") },
-  { value: "completed", label: settingsStore.t("task.completedCountPrefix") },
   { value: "pending", label: settingsStore.t("task.filterPending") },
   { value: "conflict", label: settingsStore.t("sync.conflict") },
   { value: "templates", label: settingsStore.t("task.template") },
+  { value: "trash", label: settingsStore.t("task.trash") },
 ]);
+const secondaryFilter = computed<TaskFilter | "">({
+  get: () => (primaryFilterValues.includes(filter.value) ? "" : filter.value),
+  set: (value) => {
+    filter.value = value || "all";
+  },
+});
+const activeFilterLabels = computed(() => {
+  const labels: string[] = [];
+  if (filter.value !== "all") {
+    const option = [...primaryFilterOptions.value, ...secondaryFilterOptions.value].find((item) => item.value === filter.value);
+    if (option) labels.push(option.label);
+  }
+  if (selectedProject.value) labels.push(`${settingsStore.t("task.project")}: ${selectedProject.value}`);
+  if (selectedTag.value) labels.push(`${settingsStore.t("task.tag")}: #${selectedTag.value}`);
+  const keyword = search.value.trim();
+  if (keyword) {
+    labels.push(settingsStore.language === "zh-CN" ? `搜索: ${keyword}` : `Search: ${keyword}`);
+  }
+  return labels;
+});
+const hasActiveFilters = computed(() => activeFilterLabels.value.length > 0);
 
 const filteredTasks = computed(() => {
   const keyword = search.value.trim().toLowerCase();
-  return taskStore.activeTasks.filter((task) => {
+  const sourceTasks = filter.value === "trash" ? taskStore.trashTasks : taskStore.activeTasks;
+  return sourceTasks.filter((task) => {
     if (selectedProject.value && task.project !== selectedProject.value) return false;
     if (selectedTag.value && task.tag !== selectedTag.value) return false;
     if (!matchesFilter(task, filter.value)) return false;
@@ -49,7 +95,7 @@ const filteredTasks = computed(() => {
     return `${task.title} ${task.content ?? ""} ${task.tag ?? ""} ${task.project ?? ""}`.toLowerCase().includes(keyword);
   });
 });
-const openFilteredTasks = computed(() => filteredTasks.value.filter((task) => task.status !== "completed"));
+const openFilteredTasks = computed(() => filteredTasks.value.filter((task) => !isCompletedStatus(task.status)));
 const overdueFilteredTasks = computed(() =>
   openFilteredTasks.value.filter((task) => isTaskOverdue(task, taskStore.timelineNow, settingsStore.displayTimeZone)),
 );
@@ -57,9 +103,57 @@ const pendingOpenFilteredTasks = computed(() =>
   openFilteredTasks.value.filter((task) => !isTaskOverdue(task, taskStore.timelineNow, settingsStore.displayTimeZone)),
 );
 const completedFilteredTasks = computed(() =>
-  sortCompletedTasksByRecency(filteredTasks.value.filter((task) => task.status === "completed")),
+  sortCompletedTasksByRecency(filteredTasks.value.filter((task) => isCompletedStatus(task.status))),
 );
-const shouldGroupByCompletion = computed(() => filter.value !== "completed");
+const shouldGroupByCompletion = computed(() => filter.value !== "completed" && filter.value !== "trash");
+const selectedTaskIds = ref<Set<string>>(new Set());
+const selectableOpenTasks = computed(() =>
+  filter.value === "trash"
+    ? filteredTasks.value
+    : filter.value === "completed"
+      ? []
+    : openFilteredTasks.value.filter((task) => !task.isTemplate),
+);
+const bulkActionTargets = computed(() => selectableOpenTasks.value.filter((task) => selectedTaskIds.value.has(task.localId)));
+const bulkActionCountLabel = computed(() =>
+  `${bulkActionTargets.value.length} ${settingsStore.t(filter.value === "trash" ? "task.selectedCountSuffix" : "task.openCountSuffix")}`,
+);
+const canCreateIntoCurrentEmptyView = computed(
+  () => createVisibleEmptyFilters.has(filter.value) && !selectedProject.value && !selectedTag.value && !search.value.trim(),
+);
+const emptyTaskActionLabel = computed(() =>
+  canCreateIntoCurrentEmptyView.value ? settingsStore.t("task.add") : settingsStore.t("task.showAllTasks"),
+);
+const emptyTaskStateText = computed(() => {
+  if (filter.value === "trash") return settingsStore.t("task.emptyTrash");
+  if (search.value.trim()) return settingsStore.t("task.emptySearch");
+  if (hasActiveFilters.value && !canCreateIntoCurrentEmptyView.value) return settingsStore.t("task.emptyFiltered");
+  if (filter.value === "today") return settingsStore.t("task.emptyToday");
+  return settingsStore.t("task.empty");
+});
+const diagnosticSyncIssueCount = computed(
+  () =>
+    syncStore.diagnostics.pendingQueueCount +
+    syncStore.diagnostics.exhaustedQueueCount +
+    syncStore.diagnostics.failedCount +
+    syncStore.diagnostics.conflictCount,
+);
+const taskRecordSyncIssueCount = computed(() => taskStore.tasks.filter((task) => task.syncStatus !== "synced").length);
+const taskSyncIssueCount = computed(() => Math.max(diagnosticSyncIssueCount.value, taskRecordSyncIssueCount.value));
+const taskSyncHealthTone = computed<"ready" | "attention" | "unknown">(() => {
+  if (taskSyncIssueCount.value > 0 || syncStore.status === "error") return "attention";
+  if (syncStore.status === "offline" || syncStore.status === "idle") return "unknown";
+  return "ready";
+});
+const taskSyncHealthText = computed(() => {
+  if (taskSyncIssueCount.value > 0) {
+    return settingsStore.t("task.syncHealthNeedsReview").replace("{count}", String(taskSyncIssueCount.value));
+  }
+  if (syncStore.status === "offline" || syncStore.status === "idle") return settingsStore.t("task.syncHealthUnknown");
+  if (syncStore.status === "error") return settingsStore.t("task.syncHealthDegraded");
+  return settingsStore.t("task.syncHealthReady");
+});
+const editorCreatePreset = computed<"default" | "today">(() => (filter.value === "today" ? "today" : "default"));
 
 watch(
   () => props.quickAddSignal,
@@ -80,14 +174,62 @@ watch(
   { immediate: true },
 );
 
+watch(
+  selectableOpenTasks,
+  (tasks) => {
+    const selectableIds = new Set(tasks.map((task) => task.localId));
+    const nextSelectedIds = new Set([...selectedTaskIds.value].filter((id) => selectableIds.has(id)));
+    if (nextSelectedIds.size !== selectedTaskIds.value.size || [...nextSelectedIds].some((id) => !selectedTaskIds.value.has(id))) {
+      selectedTaskIds.value = nextSelectedIds;
+    }
+  },
+);
+
 function openCreate(): void {
   editingTask.value = null;
+  editorDirty.value = false;
   editorOpen.value = true;
+}
+
+function resetTaskFilters(): void {
+  filter.value = "all";
+  selectedProject.value = "";
+  selectedTag.value = "";
+  search.value = "";
+  clearSelectedTasks();
+}
+
+function handleEmptyStateAction(): void {
+  if (canCreateIntoCurrentEmptyView.value) {
+    openCreate();
+    return;
+  }
+  resetTaskFilters();
+}
+
+function openSyncRecovery(): void {
+  emit("openSettings");
 }
 
 function openEdit(task: TaskRecord): void {
   editingTask.value = task;
+  editorDirty.value = false;
   editorOpen.value = true;
+}
+
+async function closeEditor(): Promise<void> {
+  if (
+    editorDirty.value &&
+    !(await requestConfirmation({
+      message: settingsStore.t("task.discardChangesConfirm"),
+      danger: true,
+    }))
+  ) {
+    return;
+  }
+  editorOpen.value = false;
+  editingTask.value = null;
+  editorDirty.value = false;
 }
 
 async function save(draft: TaskDraft): Promise<void> {
@@ -98,6 +240,7 @@ async function save(draft: TaskDraft): Promise<void> {
   }
   editorOpen.value = false;
   editingTask.value = null;
+  editorDirty.value = false;
   showNotice(settingsStore.t("task.feedbackSaved"));
 }
 
@@ -111,13 +254,144 @@ async function restoreTask(task: TaskRecord): Promise<void> {
   showNotice(`${settingsStore.t("task.feedbackRestored")}：${task.title}`);
 }
 
-function showNotice(message: string): void {
+async function deleteTask(task: TaskRecord): Promise<void> {
+  const message = getTaskActionConfirmationMessage("delete", task.title, settingsStore.language);
+  if (
+    message &&
+    !(await requestConfirmation({
+      message,
+      confirmText: settingsStore.t("task.delete"),
+      danger: true,
+    }))
+  ) {
+    return;
+  }
+  await taskStore.deleteTask(task);
+  showNotice(`${settingsStore.t("task.feedbackDeleted")}：${task.title}`, IMPORTANT_NOTICE_MS);
+}
+
+async function purgeTask(task: TaskRecord): Promise<void> {
+  if (
+    !(await requestConfirmation({
+      message: settingsStore.t("task.purgeConfirm").replace("{title}", task.title),
+      confirmText: settingsStore.t("task.purge"),
+      danger: true,
+    }))
+  ) {
+    return;
+  }
+  await taskStore.purgeTask(task);
+  showNotice(`${settingsStore.t("task.feedbackPurged")}：${task.title}`, IMPORTANT_NOTICE_MS);
+}
+
+async function completeVisibleTasks(): Promise<void> {
+  if (bulkActionTargets.value.length === 0) return;
+  const count = bulkActionTargets.value.length;
+  if (
+    !(await requestConfirmation({
+      message: settingsStore.t("task.completeVisibleConfirm").replace("{count}", String(count)),
+      confirmText: settingsStore.t("task.completeVisible"),
+      danger: true,
+    }))
+  ) {
+    return;
+  }
+  await taskStore.batchComplete(bulkActionTargets.value);
+  clearSelectedTasks();
+  showNotice(settingsStore.t("task.feedbackBatchCompleted"), IMPORTANT_NOTICE_MS);
+}
+
+async function deleteVisibleTasks(): Promise<void> {
+  const count = bulkActionTargets.value.length;
+  if (count === 0) return;
+  if (
+    !(await requestConfirmation({
+      message: settingsStore.t("task.deleteVisibleConfirm").replace("{count}", String(count)),
+      confirmText: settingsStore.t("task.deleteVisible"),
+      danger: true,
+    }))
+  ) {
+    return;
+  }
+  await taskStore.batchDelete(bulkActionTargets.value);
+  clearSelectedTasks();
+  showNotice(settingsStore.t("task.feedbackBatchDeleted"), IMPORTANT_NOTICE_MS);
+}
+
+async function restoreSelectedTrashTasks(): Promise<void> {
+  const count = bulkActionTargets.value.length;
+  if (count === 0) return;
+  await taskStore.batchRestore(bulkActionTargets.value);
+  clearSelectedTasks();
+  showNotice(settingsStore.t("task.feedbackBatchRestored"), IMPORTANT_NOTICE_MS);
+}
+
+async function purgeSelectedTrashTasks(): Promise<void> {
+  const count = bulkActionTargets.value.length;
+  if (count === 0) return;
+  if (
+    !(await requestConfirmation({
+      message: settingsStore.t("task.purgeSelectedConfirm").replace("{count}", String(count)),
+      confirmText: settingsStore.t("task.purgeSelectedTrash"),
+      danger: true,
+    }))
+  ) {
+    return;
+  }
+  await taskStore.batchPurge(bulkActionTargets.value);
+  clearSelectedTasks();
+  showNotice(settingsStore.t("task.feedbackBatchPurged"), IMPORTANT_NOTICE_MS);
+}
+
+function setTaskSelected(task: TaskRecord, selected: boolean): void {
+  const nextSelectedIds = new Set(selectedTaskIds.value);
+  if (selected) {
+    nextSelectedIds.add(task.localId);
+  } else {
+    nextSelectedIds.delete(task.localId);
+  }
+  selectedTaskIds.value = nextSelectedIds;
+}
+
+function clearSelectedTasks(): void {
+  selectedTaskIds.value = new Set();
+}
+
+async function resolveConflictUseServer(task: TaskRecord): Promise<void> {
+  if (
+    !(await requestConfirmation({
+      message: settingsStore.t("sync.useCloudConfirm"),
+      confirmText: settingsStore.t("sync.useServer"),
+      danger: true,
+    }))
+  ) {
+    return;
+  }
+  await taskStore.resolveConflictUseServer(task);
+  showNotice(settingsStore.t("sync.useServer"), IMPORTANT_NOTICE_MS);
+}
+
+async function forceOverwriteServer(task: TaskRecord): Promise<void> {
+  if (
+    !(await requestConfirmation({
+      message: settingsStore.t("sync.overwriteCloudConfirm"),
+      confirmText: settingsStore.t("sync.overwriteServer"),
+      danger: true,
+    }))
+  ) {
+    return;
+  }
+  await taskStore.forceOverwriteServer(task);
+  showNotice(settingsStore.t("sync.overwriteServer"), IMPORTANT_NOTICE_MS);
+}
+
+function showNotice(message: string, duration = SHORT_NOTICE_MS): void {
   notice.value = message;
   if (noticeTimer !== undefined) window.clearTimeout(noticeTimer);
   noticeTimer = window.setTimeout(() => {
     notice.value = "";
     noticeTimer = undefined;
-  }, 1800);
+  }, duration);
 }
 
 function matchesFilter(task: TaskRecord, mode: TaskFilter): boolean {
@@ -125,7 +399,7 @@ function matchesFilter(task: TaskRecord, mode: TaskFilter): boolean {
   const taskDate = task.plannedDate ?? isoDate(task.dueTime);
   switch (mode) {
     case "inbox":
-      return task.listType === "inbox" && task.status !== "completed";
+      return task.listType === "inbox" && !isCompletedStatus(task.status);
     case "today":
       return taskDate === today || task.listType === "today";
     case "overdue":
@@ -137,15 +411,17 @@ function matchesFilter(task: TaskRecord, mode: TaskFilter): boolean {
           taskDate <= todayLocalDate(new Date(taskStore.timelineNow.getTime() + 7 * 86_400_000), settingsStore.displayTimeZone),
       );
     case "high":
-      return task.status !== "completed" && task.priority >= 3;
+      return !isCompletedStatus(task.status) && task.priority >= 3;
     case "completed":
-      return task.status === "completed";
+      return isCompletedStatus(task.status);
     case "pending":
       return task.syncStatus !== "synced";
     case "conflict":
       return task.syncStatus === "conflict";
     case "templates":
       return task.isTemplate;
+    case "trash":
+      return task.isDeleted;
     default:
       return true;
   }
@@ -156,6 +432,7 @@ function isoDate(value: string | null): string | null {
   const date = parseTaskBridgeDate(value);
   return date ? todayLocalDate(date, settingsStore.displayTimeZone) : null;
 }
+
 </script>
 
 <template>
@@ -169,54 +446,129 @@ function isoDate(value: string | null): string | null {
     </header>
 
     <div class="toolbar search-toolbar">
-      <input v-model="search" type="search" :placeholder="settingsStore.t('task.search')" />
+      <input
+        v-model="search"
+        type="search"
+        :aria-label="settingsStore.t('task.search')"
+        :placeholder="settingsStore.t('task.search')"
+      />
+      <button v-if="search.trim()" class="ghost-button" type="button" @click="search = ''">
+        {{ settingsStore.t("task.clearSearch") }}
+      </button>
       <span>{{ settingsStore.t("task.completedCountPrefix") }} {{ taskStore.completedTasks.length }}</span>
     </div>
 
     <div class="filter-toolbar">
       <div class="filter-strip" role="group" :aria-label="settingsStore.t('task.statusFilters')">
         <button
-          v-for="option in filterOptions"
+          v-for="option in primaryFilterOptions"
           :key="option.value"
           type="button"
           :class="{ active: filter === option.value }"
+          :aria-pressed="filter === option.value"
           @click="filter = option.value"
         >
           {{ option.label }}
         </button>
       </div>
       <div class="filter-selects">
-        <select v-model="selectedProject">
-          <option value="">{{ settingsStore.t("task.allProjects") }}</option>
-          <option v-for="project in taskStore.projects" :key="project" :value="project">{{ project }}</option>
-        </select>
-        <select v-model="selectedTag">
-          <option value="">{{ settingsStore.t("task.allTags") }}</option>
-          <option v-for="tag in taskStore.tags" :key="tag" :value="tag">#{{ tag }}</option>
+        <select v-model="secondaryFilter" :aria-label="settingsStore.t('task.moreFilters')">
+          <option value="">{{ settingsStore.t("task.moreFilters") }}</option>
+          <option v-for="option in secondaryFilterOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </div>
+      <details class="filter-advanced-details">
+        <summary>{{ settingsStore.t("task.projectTagFilters") }}</summary>
+        <div class="filter-selects">
+          <select v-model="selectedProject" :aria-label="settingsStore.t('task.allProjects')">
+            <option value="">{{ settingsStore.t("task.allProjects") }}</option>
+            <option v-for="project in taskStore.projects" :key="project" :value="project">{{ project }}</option>
+          </select>
+          <select v-model="selectedTag" :aria-label="settingsStore.t('task.allTags')">
+            <option value="">{{ settingsStore.t("task.allTags") }}</option>
+            <option v-for="tag in taskStore.tags" :key="tag" :value="tag">#{{ tag }}</option>
+          </select>
+        </div>
+      </details>
+    </div>
+
+    <TaskSyncHealthBar
+      :title="settingsStore.t('task.syncHealthTitle')"
+      :text="taskSyncHealthText"
+      :action-label="settingsStore.t('task.syncHealthAction')"
+      :tone="taskSyncHealthTone"
+      @open-details="openSyncRecovery"
+    />
+
+    <div v-if="hasActiveFilters" class="active-filter-bar" aria-live="polite">
+      <span class="active-filter-label">{{ settingsStore.t("task.currentFilters") }}</span>
+      <div class="active-filter-chips">
+        <span v-for="label in activeFilterLabels" :key="label" class="active-filter-chip">{{ label }}</span>
+      </div>
+      <button class="text-button" type="button" @click="resetTaskFilters">
+        {{ settingsStore.t("task.clearFilters") }}
+      </button>
+    </div>
+
+    <div v-if="bulkActionTargets.length > 0" class="bulk-action-toolbar" role="group" :aria-label="settingsStore.t('task.bulkActions')">
+      <span>{{ bulkActionCountLabel }}</span>
+      <template v-if="filter === 'trash'">
+        <button class="secondary-button" type="button" @click="restoreSelectedTrashTasks">
+          {{ settingsStore.t("task.restoreSelectedTrash") }}
+        </button>
+        <button class="secondary-button danger-outline-button" type="button" @click="purgeSelectedTrashTasks">
+          {{ settingsStore.t("task.purgeSelectedTrash") }}
+        </button>
+      </template>
+      <template v-else>
+        <button class="secondary-button" type="button" @click="completeVisibleTasks">
+          {{ settingsStore.t("task.completeVisible") }}
+        </button>
+        <button class="secondary-button danger-outline-button" type="button" @click="deleteVisibleTasks">
+          {{ settingsStore.t("task.deleteVisible") }}
+        </button>
+      </template>
+      <button class="text-button" type="button" @click="clearSelectedTasks">
+        {{ settingsStore.t("task.clearSelection") }}
+      </button>
     </div>
 
     <div v-if="editorOpen" class="drawer-layer">
-      <button class="drawer-scrim" type="button" :aria-label="settingsStore.t('task.close')" @click="editorOpen = false"></button>
+      <button class="drawer-scrim" type="button" :aria-label="settingsStore.t('task.close')" @click="closeEditor"></button>
       <aside class="side-panel">
-        <TaskEditor :task="editingTask" @save="save" @cancel="editorOpen = false" />
+        <TaskEditor
+          :task="editingTask"
+          :create-preset="editorCreatePreset"
+          @save="save"
+          @cancel="closeEditor"
+          @dirty-change="editorDirty = $event"
+        />
       </aside>
     </div>
 
     <p v-if="notice" class="action-feedback">{{ notice }}</p>
 
     <div class="task-list">
-      <template v-if="shouldGroupByCompletion">
-        <div v-if="overdueFilteredTasks.length > 0" class="task-section-header overdue-section">
-          <span>{{ settingsStore.t("task.filterOverdue") }}</span>
-          <strong>{{ overdueFilteredTasks.length }}</strong>
-        </div>
-        <TaskItem
-          v-for="task in overdueFilteredTasks"
-          :key="task.localId"
-          :task="task"
+      <template v-if="filter === 'trash'">
+        <TaskListSection
+          :tasks="filteredTasks"
+          trash
+          selectable
+          :selected-task-ids="selectedTaskIds"
+          @selection-change="setTaskSelected"
+          @restore="restoreTask"
+          @purge="purgeTask"
+        />
+      </template>
+      <template v-else-if="shouldGroupByCompletion">
+        <TaskListSection
+          :title="settingsStore.t('task.filterOverdue')"
+          :tasks="overdueFilteredTasks"
+          tone="overdue"
+          selectable
+          :selected-task-ids="selectedTaskIds"
           @edit="openEdit"
+          @selection-change="setTaskSelected"
           @complete="completeTask"
           @restore="restoreTask"
           @postpone="taskStore.postponeTomorrow"
@@ -224,18 +576,18 @@ function isoDate(value: string | null): string | null {
           @plan-today="taskStore.planToday"
           @next-occurrence="taskStore.createNextOccurrence"
           @instantiate-template="taskStore.instantiateTemplate"
-          @delete="taskStore.deleteTask"
+          @use-server="resolveConflictUseServer"
+          @overwrite-server="forceOverwriteServer"
+          @delete="deleteTask"
         />
 
-        <div v-if="pendingOpenFilteredTasks.length > 0" class="task-section-header">
-          <span>{{ settingsStore.t("task.filterOpen") }}</span>
-          <strong>{{ pendingOpenFilteredTasks.length }}</strong>
-        </div>
-        <TaskItem
-          v-for="task in pendingOpenFilteredTasks"
-          :key="task.localId"
-          :task="task"
+        <TaskListSection
+          :title="settingsStore.t('task.filterOpen')"
+          :tasks="pendingOpenFilteredTasks"
+          selectable
+          :selected-task-ids="selectedTaskIds"
           @edit="openEdit"
+          @selection-change="setTaskSelected"
           @complete="completeTask"
           @restore="restoreTask"
           @postpone="taskStore.postponeTomorrow"
@@ -243,17 +595,16 @@ function isoDate(value: string | null): string | null {
           @plan-today="taskStore.planToday"
           @next-occurrence="taskStore.createNextOccurrence"
           @instantiate-template="taskStore.instantiateTemplate"
-          @delete="taskStore.deleteTask"
+          @use-server="resolveConflictUseServer"
+          @overwrite-server="forceOverwriteServer"
+          @delete="deleteTask"
         />
 
-        <div v-if="completedFilteredTasks.length > 0" class="task-section-header completed-section">
-          <span>{{ settingsStore.t("task.completedCountPrefix") }}</span>
-          <strong>{{ completedFilteredTasks.length }}</strong>
-        </div>
-        <TaskItem
-          v-for="task in completedFilteredTasks"
-          :key="task.localId"
-          :task="task"
+        <TaskListSection
+          :title="settingsStore.t('task.completedCountPrefix')"
+          :tasks="completedFilteredTasks"
+          tone="completed"
+          :selected-task-ids="selectedTaskIds"
           @edit="openEdit"
           @complete="completeTask"
           @restore="restoreTask"
@@ -262,14 +613,15 @@ function isoDate(value: string | null): string | null {
           @plan-today="taskStore.planToday"
           @next-occurrence="taskStore.createNextOccurrence"
           @instantiate-template="taskStore.instantiateTemplate"
-          @delete="taskStore.deleteTask"
+          @use-server="resolveConflictUseServer"
+          @overwrite-server="forceOverwriteServer"
+          @delete="deleteTask"
         />
       </template>
       <template v-else>
-        <TaskItem
-          v-for="task in completedFilteredTasks"
-          :key="task.localId"
-          :task="task"
+        <TaskListSection
+          :tasks="completedFilteredTasks"
+          :selected-task-ids="selectedTaskIds"
           @edit="openEdit"
           @complete="completeTask"
           @restore="restoreTask"
@@ -278,23 +630,26 @@ function isoDate(value: string | null): string | null {
           @plan-today="taskStore.planToday"
           @next-occurrence="taskStore.createNextOccurrence"
           @instantiate-template="taskStore.instantiateTemplate"
-          @delete="taskStore.deleteTask"
+          @use-server="resolveConflictUseServer"
+          @overwrite-server="forceOverwriteServer"
+          @delete="deleteTask"
         />
       </template>
-      <div
-        v-for="task in filteredTasks.filter((item) => item.syncStatus === 'conflict')"
-        :key="`${task.localId}-conflict`"
-        class="conflict-actions"
-      >
-        <span>{{ task.title }} {{ settingsStore.t("sync.conflictExists") }}</span>
-        <button class="secondary-button" type="button" @click="taskStore.resolveConflictUseServer(task)">
-          {{ settingsStore.t("sync.useCloud") }}
-        </button>
-        <button class="secondary-button" type="button" @click="taskStore.forceOverwriteServer(task)">
-          {{ settingsStore.t("sync.overwriteCloud") }}
-        </button>
+      <div v-if="filteredTasks.length === 0" class="empty-state empty-state-action">
+        <span>{{ emptyTaskStateText }}</span>
+        <button class="secondary-button" type="button" @click="handleEmptyStateAction">{{ emptyTaskActionLabel }}</button>
       </div>
-      <p v-if="filteredTasks.length === 0" class="empty-state">{{ settingsStore.t("task.empty") }}</p>
     </div>
+
+    <ConfirmDialog
+      :visible="confirmDialog.visible"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :danger="confirmDialog.danger"
+      @confirm="confirmRequestedAction"
+      @cancel="cancelRequestedAction"
+    />
   </section>
 </template>

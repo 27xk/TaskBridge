@@ -35,13 +35,22 @@ def upgrade() -> None:
         sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0"),
     )
 
-    op.create_foreign_key(
-        "fk_tasks_parent_task_id_tasks",
-        "tasks",
-        "tasks",
-        ["parent_task_id"],
-        ["id"],
-    )
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("tasks") as batch_op:
+            batch_op.create_foreign_key(
+                "fk_tasks_parent_task_id_tasks",
+                "tasks",
+                ["parent_task_id"],
+                ["id"],
+            )
+    else:
+        op.create_foreign_key(
+            "fk_tasks_parent_task_id_tasks",
+            "tasks",
+            "tasks",
+            ["parent_task_id"],
+            ["id"],
+        )
     op.create_index("ix_tasks_project", "tasks", ["project"], unique=False)
     op.create_index("ix_tasks_list_type", "tasks", ["list_type"], unique=False)
     op.create_index("ix_tasks_planned_date", "tasks", ["planned_date"], unique=False)
@@ -53,7 +62,11 @@ def downgrade() -> None:
     op.drop_index("ix_tasks_planned_date", table_name="tasks")
     op.drop_index("ix_tasks_list_type", table_name="tasks")
     op.drop_index("ix_tasks_project", table_name="tasks")
-    op.drop_constraint("fk_tasks_parent_task_id_tasks", "tasks", type_="foreignkey")
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("tasks") as batch_op:
+            batch_op.drop_constraint("fk_tasks_parent_task_id_tasks", type_="foreignkey")
+    else:
+        op.drop_constraint("fk_tasks_parent_task_id_tasks", "tasks", type_="foreignkey")
 
     op.drop_column("tasks", "sort_order")
     op.drop_column("tasks", "template_name")

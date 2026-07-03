@@ -25,8 +25,15 @@ function submit(): void {
       data-floating-quick-add
       type="text"
       maxlength="120"
+      :aria-label="settingsStore.t('floating.addTask')"
       :placeholder="settingsStore.t('floating.placeholder')"
     />
-    <button type="submit" :title="settingsStore.t('floating.addTask')">+</button>
+    <button
+      type="submit"
+      :title="settingsStore.t('floating.addTask')"
+      :aria-label="settingsStore.t('floating.addTask')"
+    >
+      +
+    </button>
   </form>
 </template>

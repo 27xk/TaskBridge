@@ -38,6 +38,7 @@ class TodayTaskWidgetRepository(
 
     suspend fun loadState(): TodayTaskWidgetState {
         val accessToken = tokenDataStore.accessToken.first()
+        val ownerUserId = tokenDataStore.currentUserId.first()
         val opacityPercent = tokenDataStore.widgetOpacityPercent.first()
         val displayTimeZone = tokenDataStore.displayTimeZone.first()
         val taskScope = normalizeScope(tokenDataStore.widgetTaskScope.first())
@@ -45,7 +46,7 @@ class TodayTaskWidgetRepository(
         val style = normalizeStyle(tokenDataStore.widgetStyle.first())
         val today = ShanghaiTime.todayDate(displayTimeZone).toString()
         val now = Instant.now()
-        if (accessToken.isNullOrBlank()) {
+        if (accessToken.isNullOrBlank() || ownerUserId.isNullOrBlank()) {
             return TodayTaskWidgetState(
                 isLoggedIn = false,
                 tasks = emptyList(),
@@ -57,15 +58,15 @@ class TodayTaskWidgetRepository(
 
         val queryLimit = WidgetConstants.MAX_TASKS * 3
         val candidates = if (taskScope == WidgetConstants.TASK_SCOPE_ALL) {
-            taskDao.getAllWidgetTasks(queryLimit, now.toString())
+            taskDao.getAllWidgetTasks(ownerUserId, queryLimit, now.toString())
         } else {
             val (startTime, endTime) = ShanghaiTime.dayBounds(today, displayTimeZone)
             taskDao.getTodayWidgetTasks(
+                ownerUserId = ownerUserId,
                 today = today,
                 startTime = startTime,
                 endTime = endTime,
                 nowTime = now.toString(),
-                highPriority = WidgetConstants.HIGH_PRIORITY,
                 limit = queryLimit,
             ).filter { isWidgetCandidate(it, today, displayTimeZone, now = now) }
         }
@@ -93,14 +94,13 @@ class TodayTaskWidgetRepository(
             task: TodayWidgetTaskProjection,
             today: String,
             displayTimeZone: String = ShanghaiTime.DEFAULT_ZONE_ID,
-            highPriority: Int = WidgetConstants.HIGH_PRIORITY,
             now: Instant = Instant.now(),
         ): Boolean {
             if (isTaskOverdue(task.status, task.dueTime, now, displayTimeZone)) return true
             if (task.dueTime.isToday(today, displayTimeZone)) return true
             if (task.remindTime.isToday(today, displayTimeZone)) return true
             if (task.plannedDate == today) return true
-            return task.status == TaskStatus.Todo.wireName && task.priority >= highPriority
+            return false
         }
     }
 }

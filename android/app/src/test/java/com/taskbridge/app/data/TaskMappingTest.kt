@@ -12,6 +12,7 @@ class TaskMappingTest {
     fun taskEntityMapsToDomainModel() {
         val entity = TaskEntity(
             localId = "local-1",
+            ownerUserId = "1",
             serverId = 10,
             title = "Sync Android app",
             content = "Build Room and Retrofit layers",
@@ -34,6 +35,8 @@ class TaskMappingTest {
             version = 4,
             isDeleted = false,
             syncStatus = "synced",
+            conflictServerJson = """{"title":"Cloud copy"}""",
+            conflictLocalJson = """{"title":"Local copy"}""",
             createdAt = "2026-05-17T10:00:00Z",
             updatedAt = "2026-05-17T11:00:00Z",
             lastSyncAt = "2026-05-17T11:30:00Z",
@@ -45,5 +48,7 @@ class TaskMappingTest {
         assertEquals(10, task.serverId)
         assertEquals(TaskStatus.Completed, task.status)
         assertEquals(SyncStatus.Synced, task.syncStatus)
+        assertEquals("""{"title":"Cloud copy"}""", task.conflictServerJson)
+        assertEquals("""{"title":"Local copy"}""", task.conflictLocalJson)
     }
 }

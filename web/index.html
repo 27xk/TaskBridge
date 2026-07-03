@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="description" content="TaskBridge 跨设备待办" />
+    <meta name="taskbridge-version" content="0.1.6" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>TaskBridge</title>
+    <script type="module" src="./app.js?v=0.1.6"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="./icon.svg" alt="" width="40" height="40" />
+          <div>
+            <strong>TaskBridge</strong>
+            <span data-i18n="brand.tagline">跨设备待办</span>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <label class="language-switch" for="languageSelect">
+            <span data-i18n="language.label">语言</span>
+            <select id="languageSelect" aria-label="语言">
+              <option value="zh-CN">中文</option>
+              <option value="en-US">English</option>
+            </select>
+          </label>
+          <span id="connectionBadge" class="badge badge-neutral">服务器未连接</span>
+          <button id="installAppButton" type="button" class="ghost-button" data-i18n="install.action">查看安装方法</button>
+          <button id="syncStatusButton" type="button" class="ghost-button" data-i18n="sync.status" hidden>同步状态</button>
+          <button id="logoutButton" type="button" class="ghost-button" data-i18n="auth.logout" hidden>退出</button>
+        </div>
+      </header>
+      <aside id="installHelpPanel" class="install-help" aria-live="polite" hidden>
+        <div>
+          <strong data-i18n="install.title">安装 TaskBridge</strong>
+          <p id="installHelpText" data-i18n="install.defaultHelp">根据当前浏览器选择安装入口。</p>
+        </div>
+        <button id="installHelpCloseButton" type="button" class="text-button" data-i18n="install.close">关闭</button>
+      </aside>
+      <aside id="startupFallback" class="startup-fallback" role="alert" aria-live="assertive" hidden>
+        <div>
+          <strong data-i18n="startup.title">页面资源需要刷新</strong>
+          <p data-i18n="startup.message">如果页面长时间没有响应，可能是浏览器还保留着旧的页面资源缓存。刷新不会删除你的本机任务。</p>
+        </div>
+        <div class="startup-fallback-actions">
+          <button id="reloadStartupButton" type="button" class="secondary-button" data-i18n="startup.reload">刷新页面</button>
+          <button id="clearStartupCacheButton" type="button" class="primary-button" data-i18n="startup.clearAndReload">清除页面资源缓存并刷新</button>
+        </div>
+      </aside>
+
+      <main class="layout">
+        <section id="authScreen" class="panel auth-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow" data-i18n="auth.eyebrow">跨设备待办</p>
+              <h1 data-i18n="auth.title">登录 TaskBridge</h1>
+            </div>
+            <div id="authModeSwitch" class="segmented" role="tablist" aria-label="登录模式" data-i18n-aria-label="auth.modeLabel">
+              <button type="button" data-mode="login" class="active" data-i18n="auth.login">登录</button>
+              <button type="button" data-mode="register" data-i18n="auth.register">注册</button>
+            </div>
+          </div>
+          <p id="registrationGateHint" class="status-text registration-gate-hint" aria-live="polite"></p>
+
+          <div class="first-run-guide" aria-label="选择使用方式" data-i18n-aria-label="auth.firstUseTitle">
+            <strong data-i18n="auth.firstUseTitle">已有服务器地址就能登录</strong>
+            <span data-i18n="auth.firstUseExistingServer">把管理员给你的 TaskBridge 服务器地址填到下方，然后直接登录；客户端会自动检查连接。</span>
+            <span data-i18n="auth.firstUseSimpleStart">还没有服务器地址时，再展开下方帮助选择这台电脑试用或长期自托管。</span>
+            <details id="serverSetupHelp" class="first-run-details">
+              <summary data-i18n="auth.serverSetupHelp">没有服务器地址？</summary>
+              <p class="field-help" data-i18n="auth.serverSetupHelpHint">普通使用只需要一个服务器地址；下面两种方式分别适合这台电脑试用和长期自托管。</p>
+              <div class="setup-checklist" aria-label="推荐顺序" data-i18n-aria-label="auth.setupChecklistTitle">
+                <span data-i18n="auth.setupChecklistTitle">推荐顺序</span>
+                <ol>
+                  <li data-i18n="auth.setupStepServer">先确认服务器地址。</li>
+                  <li data-i18n="auth.setupStepCheck">直接登录或注册，客户端会自动检查连接。</li>
+                  <li data-i18n="auth.setupStepAccount">检查连接只用于排查服务器地址。</li>
+                </ol>
+              </div>
+              <details id="localTrialGuide" class="first-run-details">
+                <summary data-i18n="auth.localTrial">Docker 本机试用</summary>
+                <span data-i18n="auth.localTrialDocs">还没有后端时，先打开 Docker 本机试用说明，在后端电脑上启动服务。</span>
+                <a class="text-button local-trial-guide-link" href="./local-trial.html" target="_blank" rel="noreferrer" data-i18n="auth.openLocalTrialGuide">打开 Docker 本机试用说明</a>
+                <span data-i18n="auth.localTrialSameDevice">同一台电脑保持默认地址 127.0.0.1；手机或另一台电脑访问时，填写运行后端那台电脑的局域网 IP。</span>
+                <span data-i18n="auth.localTrialStartBackend">先在电脑上启动 TaskBridge 后端，再回到这里填写服务器地址并登录。手机访问时填写那台电脑的局域网 IP。</span>
+              </details>
+              <details id="selfHostGuide" class="first-run-details">
+                <summary data-i18n="auth.selfHost">自托管部署</summary>
+                <span data-i18n="auth.selfHostHint">如果要自己部署，先打开部署说明完成服务准备，再把服务器地址填到这里。普通用户不需要修改高级连接设置。</span>
+                <a class="text-button self-host-guide-link" href="./self-hosting.html" target="_blank" rel="noreferrer" data-i18n="auth.openSelfHostGuide">打开自托管部署说明</a>
+                <span data-i18n="auth.selfHostFirstAccount">生产环境关闭公开注册时，请先在后端容器内创建首个账号。</span>
+              </details>
+            </details>
+          </div>
+
+          <form id="authForm" class="form-grid">
+            <label class="field">
+              <span data-i18n="auth.serverUrl">服务器地址</span>
+              <input
+                id="serverBaseUrl"
+                type="url"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="https://taskbridge.example.com"
+              />
+              <small data-i18n="auth.serverUrlHint">填写 TaskBridge 服务器地址即可，高级连接设置会自动生成。</small>
+              <small id="serverLocalhostHint" class="field-warning" hidden></small>
+            </label>
+            <button id="showAdvancedConnectionButton" type="button" class="text-button advanced-connection-reveal" data-i18n="auth.showAdvancedConnection">
+              自定义代理或高级部署设置
+            </button>
+            <details id="advancedConnectionSettings" class="advanced-connection-settings" hidden>
+              <summary data-i18n="auth.advancedConnection">高级连接设置</summary>
+              <div class="form-grid advanced-connection-grid">
+                <label class="field">
+                  <span data-i18n="auth.apiUrlGenerated">请求地址（自动生成）</span>
+                  <input id="apiBaseUrl" type="url" autocomplete="off" spellcheck="false" />
+                </label>
+                <div class="field">
+                  <span data-i18n="auth.deviceIdGenerated">设备标识（自动生成）</span>
+                  <input id="deviceId" type="text" autocomplete="off" spellcheck="false" readonly />
+                  <small data-i18n="auth.deviceIdHint">用于区分这台设备的同步记录，普通用户不需要修改。</small>
+                  <button id="regenerateDeviceIdButton" type="button" class="text-button" data-i18n="auth.regenerateDeviceId">重新生成设备标识</button>
+                </div>
+              </div>
+            </details>
+            <label class="field auth-register-only" hidden>
+              <span data-i18n="auth.username">用户名</span>
+              <input id="username" type="text" autocomplete="username" />
+            </label>
+            <label class="field auth-register-only" hidden>
+              <span data-i18n="auth.email">邮箱</span>
+              <input id="email" type="email" autocomplete="email" />
+            </label>
+            <label class="field auth-login-only">
+              <span data-i18n="auth.account">账号</span>
+              <input id="usernameOrEmail" type="text" autocomplete="username" required />
+            </label>
+            <label class="field">
+              <span data-i18n="auth.password">密码</span>
+              <div class="password-field">
+                <input id="password" type="password" autocomplete="current-password" required />
+                <button
+                  id="togglePasswordVisibilityButton"
+                  type="button"
+                  class="text-button password-toggle-button"
+                  data-i18n="auth.showPassword"
+                  data-i18n-aria-label="auth.showPassword"
+                  aria-pressed="false"
+                >
+                  显示密码
+                </button>
+              </div>
+            </label>
+
+            <div class="form-actions">
+              <button id="authSubmitButton" type="submit" class="primary-button" data-i18n="auth.login">登录</button>
+              <button id="testConnectionButton" type="button" class="secondary-button" data-i18n="auth.checkConnection">检查连接</button>
+            </div>
+            <p class="status-text auth-helper-text" data-i18n="auth.loginAutoChecksConnection">登录会自动检查连接；检查连接只用于排查服务器地址。</p>
+            <p id="authMessage" class="status-text" aria-live="polite"></p>
+          </form>
+        </section>
+
+        <section id="appScreen" class="workspace" hidden>
+          <aside class="panel sidebar">
+            <nav class="mobile-quick-actions" aria-label="常用操作" data-i18n-aria-label="app.mobileQuickActions">
+              <button id="mobileQuickCreateButton" type="button" class="primary-button" data-i18n="task.newTaskShortcut">新建任务</button>
+              <button id="mobileQuickTaskListButton" type="button" class="secondary-button" data-i18n="task.taskListShortcut">任务列表</button>
+            </nav>
+
+            <section class="stack">
+              <div class="section-head">
+                <h2 data-i18n="app.account">账户</h2>
+                <button id="refreshAllButton" type="button" class="text-button" data-i18n="app.refresh">刷新</button>
+              </div>
+              <dl class="info-list">
+                <div>
+                  <dt data-i18n="app.user">用户</dt>
+                  <dd id="userDisplay">-</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section class="stack">
+              <div class="section-head">
+                <h2 data-i18n="app.syncStatus">同步状态</h2>
+                <div class="sync-status-actions">
+                  <span id="syncBadge" class="badge badge-neutral">-</span>
+                  <button id="openSyncSupportButton" type="button" class="text-button" data-i18n="app.openSyncSupport">查看同步详情</button>
+                </div>
+              </div>
+              <p id="syncSummary" class="sidebar-note" data-i18n="sync.noStatus">尚未检查同步状态。</p>
+              <p id="syncNextStep" class="sidebar-note sync-next-step" data-i18n="app.syncNextStep">下一步：继续记录任务，TaskBridge 会自动同步。</p>
+              <p class="sidebar-note sync-decision" data-i18n="app.syncDecision">只要这里没有显示待同步、失败或冲突，你通常不需要手动处理。</p>
+            </section>
+
+            <section class="stack">
+              <h2 data-i18n="app.views">视图</h2>
+              <div id="viewButtons" class="view-list"></div>
+              <label class="field more-view-field">
+                <span data-i18n="view.moreFilters">列表与状态</span>
+                <select id="moreViewSelect" aria-label="列表与状态" data-i18n-aria-label="view.moreFilters">
+                  <option value="" data-i18n="view.moreFilters">列表与状态</option>
+                </select>
+              </label>
+            </section>
+
+            <section class="stack">
+              <h2 data-i18n="app.stats">统计</h2>
+              <div id="metaCounts" class="chip-grid"></div>
+            </section>
+
+            <section class="stack">
+              <details id="supportDataTools" class="sidebar-details support-tools-panel">
+                <summary data-i18n="app.supportDataTools">同步问题与数据安全</summary>
+                <section id="syncAdvancedDiagnostics" class="support-tools-section">
+                  <h3>
+                    <span data-i18n="app.syncAdvancedDiagnostics">同步详情</span>
+                    <span data-i18n="app.syncDetails" hidden>同步详情</span>
+                  </h3>
+                  <dl id="syncDetails" class="info-list"></dl>
+                </section>
+                <section id="developerDiagnostics" class="support-tools-section technical-support-section">
+                  <h3 data-i18n="app.diagnostics">问题排查</h3>
+                  <dl class="info-list">
+                    <div>
+                      <dt data-i18n="app.apiAddress">接口地址</dt>
+                      <dd id="apiDisplay">-</dd>
+                    </div>
+                    <div>
+                      <dt data-i18n="app.deviceId">设备标识</dt>
+                      <dd id="deviceDisplay">-</dd>
+                    </div>
+                  </dl>
+                  <label class="checkbox-line diagnostics-toggle">
+                    <input id="clientErrorReportingToggle" type="checkbox" />
+                    <span data-i18n="app.clientErrorReporting">允许发送浏览器错误用于排障</span>
+                  </label>
+                  <p id="clientErrorDiagnosticsNotice" class="diagnostics-note" data-i18n="app.clientErrorReportingHint">
+                    登录后，浏览器错误会在开启后发送用于排障；上报内容包含应用版本、页面路径、浏览器类型和脱敏后的错误堆栈，不包含密码、令牌或完整链接参数。
+                  </p>
+                </section>
+                <section id="localDataTools" class="support-tools-section">
+                  <h3 data-i18n="app.localData">数据与备份</h3>
+                  <p class="sidebar-note" data-i18n="app.localDataHint">导出或导入这台设备的离线任务备份。清除此设备数据只会删除本机缓存和登录状态，不会删除服务器上的任务。</p>
+                  <p class="sidebar-note" data-i18n="app.localDataSafetyHint">清除前先确认没有待同步、同步失败或冲突的任务；不确定时先导出本机备份。</p>
+                  <p id="clearLocalDataBlockedHint" class="sidebar-note danger-note" data-i18n="app.clearLocalDataBlocked" hidden>当前还有待同步、同步失败或冲突的任务。请先在同步详情中处理，或先导出本机备份后再清除此设备数据。</p>
+                  <div class="sidebar-actions">
+                    <button id="exportLocalBackupButton" type="button" class="text-button" data-i18n="app.exportLocalBackup">导出本机备份</button>
+                    <label class="file-button" for="importLocalBackupInput">
+                      <span data-i18n="app.importLocalBackup">导入本机备份</span>
+                      <input id="importLocalBackupInput" type="file" accept=".json,application/json" hidden />
+                    </label>
+                    <button id="undoLocalBackupImportButton" type="button" class="text-button" data-i18n="app.undoLocalBackupImport" hidden>撤销上次导入</button>
+                    <button id="clearLocalDataButton" type="button" class="text-button danger-text-button" data-i18n="app.clearLocalData">退出并清除此设备数据</button>
+                  </div>
+                  <p id="localDataMessage" class="status-text" aria-live="polite"></p>
+                </section>
+              </details><!-- supportDataTools -->
+            </section>
+          </aside>
+
+          <section class="panel main-panel">
+            <section class="stack task-create-stack">
+              <section id="taskCreateDetails" class="task-create-details task-create-panel" aria-labelledby="taskCreateHeading">
+                <div class="section-head task-create-summary">
+                  <h2 id="taskCreateHeading" data-i18n="task.newTask">新建任务</h2>
+                  <span class="status-text task-create-summary-hint" data-i18n="task.createCollapsedHint">直接填写标题即可，更多属性可稍后展开。</span>
+                </div>
+                <p id="taskMessage" class="status-text"></p>
+                <form id="taskForm" class="form-grid task-form">
+                  <label class="field span-2">
+                    <span data-i18n="task.title">标题</span>
+                    <input id="taskTitle" type="text" maxlength="255" required placeholder="例如：明天下午 3 点写周报 #工作 @项目 P3" data-i18n-placeholder="task.quickPlaceholder" />
+                  </label>
+                  <p id="taskQuickPreview" class="quick-preview span-2" aria-live="polite" hidden></p>
+                  <label class="field span-2">
+                    <span data-i18n="task.content">内容</span>
+                    <textarea id="taskContent" rows="3" maxlength="10000"></textarea>
+                  </label>
+                  <details id="taskAdvancedFields" class="advanced-task-fields span-2">
+                    <summary data-i18n="task.moreSettings">更多属性</summary>
+                    <div class="task-quick-fields span-2">
+                      <label class="field">
+                        <span data-i18n="task.priority">优先级</span>
+                        <select id="taskPriority">
+                          <option value="0" data-i18n="task.priorityNone">无优先级</option>
+                          <option value="1" data-i18n="task.priorityLow">低</option>
+                          <option value="2" data-i18n="task.priorityMedium">中</option>
+                          <option value="3" data-i18n="task.priorityHigh">高</option>
+                          <option value="4" data-i18n="task.priorityUrgent">紧急</option>
+                          <option value="5" data-i18n="task.priorityHighest">最高</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span data-i18n="task.list">归类</span>
+                        <select id="taskListType">
+                          <option value="inbox" data-i18n="task.listInbox">收件箱</option>
+                          <option value="today" data-i18n="task.listToday">今日</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span data-i18n="task.plannedDate">计划日期</span>
+                        <input id="taskPlannedDate" type="date" />
+                      </label>
+                      <label class="field">
+                        <span data-i18n="task.dueTime">截止时间</span>
+                        <input id="taskDueTime" type="datetime-local" />
+                      </label>
+                      <label class="field">
+                        <span data-i18n="task.remindTime">提醒时间</span>
+                        <input id="taskRemindTime" type="datetime-local" />
+                      </label>
+                    </div>
+                    <p class="field-help span-2" data-i18n="task.scheduleHelp">计划日期表示哪天要做；截止时间表示最晚完成时间；提醒时间只负责通知。</p>
+                    <div class="form-grid advanced-task-grid">
+                      <label class="field">
+                        <span data-i18n="task.project">项目</span>
+                        <input id="taskProject" type="text" maxlength="128" />
+                      </label>
+                      <label class="field">
+                        <span data-i18n="task.tag">标签</span>
+                        <input id="taskTag" type="text" maxlength="64" />
+                      </label>
+                      <label class="field">
+                        <span data-i18n="task.repeat">重复</span>
+                        <select id="taskRepeatRule">
+                          <option value="" data-i18n="task.repeatNone">不重复</option>
+                          <option value="daily" data-i18n="task.repeatDaily">每天</option>
+                          <option value="weekly" data-i18n="task.repeatWeekly">每周</option>
+                          <option value="monthly" data-i18n="task.repeatMonthly">每月</option>
+                        </select>
+                      </label>
+                      <div class="field span-2">
+                        <span data-i18n="task.steps">步骤</span>
+                        <textarea id="taskChecklist" rows="3" maxlength="10000" placeholder="每行一个步骤" data-i18n-placeholder="task.stepsPlaceholder"></textarea>
+                        <small data-i18n="task.stepsHint">用于拆分任务，已完成的步骤会在编辑时尽量保留。</small>
+                        <div id="taskChecklistItems" class="checklist-draft-items" aria-live="polite"></div>
+                      </div>
+                      <label class="checkbox-line span-2">
+                        <input id="taskIsTemplate" type="checkbox" />
+                        <span data-i18n="task.saveAsTemplate">保存为模板</span>
+                      </label>
+                      <label class="field span-2" id="taskTemplateNameField" hidden>
+                        <span data-i18n="task.templateName">模板名称</span>
+                        <input id="taskTemplateName" type="text" maxlength="128" />
+                      </label>
+                    </div>
+                  </details>
+                  <div class="form-actions span-2">
+                    <button id="taskSubmitButton" type="submit" class="primary-button" data-i18n="task.create">创建</button>
+                    <button id="resetTaskFormButton" type="button" class="secondary-button" data-i18n="task.reset">重置</button>
+                    <button id="cancelEditButton" type="button" class="ghost-button" data-i18n="task.cancelEdit" hidden>取消编辑</button>
+                  </div>
+                </form>
+              </section>
+            </section>
+
+            <section class="stack task-list-stack">
+              <div class="section-head">
+                <h2 data-i18n="task.tasks">任务</h2>
+                <div class="task-list-actions">
+                  <span id="taskSummary" class="status-text"></span>
+                  <button id="openTaskCreateButton" type="button" class="primary-button" data-i18n="task.backToNewTask">回到新建任务</button>
+                </div>
+              </div>
+              <div class="search-row">
+                <label class="field search-field">
+                  <span data-i18n="task.search">搜索</span>
+                  <input id="taskSearch" type="search" placeholder="标题、内容、项目、标签" data-i18n-placeholder="task.searchPlaceholder" />
+                </label>
+                <button id="clearSearchButton" type="button" class="ghost-button" data-i18n="task.clearSearch">清空</button>
+              </div>
+              <div id="taskSyncHealthBar" class="task-sync-health-bar" aria-live="polite">
+                <span id="taskSyncHealthText" data-i18n="task.syncHealthReady">当前无需处理，继续记录任务，TaskBridge 会自动同步。</span>
+                <button id="taskSyncHealthActionButton" type="button" class="text-button" data-i18n="app.openSyncSupport">查看同步详情</button>
+              </div>
+              <div id="taskFilterSummary" class="active-filter-bar" aria-live="polite" hidden>
+                <span class="active-filter-label" data-i18n="task.currentFilters">当前筛选</span>
+                <div id="taskActiveFilterChips" class="active-filter-chips"></div>
+                <button id="clearTaskFiltersButton" type="button" class="text-button" data-i18n="task.clearFilters">清空筛选</button>
+              </div>
+              <ul id="taskList" class="task-list" aria-live="polite"></ul>
+            </section>
+          </section>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+      <div id="confirmDialog" class="confirm-backdrop" role="presentation" hidden>
+        <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmDialogTitle">
+          <h2 id="confirmDialogTitle" data-i18n="confirm.title">确认操作</h2>
+          <p id="confirmDialogMessage"></p>
+          <div class="confirm-actions">
+            <button id="confirmDialogCancelButton" type="button" class="secondary-button" data-i18n="confirm.cancel">取消</button>
+            <button id="confirmDialogConfirmButton" type="button" class="primary-button" data-i18n="confirm.confirm">确认</button>
+          </div>
+        </section>
+      </div>
+    </div>
+    <script>
+      (() => {
+        window.taskBridgeWebReady ??= false;
+        const showStartupFallback = () => {
+          if (window.taskBridgeWebReady) return;
+          const panel = document.getElementById("startupFallback");
+          if (panel) panel.hidden = false;
+        };
+        const reloadPage = () => window.location.reload();
+        const clearOfflineCacheAndReload = async () => {
+          if ("serviceWorker" in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+          }
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((key) => caches.delete(key)));
+          }
+          reloadPage();
+        };
+        window.addEventListener("DOMContentLoaded", () => {
+          document.getElementById("reloadStartupButton")?.addEventListener("click", reloadPage);
+          document
+            .getElementById("clearStartupCacheButton")
+            ?.addEventListener("click", () => {
+              void clearOfflineCacheAndReload();
+            });
+          window.setTimeout(showStartupFallback, 4000);
+        });
+      })();
+    </script>
+  </body>
+</html>

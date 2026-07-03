@@ -8,6 +8,7 @@ import com.taskbridge.app.data.remote.dto.DeviceRegisterRequestDto
 import com.taskbridge.app.data.remote.dto.LoginRequestDto
 import com.taskbridge.app.data.remote.dto.RefreshTokenRequestDto
 import com.taskbridge.app.data.remote.dto.RegisterRequestDto
+import com.taskbridge.app.data.remote.dto.RegistrationStatusDto
 import com.taskbridge.app.data.remote.dto.SyncPullResponseDto
 import com.taskbridge.app.data.remote.dto.SyncPushRequestDto
 import com.taskbridge.app.data.remote.dto.SyncPushResponseDto
@@ -33,6 +34,9 @@ interface ApiService {
     @POST("auth/register")
     suspend fun register(@Body request: RegisterRequestDto): ApiEnvelope<TokenPairDto>
 
+    @GET("auth/registration")
+    suspend fun registrationStatus(): ApiEnvelope<RegistrationStatusDto>
+
     @POST("auth/login")
     suspend fun login(@Body request: LoginRequestDto): ApiEnvelope<TokenPairDto>
 
@@ -42,13 +46,31 @@ interface ApiService {
     @GET("auth/me")
     suspend fun me(): ApiEnvelope<UserDto>
 
+    @GET("sync/status")
+    suspend fun syncStatus(): ApiEnvelope<Map<String, Any?>>
+
     @POST("auth/ws-ticket")
     suspend fun createWebSocketTicket(
         @Body request: WebSocketTicketRequestDto,
     ): ApiEnvelope<WebSocketTicketDto>
 
     @GET("tasks")
-    suspend fun getTasks(): ApiEnvelope<List<TaskDto>>
+    suspend fun getTasks(
+        @Query("q") q: String? = null,
+        @Query("view") view: String? = null,
+        @Query("now") now: String? = null,
+        @Query("status") status: String? = null,
+        @Query("tag") tag: String? = null,
+        @Query("project") project: String? = null,
+        @Query("list_type") listType: String? = null,
+        @Query("planned_date") plannedDate: String? = null,
+        @Query("include_deleted") includeDeleted: Boolean? = null,
+        @Query("templates_only") templatesOnly: Boolean? = null,
+        @Query("cursor_id") cursorId: Int? = null,
+        @Query("cursor_updated_at") cursorUpdatedAt: String? = null,
+        @Query("offset") offset: Int? = null,
+        @Query("limit") limit: Int? = null,
+    ): ApiEnvelope<List<TaskDto>>
 
     @POST("tasks")
     suspend fun createTask(@Body request: TaskCreateRequestDto): ApiEnvelope<TaskDto>
@@ -66,7 +88,10 @@ interface ApiService {
     ): ApiEnvelope<TaskDto>
 
     @DELETE("tasks/{task_id}")
-    suspend fun deleteTask(@Path("task_id") taskId: Int): ApiEnvelope<TaskDto>
+    suspend fun deleteTask(
+        @Path("task_id") taskId: Int,
+        @Query("expected_version") expectedVersion: Int? = null,
+    ): ApiEnvelope<TaskDto>
 
     @DELETE("tasks/{task_id}/purge")
     suspend fun purgeTask(@Path("task_id") taskId: Int): ApiEnvelope<TaskDto>
@@ -91,10 +116,16 @@ interface ApiService {
     ): ApiEnvelope<TaskDto>
 
     @POST("tasks/{task_id}/complete")
-    suspend fun completeTask(@Path("task_id") taskId: Int): ApiEnvelope<TaskDto>
+    suspend fun completeTask(
+        @Path("task_id") taskId: Int,
+        @Query("expected_version") expectedVersion: Int? = null,
+    ): ApiEnvelope<TaskDto>
 
     @POST("tasks/{task_id}/restore")
-    suspend fun restoreTask(@Path("task_id") taskId: Int): ApiEnvelope<TaskDto>
+    suspend fun restoreTask(
+        @Path("task_id") taskId: Int,
+        @Query("expected_version") expectedVersion: Int? = null,
+    ): ApiEnvelope<TaskDto>
 
     @POST("tasks/{task_id}/next-occurrence")
     suspend fun createNextOccurrence(@Path("task_id") taskId: Int): ApiEnvelope<TaskDto>

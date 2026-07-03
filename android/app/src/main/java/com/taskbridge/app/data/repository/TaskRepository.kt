@@ -1,11 +1,15 @@
 package com.taskbridge.app.data.repository
 
 import androidx.room.withTransaction
+import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.local.SyncQueueDao
+import com.taskbridge.app.data.local.SyncQueueCounts
 import com.taskbridge.app.data.local.SyncQueueEntity
 import com.taskbridge.app.data.local.AppDatabase
 import com.taskbridge.app.data.local.TaskDao
 import com.taskbridge.app.data.local.TaskEntity
+import com.taskbridge.app.data.remote.ApiService
+import com.taskbridge.app.data.remote.dto.TaskDto
 import com.taskbridge.app.domain.model.SyncStatus
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
@@ -16,6 +20,9 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import java.time.Instant
 import java.time.LocalDate
@@ -23,12 +30,13 @@ import java.util.UUID
 
 private val taskRepositoryGson = Gson()
 private val checklistType = object : TypeToken<List<LocalChecklistItem>>() {}.type
-private const val MAX_IMPORT_BYTES = 1_000_000
+private const val MAX_IMPORT_BYTES = 20_000_000
 private const val MAX_IMPORT_TASKS = 500
-private const val ACTIVE_TASK_LIMIT = 200
-private const val TODAY_TASK_LIMIT = 120
-private const val SEARCH_TASK_LIMIT = 100
+private const val ACTIVE_TASK_LIMIT = 5_000
+private const val TODAY_TASK_LIMIT = 5_000
+private const val SEARCH_TASK_LIMIT = 500
 private const val BACKUP_EXPORT_LIMIT = 5_000
+private const val SIGNED_OUT_OWNER = "signed-out"
 private val ACCEPTED_BACKUP_FORMATS = setOf(
     "taskbridge.local.backup.v1",
     "taskbridge.android.backup.v1",
@@ -41,36 +49,133 @@ private data class LocalChecklistItem(
     val done: Boolean,
 )
 
+data class BackupImportResult(
+    val importedCount: Int,
+    val importedLocalIds: List<String>,
+    val importedUndoItems: List<BackupImportUndoItem> = emptyList(),
+    val scannedCount: Int = 0,
+    val skippedCount: Int = 0,
+    val errorCode: BackupImportErrorCode? = null,
+)
+
+data class BackupImportUndoItem(
+    val localId: String,
+    val importedUpdatedAt: String,
+)
+
+data class BackupImportUndoResult(
+    val undoneCount: Int,
+    val skippedChangedCount: Int,
+)
+
+data class BackupImportPreview(
+    val importableCount: Int,
+    val scannedCount: Int,
+    val skippedCount: Int,
+    val errorCode: BackupImportErrorCode? = null,
+)
+
+enum class BackupImportErrorCode {
+    FileTooLarge,
+    InvalidJson,
+    UnsupportedFormat,
+    MissingTasks,
+    NoValidTasks,
+}
+
+private data class BackupImportParseResult(
+    val tasks: List<TaskEntity>,
+    val scannedCount: Int,
+    val skippedCount: Int,
+    val errorCode: BackupImportErrorCode? = null,
+)
+
 class TaskRepository(
+    private val apiService: ApiService,
     private val database: AppDatabase,
     private val taskDao: TaskDao,
     private val syncQueueDao: SyncQueueDao,
+    private val tokenDataStore: TokenDataStore,
 ) {
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun observeTasks(now: Instant = Instant.now()): Flow<List<Task>> {
-        return taskDao.observeActiveTasks(ACTIVE_TASK_LIMIT, now.toString())
-            .map { tasks -> tasks.map { it.toDomain() } }
+        return tokenDataStore.currentUserId.flatMapLatest { ownerUserId ->
+            if (ownerUserId.isNullOrBlank()) {
+                flowOf(emptyList())
+            } else {
+                taskDao.observeActiveTasks(ownerUserId, ACTIVE_TASK_LIMIT, now.toString())
+                    .map { tasks -> tasks.map { it.toDomain() } }
+            }
+        }
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun observeTrashTasks(): Flow<List<Task>> {
+        return tokenDataStore.currentUserId.flatMapLatest { ownerUserId ->
+            if (ownerUserId.isNullOrBlank()) {
+                flowOf(emptyList())
+            } else {
+                taskDao.observeDeletedTasks(ownerUserId, ACTIVE_TASK_LIMIT)
+                    .map { tasks -> tasks.map { it.toDomain() } }
+            }
+        }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun observeTodayTasks(
         todayPrefix: String,
         timeZoneId: String = ShanghaiTime.DEFAULT_ZONE_ID,
         now: Instant = Instant.now(),
     ): Flow<List<Task>> {
         val (startTime, endTime) = ShanghaiTime.dayBounds(todayPrefix, timeZoneId)
-        return taskDao.observeTodayTasks(todayPrefix, startTime, endTime, now.toString(), TODAY_TASK_LIMIT)
-            .map { tasks -> tasks.map { it.toDomain() } }
+        return tokenDataStore.currentUserId.flatMapLatest { ownerUserId ->
+            if (ownerUserId.isNullOrBlank()) {
+                flowOf(emptyList())
+            } else {
+                taskDao.observeTodayTasks(ownerUserId, todayPrefix, startTime, endTime, now.toString(), TODAY_TASK_LIMIT)
+                    .map { tasks -> tasks.map { it.toDomain() } }
+            }
+        }
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun observeSearchTasks(keyword: String): Flow<List<Task>> {
-        return taskDao.observeSearchTasks(keyword, SEARCH_TASK_LIMIT).map { tasks -> tasks.map { it.toDomain() } }
+        return tokenDataStore.currentUserId.flatMapLatest { ownerUserId ->
+            if (ownerUserId.isNullOrBlank()) {
+                flowOf(emptyList())
+            } else {
+                taskDao.observeSearchTasks(ownerUserId, keyword, SEARCH_TASK_LIMIT)
+                    .map { tasks -> tasks.map { it.toDomain() } }
+            }
+        }
     }
 
     suspend fun getTask(localId: String): Task? {
-        return taskDao.getByLocalId(localId)?.toDomain()
+        return taskDao.getByLocalId(ownerUserId(), localId)?.toDomain()
     }
 
     suspend fun exportBackupTasks(): List<Task> {
-        return taskDao.getBackupTasks(BACKUP_EXPORT_LIMIT).map { it.toDomain() }
+        return taskDao.getBackupTasks(ownerUserId(), BACKUP_EXPORT_LIMIT).map { it.toDomain() }
+    }
+
+    suspend fun getSyncQueueCounts(): SyncQueueCounts {
+        return syncQueueDao.queueCounts(ownerUserId())
+    }
+
+    suspend fun getExhaustedSyncQueuePreview(limit: Int = 20): List<SyncQueueEntity> {
+        return syncQueueDao.exhaustedChanges(ownerUserId(), limit)
+    }
+
+    suspend fun getConflictTaskCount(): Int {
+        return taskDao.countConflictTasks(ownerUserId())
+    }
+
+    suspend fun getFailedSyncTaskCount(): Int {
+        return taskDao.countFailedSyncTasks(ownerUserId())
+    }
+
+    suspend fun retryExhaustedSyncQueue(): Int {
+        return syncQueueDao.resetExhaustedAttempts(ownerUserId())
     }
 
     suspend fun addTask(
@@ -91,8 +196,10 @@ class TaskRepository(
     ): String {
         val now = Instant.now().toString()
         val localId = UUID.randomUUID().toString()
+        val ownerUserId = ownerUserId()
         val task = TaskEntity(
             localId = localId,
+            ownerUserId = ownerUserId,
             serverId = null,
             title = title,
             content = content,
@@ -115,6 +222,8 @@ class TaskRepository(
             version = 0,
             isDeleted = false,
             syncStatus = SyncStatus.PendingCreate.wireName,
+            conflictServerJson = null,
+            conflictLocalJson = null,
             createdAt = now,
             updatedAt = now,
             lastSyncAt = null,
@@ -124,11 +233,102 @@ class TaskRepository(
         return localId
     }
 
+    suspend fun previewBackupImportCount(raw: String): Int {
+        return previewBackupImport(raw).importableCount
+    }
+
+    suspend fun previewBackupImport(raw: String): BackupImportPreview {
+        val result = parseBackupImport(raw, ownerUserId())
+        return BackupImportPreview(
+            importableCount = result.tasks.size,
+            scannedCount = result.scannedCount,
+            skippedCount = result.skippedCount,
+            errorCode = result.errorCode,
+        )
+    }
+
     suspend fun importBackupJson(raw: String): Int {
-        if (raw.length > MAX_IMPORT_BYTES) return 0
-        val root = runCatching { JsonParser.parseString(raw).asJsonObject }.getOrNull() ?: return 0
-        if (root.stringOrNull("format") !in ACCEPTED_BACKUP_FORMATS) return 0
-        val tasks = root.get("tasks")?.takeIf { it.isJsonArray }?.asJsonArray ?: return 0
+        return importBackupJsonDetailed(raw).importedCount
+    }
+
+    suspend fun importBackupJsonDetailed(raw: String): BackupImportResult {
+        val ownerUserId = ownerUserId()
+        val preview = parseBackupImport(raw, ownerUserId)
+        val importedTasks = preview.tasks
+        if (importedTasks.isEmpty()) {
+            return BackupImportResult(
+                importedCount = 0,
+                importedLocalIds = emptyList(),
+                scannedCount = preview.scannedCount,
+                skippedCount = preview.skippedCount,
+                errorCode = preview.errorCode,
+            )
+        }
+        database.withTransaction {
+            taskDao.upsertAll(importedTasks)
+            importedTasks.filterNot { it.isDeleted }.forEach { task -> replaceQueue(task, "create") }
+        }
+        return BackupImportResult(
+            importedCount = importedTasks.size,
+            importedLocalIds = importedTasks.map { it.localId },
+            importedUndoItems = importedTasks.map { task ->
+                BackupImportUndoItem(
+                    localId = task.localId,
+                    importedUpdatedAt = task.updatedAt,
+                )
+            },
+            scannedCount = preview.scannedCount,
+            skippedCount = preview.skippedCount,
+        )
+    }
+
+    suspend fun undoImportedBackupTasks(items: List<BackupImportUndoItem>): BackupImportUndoResult {
+        val ownerUserId = ownerUserId()
+        var undoneCount = 0
+        var skippedChangedCount = 0
+        database.withTransaction {
+            items.distinctBy { it.localId }.forEach { item ->
+                val current = taskDao.getByLocalId(ownerUserId, item.localId) ?: return@forEach
+                if (current.updatedAt != item.importedUpdatedAt) {
+                    skippedChangedCount += 1
+                    return@forEach
+                }
+                if (current.serverId == null) {
+                    syncQueueDao.deleteByLocalId(ownerUserId, item.localId)
+                    taskDao.deleteByLocalId(ownerUserId, item.localId)
+                } else {
+                    val updated = current.copy(
+                        isDeleted = true,
+                        syncStatus = SyncStatus.PendingDelete.wireName,
+                        updatedAt = Instant.now().toString(),
+                    )
+                    taskDao.upsert(updated)
+                    replaceQueue(updated, "delete")
+                }
+                undoneCount += 1
+            }
+        }
+        return BackupImportUndoResult(
+            undoneCount = undoneCount,
+            skippedChangedCount = skippedChangedCount,
+        )
+    }
+
+    private fun parseImportableBackupTasks(raw: String, ownerUserId: String): List<TaskEntity> {
+        return parseBackupImport(raw, ownerUserId).tasks
+    }
+
+    private fun parseBackupImport(raw: String, ownerUserId: String): BackupImportParseResult {
+        if (raw.length > MAX_IMPORT_BYTES) {
+            return BackupImportParseResult(emptyList(), 0, 0, BackupImportErrorCode.FileTooLarge)
+        }
+        val root = runCatching { JsonParser.parseString(raw).asJsonObject }.getOrNull()
+            ?: return BackupImportParseResult(emptyList(), 0, 0, BackupImportErrorCode.InvalidJson)
+        if (root.stringOrNull("format") !in ACCEPTED_BACKUP_FORMATS) {
+            return BackupImportParseResult(emptyList(), 0, 0, BackupImportErrorCode.UnsupportedFormat)
+        }
+        val tasks = root.get("tasks")?.takeIf { it.isJsonArray }?.asJsonArray
+            ?: return BackupImportParseResult(emptyList(), 0, 0, BackupImportErrorCode.MissingTasks)
         val importedTasks = mutableListOf<TaskEntity>()
         tasks.forEach { element ->
             if (importedTasks.size >= MAX_IMPORT_TASKS) return@forEach
@@ -136,14 +336,19 @@ class TaskRepository(
             val title = item.stringOrNull("title")?.trim().orEmpty()
             if (title.isBlank()) return@forEach
             val now = Instant.now().toString()
+            val isDeleted = item.booleanOrNull("isDeleted") ?: item.booleanOrNull("is_deleted") ?: false
             val task = runCatching {
                 TaskEntity(
                     localId = "import-${UUID.randomUUID()}",
+                    ownerUserId = ownerUserId,
                     serverId = null,
                     title = title,
                     content = item.stringOrNull("content"),
-                    status = item.stringOrNull("status")?.takeIf { it == TaskStatus.Completed.wireName }
-                        ?: TaskStatus.Todo.wireName,
+                    status = if (TaskStatus.fromWire(item.stringOrNull("status").orEmpty()) == TaskStatus.Completed) {
+                        TaskStatus.Completed.wireName
+                    } else {
+                        TaskStatus.Todo.wireName
+                    },
                     priority = item.intOrNull("priority")?.coerceIn(0, 5) ?: 0,
                     tag = item.stringOrNull("tag"),
                     project = item.stringOrNull("project"),
@@ -162,8 +367,14 @@ class TaskRepository(
                     templateName = item.stringOrNull("templateName") ?: item.stringOrNull("template_name"),
                     sortOrder = item.intOrNull("sortOrder") ?: item.intOrNull("sort_order") ?: 0,
                     version = 0,
-                    isDeleted = false,
-                    syncStatus = SyncStatus.PendingCreate.wireName,
+                    isDeleted = isDeleted,
+                    syncStatus = if (isDeleted) {
+                        SyncStatus.Synced.wireName
+                    } else {
+                        SyncStatus.PendingCreate.wireName
+                    },
+                    conflictServerJson = null,
+                    conflictLocalJson = null,
                     createdAt = now,
                     updatedAt = now,
                     lastSyncAt = null,
@@ -171,13 +382,10 @@ class TaskRepository(
             }.getOrNull() ?: return@forEach
             importedTasks += task
         }
-        if (importedTasks.isNotEmpty()) {
-            database.withTransaction {
-                taskDao.upsertAll(importedTasks)
-                importedTasks.forEach { task -> replaceQueue(task, "create") }
-            }
-        }
-        return importedTasks.size
+        val scannedCount = tasks.size()
+        val skippedCount = scannedCount - importedTasks.size
+        val errorCode = if (importedTasks.isEmpty()) BackupImportErrorCode.NoValidTasks else null
+        return BackupImportParseResult(importedTasks, scannedCount, skippedCount, errorCode)
     }
 
     suspend fun updateTask(
@@ -190,11 +398,17 @@ class TaskRepository(
         remindTime: String?,
         repeatRule: String?,
         project: String? = null,
+        updateProject: Boolean = false,
         listType: String? = null,
         plannedDate: String? = null,
+        updatePlannedDate: Boolean = false,
         snoozedUntil: String? = null,
+        checklistJson: String? = null,
+        isTemplate: Boolean? = null,
+        templateName: String? = null,
+        updateTemplateName: Boolean = false,
     ) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val now = Instant.now().toString()
         val syncStatus = if (current.serverId == null) {
             SyncStatus.PendingCreate
@@ -206,13 +420,16 @@ class TaskRepository(
             content = content,
             priority = priority,
             tag = tag,
-            project = project ?: current.project,
+            project = if (updateProject) project else project ?: current.project,
             listType = listType ?: current.listType,
             dueTime = dueTime,
             remindTime = remindTime,
             repeatRule = repeatRule,
-            plannedDate = plannedDate ?: current.plannedDate,
+            plannedDate = if (updatePlannedDate) plannedDate else plannedDate ?: current.plannedDate,
             snoozedUntil = snoozedUntil ?: current.snoozedUntil,
+            checklistJson = checklistJson ?: current.checklistJson,
+            isTemplate = isTemplate ?: current.isTemplate,
+            templateName = if (updateTemplateName) templateName else current.templateName,
             syncStatus = syncStatus.wireName,
             updatedAt = now,
         )
@@ -221,7 +438,7 @@ class TaskRepository(
     }
 
     suspend fun completeTask(localId: String) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val now = Instant.now().toString()
         val updated = current.copy(
             status = TaskStatus.Completed.wireName,
@@ -241,24 +458,30 @@ class TaskRepository(
     }
 
     suspend fun resolveConflictUseServer(localId: String) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val ownerUserId = ownerUserId()
+        val current = taskDao.getByLocalId(ownerUserId, localId) ?: return
+        val serverTask = parseConflictServerTask(current.conflictServerJson) ?: return
         taskDao.upsert(
-            current.copy(
-                syncStatus = SyncStatus.Synced.wireName,
-                updatedAt = Instant.now().toString(),
+            serverTask.toEntity(
+                ownerUserId = ownerUserId,
+                localId = localId,
+                syncStatus = SyncStatus.Synced,
+                lastSyncAt = Instant.now().toString(),
             ),
         )
-        syncQueueDao.deleteByLocalId(localId)
+        syncQueueDao.deleteByLocalId(ownerUserId, localId)
     }
 
     suspend fun forceOverwriteServer(localId: String) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val updated = current.copy(
             syncStatus = if (current.serverId == null) {
                 SyncStatus.PendingCreate.wireName
             } else {
                 SyncStatus.PendingUpdate.wireName
             },
+            conflictServerJson = null,
+            conflictLocalJson = null,
             updatedAt = Instant.now().toString(),
         )
         taskDao.upsert(updated)
@@ -277,8 +500,18 @@ class TaskRepository(
         }
     }
 
+    suspend fun batchRestoreDeleted(taskIds: List<String>) {
+        database.withTransaction {
+            taskIds.distinct().forEach { restoreDeletedTask(it) }
+        }
+    }
+
+    suspend fun batchPurgeDeleted(taskIds: List<String>) {
+        taskIds.distinct().forEach { purgeDeletedTask(it) }
+    }
+
     suspend fun undoCompleteTask(localId: String) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val now = Instant.now().toString()
         val updated = current.copy(
             status = TaskStatus.Todo.wireName,
@@ -294,8 +527,50 @@ class TaskRepository(
         replaceQueue(updated, if (current.serverId == null) "create" else "restore")
     }
 
+    suspend fun restoreDeletedTask(localId: String) {
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
+        val now = Instant.now().toString()
+        val updated = current.copy(
+            isDeleted = false,
+            syncStatus = if (current.serverId == null) {
+                SyncStatus.PendingCreate.wireName
+            } else {
+                SyncStatus.PendingUpdate.wireName
+            },
+            updatedAt = now,
+        )
+        taskDao.upsert(updated)
+        replaceQueue(updated, if (current.serverId == null) "create" else "restore")
+    }
+
+    suspend fun purgeDeletedTask(localId: String) {
+        val ownerUserId = ownerUserId()
+        val current = taskDao.getByLocalId(ownerUserId, localId) ?: return
+        current.serverId?.let { serverId ->
+            runCatching {
+                apiService.purgeTask(serverId)
+            }.getOrElse {
+                apiService.deleteTask(serverId)
+                apiService.purgeTask(serverId)
+            }
+        }
+        database.withTransaction {
+            syncQueueDao.deleteByLocalId(ownerUserId, localId)
+            taskDao.deleteByLocalId(ownerUserId, localId)
+        }
+    }
+
+    suspend fun clearLocalDeviceData() {
+        val ownerUserId = ownerUserId()
+        database.withTransaction {
+            syncQueueDao.deleteAllForOwner(ownerUserId)
+            taskDao.deleteAllForOwner(ownerUserId)
+        }
+        tokenDataStore.clearLastBackupImportUndoItems()
+    }
+
     suspend fun postponeTask(localId: String, dueTime: String?, remindTime: String?, plannedDate: String?) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val now = Instant.now().toString()
         val updated = current.copy(
             dueTime = dueTime ?: current.dueTime,
@@ -314,7 +589,7 @@ class TaskRepository(
     }
 
     suspend fun snoozeTask(localId: String, snoozedUntil: String) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val now = Instant.now().toString()
         val updated = current.copy(
             snoozedUntil = snoozedUntil,
@@ -330,7 +605,7 @@ class TaskRepository(
     }
 
     suspend fun planTaskForToday(localId: String, plannedDate: String, dueTime: String? = null) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val now = Instant.now().toString()
         val updated = current.copy(
             listType = "today",
@@ -348,7 +623,7 @@ class TaskRepository(
     }
 
     suspend fun moveTaskToInbox(localId: String) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val now = Instant.now().toString()
         val updated = current.copy(
             listType = "inbox",
@@ -364,7 +639,7 @@ class TaskRepository(
     }
 
     suspend fun softDeleteTask(localId: String) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val now = Instant.now().toString()
         val updated = current.copy(
             isDeleted = true,
@@ -376,7 +651,7 @@ class TaskRepository(
     }
 
     suspend fun addChecklistItem(localId: String, title: String) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val trimmed = title.trim()
         if (trimmed.isBlank()) return
         val checklist = parseChecklist(current.checklistJson) + LocalChecklistItem(
@@ -388,7 +663,7 @@ class TaskRepository(
     }
 
     suspend fun toggleChecklistItem(localId: String, itemId: String) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val checklist = parseChecklist(current.checklistJson).map { item ->
             if (item.id == itemId) item.copy(done = !item.done) else item
         }
@@ -396,13 +671,13 @@ class TaskRepository(
     }
 
     suspend fun deleteChecklistItem(localId: String, itemId: String) {
-        val current = taskDao.getByLocalId(localId) ?: return
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return
         val checklist = parseChecklist(current.checklistJson).filterNot { it.id == itemId }
         updateChecklist(current, checklist)
     }
 
     suspend fun instantiateTemplate(localId: String): String? {
-        val template = taskDao.getByLocalId(localId) ?: return null
+        val template = taskDao.getByLocalId(ownerUserId(), localId) ?: return null
         val now = Instant.now().toString()
         val next = template.copy(
             localId = UUID.randomUUID().toString(),
@@ -428,7 +703,7 @@ class TaskRepository(
     }
 
     suspend fun createNextOccurrence(localId: String): String? {
-        val current = taskDao.getByLocalId(localId) ?: return null
+        val current = taskDao.getByLocalId(ownerUserId(), localId) ?: return null
         val shiftDays = when (current.repeatRule?.trim()?.lowercase()) {
             "daily", "every_day", "every day" -> 1L
             "weekly", "every_week", "every week" -> 7L
@@ -461,10 +736,15 @@ class TaskRepository(
         return next.localId
     }
 
+    private suspend fun ownerUserId(): String {
+        return tokenDataStore.currentUserId.first()?.takeIf { it.isNotBlank() } ?: SIGNED_OUT_OWNER
+    }
+
     private suspend fun replaceQueue(task: TaskEntity, action: String) {
-        syncQueueDao.deleteByLocalId(task.localId)
+        syncQueueDao.deleteByLocalId(task.ownerUserId, task.localId)
         syncQueueDao.enqueue(
             SyncQueueEntity(
+                ownerUserId = task.ownerUserId,
                 localId = task.localId,
                 serverId = task.serverId,
                 action = action,
@@ -514,6 +794,13 @@ private fun parseChecklist(value: String?): List<LocalChecklistItem> {
     return runCatching {
         taskRepositoryGson.fromJson<List<LocalChecklistItem>>(value, checklistType)
     }.getOrDefault(emptyList())
+}
+
+private fun parseConflictServerTask(value: String?): TaskDto? {
+    if (value.isNullOrBlank()) return null
+    return runCatching {
+        taskRepositoryGson.fromJson(value, TaskDto::class.java)
+    }.getOrNull()
 }
 
 private fun resetChecklist(value: String?): String {

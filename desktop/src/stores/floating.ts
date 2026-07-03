@@ -2,12 +2,14 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { bridge } from "../db/sqlite";
+import { formatShanghaiDateTime } from "../../shared/quick-add-parser";
 import {
   completeFloatingTask,
   listFloatingTodayTasks,
   openTaskDetail,
   quickAddTodayTask,
 } from "../db/task.dao";
+import { isCompletedStatus } from "../utils/task-order";
 import { useSettingsStore } from "./settings";
 
 type FloatingSyncState = "idle" | "syncing" | "offline" | "error" | "synced";
@@ -25,7 +27,7 @@ export const useFloatingStore = defineStore("floating", () => {
   let refreshTimer: number | null = null;
   let feedbackTimer: number | null = null;
 
-  const openTasks = computed(() => tasks.value.filter((task) => task.status !== "completed"));
+  const openTasks = computed(() => tasks.value.filter((task) => !isCompletedStatus(task.status)));
 
   async function init(): Promise<void> {
     const settings = await bridge().app.getSettings();
@@ -70,12 +72,12 @@ export const useFloatingStore = defineStore("floating", () => {
     if (!authenticated.value) return;
     const task = await quickAddTodayTask(title);
     if (!task) return;
-    showFeedback(`${useSettingsStore().t("floating.feedbackAdded")}：${task.title}`);
+    showFeedback(formatQuickAddFeedback(task));
     await refresh();
   }
 
   async function complete(task: TaskRecord): Promise<void> {
-    if (!authenticated.value || task.status === "completed") return;
+    if (!authenticated.value || isCompletedStatus(task.status)) return;
     await completeFloatingTask(task.localId);
     showFeedback(`${useSettingsStore().t("floating.feedbackCompleted")}：${task.title}`);
     await refresh();
@@ -142,6 +144,18 @@ export const useFloatingStore = defineStore("floating", () => {
       feedback.value = "";
       feedbackTimer = null;
     }, 1800);
+  }
+
+  function formatQuickAddFeedback(task: TaskRecord): string {
+    const settingsStore = useSettingsStore();
+    if (task.listType === "today") {
+      return `${settingsStore.t("floating.feedbackAdded")}：${task.title}`;
+    }
+    const scheduled = task.dueTime
+      ? formatShanghaiDateTime(task.dueTime, settingsStore.language, settingsStore.displayTimeZone)
+      : task.plannedDate;
+    const suffix = scheduled ? `（${scheduled}）` : "";
+    return `${settingsStore.t("floating.feedbackAddedInbox")}${suffix}：${task.title}`;
   }
 
   return {

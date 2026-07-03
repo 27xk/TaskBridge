@@ -26,7 +26,14 @@ from app.schemas.task import (
     TaskUpdate,
 )
 from app.services.sync_service import append_sync_log
-from app.utils.time import normalize_to_utc_naive, shanghai_day_utc_bounds, shanghai_local_date, utc_now
+from app.utils.time import (
+    normalize_to_utc_naive,
+    shanghai_day_utc_bounds,
+    shanghai_local_date,
+    utc_now,
+)
+
+COMPLETED_STATUSES = ("completed", "done")
 
 
 def _get_owned_task(
@@ -67,7 +74,14 @@ def _ensure_owned_parent_task(
         raise AppException(status_code=404, message="parent task not found")
 
 
-def _owned_parent_task_id_or_none(db: Session, current_user: User, parent_task_id: int | None) -> int | None:
+def _ensure_expected_version(task: Task, expected_version: int | None) -> None:
+    if expected_version is not None and expected_version != task.version:
+        raise AppException(status_code=409, message="version conflict")
+
+
+def _owned_parent_task_id_or_none(
+    db: Session, current_user: User, parent_task_id: int | None
+) -> int | None:
     if parent_task_id is None:
         return None
     parent_id = db.scalar(
@@ -131,24 +145,29 @@ def list_tasks(
     now: datetime | None = None,
     include_deleted: bool = False,
     templates_only: bool = False,
+    cursor_id: int | None = None,
+    cursor_updated_at: datetime | None = None,
     offset: int = 0,
     limit: int = 100,
 ) -> list[Task]:
+    if (cursor_id is None) != (cursor_updated_at is None):
+        raise AppException(
+            status_code=400, message="cursor_id and cursor_updated_at must be provided together"
+        )
+    if cursor_id is not None and offset:
+        raise AppException(
+            status_code=400, message="offset cannot be combined with cursor pagination"
+        )
+
     conditions = [Task.user_id == current_user.id]
     if not include_deleted:
         conditions.append(Task.is_deleted.is_(False))
-    if q:
-        keyword = f"%{q.strip()}%"
-        conditions.append(
-            or_(
-                Task.title.ilike(keyword),
-                Task.content.ilike(keyword),
-                Task.tag.ilike(keyword),
-                Task.project.ilike(keyword),
-            ),
-        )
+    search_query = _normalize_search_query(q)
+    if search_query:
+        search_terms = search_query["terms"]
+        conditions.append(_build_search_condition(search_terms))
     if status:
-        conditions.append(Task.status == status)
+        conditions.append(_completed_status_condition() if _is_completed_status(status) else Task.status == status)
     if tag:
         conditions.append(Task.tag == tag)
     if project:
@@ -161,39 +180,287 @@ def list_tasks(
         conditions.append(Task.is_template.is_(True))
     _apply_view_conditions(conditions, view=view, now=now)
     current = normalize_to_utc_naive(now) if now else utc_now()
+    order_specs = _task_order_specs(current, search_query)
+    if cursor_id is not None:
+        cursor_task = _get_task_cursor(db, current_user, cursor_id, cursor_updated_at)
+        conditions.append(
+            _build_cursor_condition(
+                order_specs, _task_cursor_values(cursor_task, current, search_query)
+            )
+        )
 
     query = (
         select(Task)
         .where(*conditions)
-        .order_by(*_timeline_ordering(current))
+        .order_by(*_order_by_clauses(order_specs))
         .offset(offset)
         .limit(limit)
     )
     return list(db.scalars(query))
 
 
-def _timeline_ordering(now: datetime) -> tuple[Any, ...]:
-    completed = Task.status.in_(("completed", "done"))
-    open_task = Task.status.not_in(("completed", "done"))
+def _normalize_search_query(q: str | None) -> dict[str, Any] | None:
+    if not q:
+        return None
+    normalized = " ".join(q.split()).strip()
+    if not normalized:
+        return None
+    terms: list[str] = []
+    raw_terms: list[str] = []
+    seen: set[str] = set()
+    for term in normalized.split(" "):
+        escaped = _escape_like_pattern(term)
+        if not escaped or escaped in seen:
+            continue
+        seen.add(escaped)
+        terms.append(escaped)
+        raw_terms.append(term)
+    if not terms:
+        return None
+    return {
+        "normalized": _escape_like_pattern(normalized),
+        "raw_normalized": normalized,
+        "terms": terms,
+        "raw_terms": raw_terms,
+    }
+
+
+def _build_search_condition(terms: list[str]):
+    searchable_columns = (Task.title, Task.content, Task.tag, Task.project)
+    return and_(
+        *[
+            or_(
+                *[column.ilike(f"%{term}%", escape="\\") for column in searchable_columns],
+            )
+            for term in terms
+        ],
+    )
+
+
+def _search_order_specs(normalized_query: str, terms: list[str]) -> tuple[tuple[Any, str], ...]:
+    phrase = f"%{normalized_query}%"
+    title_all_terms = and_(
+        *[Task.title.ilike(f"%{term}%", escape="\\") for term in terms],
+    )
+    any_title_term = or_(
+        *[Task.title.ilike(f"%{term}%", escape="\\") for term in terms],
+    )
+    any_term_matches = or_(
+        *[
+            or_(
+                Task.title.ilike(f"%{term}%", escape="\\"),
+                Task.content.ilike(f"%{term}%", escape="\\"),
+                Task.tag.ilike(f"%{term}%", escape="\\"),
+                Task.project.ilike(f"%{term}%", escape="\\"),
+            )
+            for term in terms
+        ],
+    )
+    return (
+        (
+            case(
+                (Task.title.ilike(phrase, escape="\\"), 0),
+                (title_all_terms, 1),
+                (any_title_term, 2),
+                (any_term_matches, 3),
+                else_=4,
+            ),
+            "asc",
+        ),
+    )
+
+
+def _escape_like_pattern(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _get_task_cursor(
+    db: Session,
+    current_user: User,
+    cursor_id: int,
+    cursor_updated_at: datetime | None,
+) -> Task:
+    if cursor_updated_at is None:
+        raise AppException(
+            status_code=400, message="cursor_id and cursor_updated_at must be provided together"
+        )
+    task = db.scalar(select(Task).where(Task.user_id == current_user.id, Task.id == cursor_id))
+    if task is None:
+        raise AppException(status_code=400, message="invalid task cursor")
+    if normalize_to_utc_naive(task.updated_at) != normalize_to_utc_naive(cursor_updated_at):
+        raise AppException(status_code=400, message="invalid task cursor")
+    return task
+
+
+def _timeline_order_specs(now: datetime) -> tuple[tuple[Any, str], ...]:
+    completed = _completed_status_condition()
+    open_task = _open_status_condition()
     completed_time = func.coalesce(Task.completed_at, Task.updated_at, Task.due_time)
     return (
-        case((completed, 1), else_=0).asc(),
-        case(
-            (completed, 4),
-            (and_(open_task, Task.due_time.is_not(None), Task.due_time < now), 0),
-            (and_(open_task, Task.due_time.is_not(None)), 1),
-            (and_(open_task, Task.planned_date.is_not(None)), 2),
-            else_=3,
-        ).asc(),
-        case((completed, completed_time), else_=None).desc(),
-        case((and_(open_task, Task.due_time.is_(None)), 1), else_=0).asc(),
-        case((open_task, Task.due_time), else_=None).asc(),
-        case((open_task, Task.planned_date), else_=None).asc(),
-        Task.sort_order.asc(),
-        Task.priority.desc(),
-        Task.updated_at.desc(),
-        Task.id.desc(),
+        (case((completed, 1), else_=0), "asc"),
+        (
+            case(
+                (completed, 4),
+                (and_(open_task, Task.due_time.is_not(None), Task.due_time < now), 0),
+                (and_(open_task, Task.due_time.is_not(None)), 1),
+                (and_(open_task, Task.planned_date.is_not(None)), 2),
+                (and_(open_task, Task.list_type == "today"), 2),
+                else_=3,
+            ),
+            "asc",
+        ),
+        (case((completed, completed_time), else_=None), "desc"),
+        (case((and_(open_task, Task.due_time.is_(None)), 1), else_=0), "asc"),
+        (case((open_task, Task.due_time), else_=None), "asc"),
+        (
+            case(
+                (and_(open_task, Task.planned_date.is_(None), Task.list_type == "today"), 1),
+                else_=0,
+            ),
+            "asc",
+        ),
+        (case((open_task, Task.planned_date), else_=None), "asc"),
+        (Task.sort_order, "asc"),
+        (Task.priority, "desc"),
+        (Task.updated_at, "desc"),
+        (Task.id, "desc"),
     )
+
+
+def _task_order_specs(
+    now: datetime, search_query: dict[str, Any] | None
+) -> tuple[tuple[Any, str], ...]:
+    search_specs = (
+        _search_order_specs(search_query["normalized"], search_query["terms"])
+        if search_query
+        else ()
+    )
+    return (*search_specs, *_timeline_order_specs(now))
+
+
+def _order_by_clauses(order_specs: tuple[tuple[Any, str], ...]) -> tuple[Any, ...]:
+    return tuple(
+        expression.asc() if direction == "asc" else expression.desc()
+        for expression, direction in order_specs
+    )
+
+
+def _build_cursor_condition(
+    order_specs: tuple[tuple[Any, str], ...], cursor_values: tuple[Any, ...]
+):
+    comparisons = []
+    equalities = []
+    for (expression, direction), cursor_value in zip(
+        order_specs,
+        cursor_values,
+        strict=True,
+    ):
+        comparison = _ordered_value_after_cursor(expression, direction, cursor_value)
+        if comparison is not None:
+            comparisons.append(and_(*equalities, comparison) if equalities else comparison)
+        equalities.append(
+            expression.is_(None) if cursor_value is None else expression == cursor_value
+        )
+    return or_(*comparisons)
+
+
+def _ordered_value_after_cursor(expression, direction: str, cursor_value: Any):
+    if cursor_value is None:
+        return None
+    if direction == "asc":
+        return expression > cursor_value
+    return expression < cursor_value
+
+
+def _task_cursor_values(
+    task: Task, now: datetime, search_query: dict[str, Any] | None
+) -> tuple[Any, ...]:
+    search_values = _search_cursor_values(task, search_query) if search_query else ()
+    return (*search_values, *_timeline_cursor_values(task, now))
+
+
+def _search_cursor_values(task: Task, search_query: dict[str, Any]) -> tuple[int]:
+    normalized_query = search_query["raw_normalized"].casefold()
+    terms = [term.casefold() for term in search_query["raw_terms"]]
+    title = task.title.casefold()
+    searchable_values = (
+        task.title,
+        task.content,
+        task.tag,
+        task.project,
+    )
+    if normalized_query in title:
+        return (0,)
+    if all(term in title for term in terms):
+        return (1,)
+    if any(term in title for term in terms):
+        return (2,)
+    if any(term in (value or "").casefold() for term in terms for value in searchable_values):
+        return (3,)
+    return (4,)
+
+
+def _timeline_cursor_values(task: Task, now: datetime) -> tuple[Any, ...]:
+    completed = _is_completed_status(task.status)
+    open_task = not completed
+    due_time = normalize_to_utc_naive(task.due_time) if task.due_time else None
+    completed_at = normalize_to_utc_naive(task.completed_at) if task.completed_at else None
+    updated_at = normalize_to_utc_naive(task.updated_at)
+    completed_time = completed_at or updated_at or due_time
+    return (
+        1 if completed else 0,
+        _timeline_bucket(
+            completed=completed,
+            open_task=open_task,
+            due_time=due_time,
+            planned_date=task.planned_date,
+            list_type=task.list_type,
+            now=now,
+        ),
+        completed_time if completed else None,
+        1 if open_task and due_time is None else 0,
+        due_time if open_task else None,
+        1 if open_task and task.planned_date is None and task.list_type == "today" else 0,
+        task.planned_date if open_task else None,
+        task.sort_order,
+        task.priority,
+        updated_at,
+        task.id,
+    )
+
+
+def _timeline_bucket(
+    *,
+    completed: bool,
+    open_task: bool,
+    due_time: datetime | None,
+    planned_date: date | None,
+    list_type: str,
+    now: datetime,
+) -> int:
+    if completed:
+        return 4
+    if open_task and due_time is not None and due_time < now:
+        return 0
+    if open_task and due_time is not None:
+        return 1
+    if open_task and planned_date is not None:
+        return 2
+    if open_task and list_type == "today":
+        return 2
+    return 3
+
+
+def _is_completed_status(status: str) -> bool:
+    return status.strip().lower() in COMPLETED_STATUSES
+
+
+def _completed_status_condition() -> Any:
+    return Task.status.in_(COMPLETED_STATUSES)
+
+
+def _open_status_condition() -> Any:
+    return Task.status.not_in(COMPLETED_STATUSES)
 
 
 def get_task_meta(db: Session, current_user: User) -> dict[str, Any]:
@@ -222,27 +489,43 @@ def get_task_meta(db: Session, current_user: User) -> dict[str, Any]:
         )
     ]
 
-    counts = {
-        "open": _count_tasks(db, active + [Task.status != "completed"]),
-        "completed": _count_tasks(db, active + [Task.status == "completed"]),
-        "inbox": _count_tasks(db, active + [Task.list_type == "inbox", Task.status != "completed"]),
-        "today": _count_tasks(
-            db,
-            active
-            + [
-                Task.status != "completed",
-                or_(
-                    Task.planned_date == today,
-                    and_(Task.due_time.is_not(None), Task.due_time >= today_start, Task.due_time < today_end),
-                    and_(Task.remind_time.is_not(None), Task.remind_time >= today_start, Task.remind_time < today_end),
-                    and_(Task.due_time.is_not(None), Task.due_time < now),
-                ),
-            ],
-        ),
-        "overdue": _count_tasks(db, active + [Task.status != "completed", Task.due_time < now]),
-        "templates": _count_tasks(db, active + [Task.is_template.is_(True)]),
-        "trash": _count_tasks(db, base + [Task.is_deleted.is_(True)]),
-    }
+    counts_row = db.execute(
+        select(
+            _count_tasks_expression(active + [_open_status_condition()]).label("open"),
+            _count_tasks_expression(active + [_completed_status_condition()]).label("completed"),
+            _count_tasks_expression(
+                active + [Task.list_type == "inbox", _open_status_condition()]
+            ).label("inbox"),
+            _count_tasks_expression(
+                active
+                + [
+                    _open_status_condition(),
+                    or_(
+                        Task.list_type == "today",
+                        Task.planned_date == today,
+                        and_(
+                            Task.due_time.is_not(None),
+                            Task.due_time >= today_start,
+                            Task.due_time < today_end,
+                        ),
+                        and_(
+                            Task.remind_time.is_not(None),
+                            Task.remind_time >= today_start,
+                            Task.remind_time < today_end,
+                        ),
+                        and_(Task.due_time.is_not(None), Task.due_time < now),
+                    ),
+                ],
+            ).label("today"),
+            _count_tasks_expression(
+                active + [_open_status_condition(), Task.due_time < now]
+            ).label("overdue"),
+            _count_tasks_expression(active + [Task.is_template.is_(True)]).label("templates"),
+            _count_tasks_expression(base + [Task.is_deleted.is_(True)]).label("trash"),
+        ).select_from(Task),
+    ).one()
+    count_names = ("open", "completed", "inbox", "today", "overdue", "templates", "trash")
+    counts = {name: int(counts_row._mapping[name] or 0) for name in count_names}
     return {"projects": projects, "tags": tags, "counts": counts}
 
 
@@ -255,7 +538,9 @@ def export_tasks(db: Session, current_user: User) -> list[dict[str, Any]]:
     return [_task_to_export_dict(task) for task in tasks]
 
 
-def batch_update_tasks(db: Session, current_user: User, payload: TaskBatchRequest) -> dict[str, Any]:
+def batch_update_tasks(
+    db: Session, current_user: User, payload: TaskBatchRequest
+) -> dict[str, Any]:
     tasks = list(
         db.scalars(
             select(Task).where(
@@ -343,18 +628,7 @@ def import_tasks(db: Session, current_user: User, payload: TaskImportRequest) ->
     created = 0
     updated = 0
     imported_tasks: list[Task] = []
-    existing_by_id: dict[int, Task] = {}
-    incoming_ids = [item.id for item in payload.tasks if item.id is not None]
-    if incoming_ids:
-        existing_by_id = {
-            task.id: task
-            for task in db.scalars(
-                select(Task).where(
-                    Task.user_id == current_user.id,
-                    Task.id.in_(incoming_ids),
-                ),
-            )
-        }
+    existing_by_id = _load_import_existing_tasks(db, current_user, payload)
     pending_logs: list[tuple[Task, str]] = []
     now = utc_now()
     for item in payload.tasks:
@@ -391,6 +665,44 @@ def import_tasks(db: Session, current_user: User, payload: TaskImportRequest) ->
     return {"created_count": created, "updated_count": updated, "tasks": imported_tasks}
 
 
+def preview_import_tasks(
+    db: Session, current_user: User, payload: TaskImportRequest
+) -> dict[str, Any]:
+    created = 0
+    updated = 0
+    preview_items: list[dict[str, Any]] = []
+    existing_by_id = _load_import_existing_tasks(db, current_user, payload)
+    for index, item in enumerate(payload.tasks):
+        existing = existing_by_id.get(item.id) if item.id is not None else None
+        task_data = _import_item_to_task_data(item)
+        if existing is None:
+            created += 1
+            preview_items.append(
+                {
+                    "index": index,
+                    "action": "create",
+                    "incoming_id": item.id,
+                    "existing_id": None,
+                    "title": task_data["title"],
+                    "changes": {},
+                }
+            )
+            continue
+
+        updated += 1
+        preview_items.append(
+            {
+                "index": index,
+                "action": "update",
+                "incoming_id": item.id,
+                "existing_id": existing.id,
+                "title": task_data["title"],
+                "changes": _task_import_changes(existing, task_data),
+            }
+        )
+    return {"created_count": created, "updated_count": updated, "items": preview_items}
+
+
 def resolve_task_conflict(
     db: Session,
     current_user: User,
@@ -404,7 +716,9 @@ def resolve_task_conflict(
         raise AppException(status_code=400, message="task is required for overwrite_server")
     updates = _task_payload_dump(payload.task, exclude_unset=True)
     if "parent_task_id" in updates:
-        _ensure_owned_parent_task(db, current_user, updates["parent_task_id"], child_task_id=task.id)
+        _ensure_owned_parent_task(
+            db, current_user, updates["parent_task_id"], child_task_id=task.id
+        )
     for field, value in updates.items():
         setattr(task, field, value)
     task.version += 1
@@ -425,8 +739,8 @@ def resolve_task_conflict(
     return task
 
 
-def _count_tasks(db: Session, conditions: list[Any]) -> int:
-    return int(db.scalar(select(func.count()).select_from(Task).where(*conditions)) or 0)
+def _count_tasks_expression(conditions: list[Any]) -> Any:
+    return func.coalesce(func.sum(case((and_(*conditions), 1), else_=0)), 0)
 
 
 def _apply_view_conditions(
@@ -443,18 +757,32 @@ def _apply_view_conditions(
     today_start, today_end = shanghai_day_utc_bounds(today)
 
     if normalized == "inbox":
-        conditions.extend([Task.list_type == "inbox", Task.status != "completed"])
+        conditions.extend([Task.list_type == "inbox", _open_status_condition()])
     elif normalized == "today":
+        conditions.append(_open_status_condition())
         conditions.append(
             or_(
+                Task.list_type == "today",
                 Task.planned_date == today,
-                and_(Task.due_time.is_not(None), Task.due_time >= today_start, Task.due_time < today_end),
-                and_(Task.remind_time.is_not(None), Task.remind_time >= today_start, Task.remind_time < today_end),
-                and_(Task.status.not_in(("completed", "done")), Task.due_time.is_not(None), Task.due_time < current),
+                and_(
+                    Task.due_time.is_not(None),
+                    Task.due_time >= today_start,
+                    Task.due_time < today_end,
+                ),
+                and_(
+                    Task.remind_time.is_not(None),
+                    Task.remind_time >= today_start,
+                    Task.remind_time < today_end,
+                ),
+                and_(
+                    _open_status_condition(),
+                    Task.due_time.is_not(None),
+                    Task.due_time < current,
+                ),
             ),
         )
     elif normalized == "overdue":
-        conditions.extend([Task.status != "completed", Task.due_time.is_not(None), Task.due_time < current])
+        conditions.extend([_open_status_condition(), Task.due_time.is_not(None), Task.due_time < current])
     elif normalized == "week":
         end_date = today + timedelta(days=7)
         week_start = today_start
@@ -462,14 +790,22 @@ def _apply_view_conditions(
         conditions.append(
             or_(
                 Task.planned_date.between(today, end_date),
-                and_(Task.due_time.is_not(None), Task.due_time >= week_start, Task.due_time < week_end),
-                and_(Task.remind_time.is_not(None), Task.remind_time >= week_start, Task.remind_time < week_end),
+                and_(
+                    Task.due_time.is_not(None),
+                    Task.due_time >= week_start,
+                    Task.due_time < week_end,
+                ),
+                and_(
+                    Task.remind_time.is_not(None),
+                    Task.remind_time >= week_start,
+                    Task.remind_time < week_end,
+                ),
             ),
         )
     elif normalized == "high_priority":
-        conditions.extend([Task.status != "completed", Task.priority >= 3])
+        conditions.extend([_open_status_condition(), Task.priority >= 3])
     elif normalized == "completed":
-        conditions.append(Task.status == "completed")
+        conditions.append(_completed_status_condition())
     elif normalized == "templates":
         conditions.append(Task.is_template.is_(True))
     elif normalized == "trash":
@@ -502,8 +838,12 @@ def get_task(db: Session, current_user: User, task_id: int) -> Task:
 def update_task(db: Session, current_user: User, task_id: int, payload: TaskUpdate) -> Task:
     task = _get_owned_task(db, current_user, task_id)
     updates = _task_payload_dump(payload, exclude_unset=True)
+    expected_version = updates.pop("expected_version", None)
+    _ensure_expected_version(task, expected_version)
     if "parent_task_id" in updates:
-        _ensure_owned_parent_task(db, current_user, updates["parent_task_id"], child_task_id=task.id)
+        _ensure_owned_parent_task(
+            db, current_user, updates["parent_task_id"], child_task_id=task.id
+        )
     for field, value in updates.items():
         setattr(task, field, value)
     task.version += 1
@@ -522,8 +862,14 @@ def update_task(db: Session, current_user: User, task_id: int, payload: TaskUpda
     return task
 
 
-def soft_delete_task(db: Session, current_user: User, task_id: int) -> Task:
+def soft_delete_task(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    expected_version: int | None = None,
+) -> Task:
     task = _get_owned_task(db, current_user, task_id)
+    _ensure_expected_version(task, expected_version)
     task.is_deleted = True
     task.deleted_at = utc_now()
     task.version += 1
@@ -542,9 +888,15 @@ def soft_delete_task(db: Session, current_user: User, task_id: int) -> Task:
     return task
 
 
-def complete_task(db: Session, current_user: User, task_id: int) -> Task:
+def complete_task(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    expected_version: int | None = None,
+) -> Task:
     task = _get_owned_task(db, current_user, task_id)
-    was_completed = task.status == "completed"
+    _ensure_expected_version(task, expected_version)
+    was_completed = _is_completed_status(task.status)
     task.status = "completed"
     task.completed_at = utc_now()
     task.version += 1
@@ -565,8 +917,14 @@ def complete_task(db: Session, current_user: User, task_id: int) -> Task:
     return task
 
 
-def undo_complete_task(db: Session, current_user: User, task_id: int) -> Task:
+def undo_complete_task(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    expected_version: int | None = None,
+) -> Task:
     task = _get_owned_task(db, current_user, task_id)
+    _ensure_expected_version(task, expected_version)
     task.status = "todo"
     task.completed_at = None
     task.version += 1
@@ -664,8 +1022,14 @@ def plan_task(
     return task
 
 
-def restore_task(db: Session, current_user: User, task_id: int) -> Task:
+def restore_task(
+    db: Session,
+    current_user: User,
+    task_id: int,
+    expected_version: int | None = None,
+) -> Task:
     task = _get_owned_task(db, current_user, task_id, include_deleted=True)
+    _ensure_expected_version(task, expected_version)
     task.status = "todo"
     task.is_deleted = False
     task.deleted_at = None
@@ -757,10 +1121,16 @@ def instantiate_template(
         tag=payload.tag if payload.tag is not None else template.tag,
         project=payload.project if payload.project is not None else template.project,
         list_type=payload.list_type if payload.list_type is not None else "inbox",
-        due_time=normalize_to_utc_naive(payload.due_time) if payload.due_time else template.due_time,
-        remind_time=normalize_to_utc_naive(payload.remind_time) if payload.remind_time else template.remind_time,
+        due_time=normalize_to_utc_naive(payload.due_time)
+        if payload.due_time
+        else template.due_time,
+        remind_time=normalize_to_utc_naive(payload.remind_time)
+        if payload.remind_time
+        else template.remind_time,
         repeat_rule=template.repeat_rule,
-        planned_date=payload.planned_date if payload.planned_date is not None else template.planned_date,
+        planned_date=payload.planned_date
+        if payload.planned_date is not None
+        else template.planned_date,
         parent_task_id=parent_task_id,
         checklist=deepcopy(template.checklist or []),
         is_template=False,
@@ -921,7 +1291,9 @@ def list_task_history(
     ]
 
 
-def _task_payload_dump(payload: TaskCreate | TaskUpdate, exclude_unset: bool = False) -> dict[str, Any]:
+def _task_payload_dump(
+    payload: TaskCreate | TaskUpdate, exclude_unset: bool = False
+) -> dict[str, Any]:
     data = payload.model_dump(exclude_unset=exclude_unset)
     for key in ("due_time", "remind_time", "completed_at", "snoozed_until"):
         if data.get(key) is not None:
@@ -929,8 +1301,7 @@ def _task_payload_dump(payload: TaskCreate | TaskUpdate, exclude_unset: bool = F
     checklist = data.get("checklist")
     if checklist is not None:
         data["checklist"] = [
-            item.model_dump() if hasattr(item, "model_dump") else item
-            for item in checklist
+            item.model_dump() if hasattr(item, "model_dump") else item for item in checklist
         ]
     return data
 
@@ -957,6 +1328,32 @@ def _import_item_to_task_data(item: TaskImportItem) -> dict[str, Any]:
         "template_name": item.template_name,
         "is_deleted": False,
     }
+
+
+def _load_import_existing_tasks(
+    db: Session, current_user: User, payload: TaskImportRequest
+) -> dict[int, Task]:
+    incoming_ids = [item.id for item in payload.tasks if item.id is not None]
+    if not incoming_ids:
+        return {}
+    return {
+        task.id: task
+        for task in db.scalars(
+            select(Task).where(
+                Task.user_id == current_user.id,
+                Task.id.in_(incoming_ids),
+            ),
+        )
+    }
+
+
+def _task_import_changes(task: Task, task_data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    changes: dict[str, dict[str, Any]] = {}
+    for key, after in task_data.items():
+        before = getattr(task, key)
+        if before != after:
+            changes[key] = {"before": before, "after": after}
+    return changes
 
 
 def _save_checklist(

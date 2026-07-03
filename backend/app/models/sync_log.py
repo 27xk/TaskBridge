@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -11,16 +11,16 @@ from app.utils.time import utc_now
 class SyncLog(Base):
     __tablename__ = "sync_logs"
     __table_args__ = (
-        Index(
-            "ix_sync_logs_idempotency",
+        Index("ix_sync_logs_user_created", "user_id", "created_at"),
+        Index("ix_sync_logs_user_task_created", "user_id", "task_id", "created_at"),
+        UniqueConstraint(
             "user_id",
             "device_id",
             "local_id",
             "operation",
             "client_version",
+            name="uq_sync_logs_idempotency",
         ),
-        Index("ix_sync_logs_user_created", "user_id", "created_at"),
-        Index("ix_sync_logs_user_task_created", "user_id", "task_id", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)

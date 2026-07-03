@@ -19,6 +19,9 @@ on:
 permissions:
   contents: write
   packages: write
+  security-events: write
+  attestations: write
+  id-token: write
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
@@ -27,9 +30,8 @@ concurrency:
 env:
   RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
   DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE || '27xk/taskbridge' }}
-  TASKBRIDGE_BASE_URL: ${{ vars.TASKBRIDGE_BASE_URL || 'http://192.168.10.30:8000/api/v1/' }}
-  TASKBRIDGE_WS_URL: ${{ vars.TASKBRIDGE_WS_URL || 'ws://192.168.10.30:8000/ws/sync' }}
-  TASKBRIDGE_ALLOW_UNSIGNED_RELEASE: ${{ vars.TASKBRIDGE_ALLOW_UNSIGNED_RELEASE || 'false' }}
+  TASKBRIDGE_BASE_URL: ${{ vars.TASKBRIDGE_BASE_URL }}
+  TASKBRIDGE_WS_URL: ${{ vars.TASKBRIDGE_WS_URL }}
 
 jobs:
   prepare:
@@ -48,6 +50,87 @@ jobs:
             echo "::error::Release version must start with v, for example v0.1.6."
             exit 1
           fi
+          expected_version="$(tr -d '[:space:]' < VERSION)"
+          if [ "${RELEASE_VERSION#v}" != "$expected_version" ]; then
+            echo "::error::Release version must match VERSION (${expected_version})."
+            exit 1
+          fi
+
+      - name: Set up Node.js for repository guards
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify version source
+        run: node scripts/check-version-source.mjs
+
+      - name: Set up Python for dependency audit
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install backend audit dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Audit Python dependencies
+        working-directory: backend
+        run: python -m pip_audit -r requirements-dev.txt
+
+      - name: Run backend tests
+        working-directory: backend
+        run: python -m pytest tests -q
+
+      - name: Verify database migrations
+        working-directory: backend
+        run: python -m pytest tests/test_migrations.py -q
+
+      - name: Compile backend and tools
+        working-directory: backend
+        run: python -m compileall -q app tests tools
+
+      - name: Verify OpenAPI contract
+        working-directory: backend
+        run: python -m tools.openapi_contract --check
+
+      - name: Lint backend
+        working-directory: backend
+        run: python -m ruff check app tests tools
+
+      - name: Validate release endpoint configuration
+        shell: bash
+        run: |
+          validate_endpoint() {
+            local name="$1"
+            local value="$2"
+            local required_scheme="$3"
+            local required_path="$4"
+            if [ -z "$value" ]; then
+              echo "::error::${name} must be configured in repository variables before release."
+              exit 1
+            fi
+            if [[ "$value" != ${required_scheme}* ]]; then
+              echo "::error::${name} must use ${required_scheme} for public release artifacts."
+              exit 1
+            fi
+            if [[ "$value" != *"${required_path}"* ]]; then
+              echo "::error::${name} must include ${required_path}."
+              exit 1
+            fi
+            host="$(python -c 'from urllib.parse import urlparse; import sys; print((urlparse(sys.argv[1]).hostname or "").lower())' "$value")"
+            if [[ "$host" =~ ^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.) ]]; then
+              echo "::error::${name} must not use a private or local network address for public release artifacts."
+              exit 1
+            fi
+          }
+          validate_endpoint "TASKBRIDGE_BASE_URL" "$TASKBRIDGE_BASE_URL" "https://" "/api/v1/"
+          validate_endpoint "TASKBRIDGE_WS_URL" "$TASKBRIDGE_WS_URL" "wss://" "/ws/sync"
 
       - name: Ensure release tag exists
         if: ${{ github.event_name == 'workflow_dispatch' }}
@@ -98,25 +181,14 @@ jobs:
         shell: bash
         run: |
           missing=()
-          provided=()
           for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
             if [ -z "${!name}" ]; then
               missing+=("$name")
-            else
-              provided+=("$name")
             fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            if [ "${#provided[@]}" -gt 0 ]; then
-              echo "Android signing secrets are partially configured. Missing: ${missing[*]}" >&2
-              exit 1
-            fi
-            if [ "${TASKBRIDGE_ALLOW_UNSIGNED_RELEASE}" = "true" ]; then
-              echo "::warning::Android signing secrets are not configured. Building an unsigned release APK because TASKBRIDGE_ALLOW_UNSIGNED_RELEASE=true."
-              exit 0
-            fi
             echo "Missing Android signing secrets: ${missing[*]}" >&2
-            echo "Configure Android signing secrets, or set repository variable TASKBRIDGE_ALLOW_UNSIGNED_RELEASE=true to publish an unsigned APK." >&2
+            echo "Public release artifacts must be signed; configure all Android signing secrets." >&2
             exit 1
           fi
           if [ ! -s release.keystore ]; then
@@ -128,7 +200,6 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          TASKBRIDGE_ALLOW_UNSIGNED_RELEASE: ${{ env.TASKBRIDGE_ALLOW_UNSIGNED_RELEASE }}
 
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
@@ -143,14 +214,33 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          TASKBRIDGE_ALLOW_UNSIGNED_RELEASE: ${{ env.TASKBRIDGE_ALLOW_UNSIGNED_RELEASE }}
+
+      - name: Verify Android APK signature
+        shell: bash
+        run: |
+          apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release.apk' | head -n 1)"
+          if [ -z "$apk_path" ]; then
+            echo "No release APK was produced." >&2
+            exit 1
+          fi
+          android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$android_sdk" ]; then
+            echo "ANDROID_HOME or ANDROID_SDK_ROOT is required to locate apksigner." >&2
+            exit 1
+          fi
+          apksigner="$(find "$android_sdk/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+          if [ -z "$apksigner" ]; then
+            echo "apksigner was not found in Android SDK build-tools." >&2
+            exit 1
+          fi
+          "$apksigner" verify --verbose --print-certs "$apk_path"
 
       - name: Prepare Android artifact
         shell: bash
         run: |
           mkdir -p ../artifacts
           find app/build/outputs/apk -maxdepth 3 -type f -print
-          apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f \( -name 'app-release.apk' -o -name 'app-release-unsigned.apk' \) | head -n 1)"
+          apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release.apk' | head -n 1)"
           if [ -z "$apk_path" ]; then
             echo "No release APK was produced." >&2
             exit 1
@@ -182,11 +272,17 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
+      - name: Verify version source
+        run: node ..\scripts\check-version-source.mjs
+
       - name: Verify desktop lockfile registry metadata
         run: npm run check:lockfile-registry
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
 
       - name: Verify desktop endpoint config
         run: npm run check:desktop-endpoint-config
@@ -194,25 +290,187 @@ jobs:
       - name: Verify security-sensitive config
         run: npm run check:security-config
 
+      - name: Verify auth session governance
+        run: npm run check:auth-session-config
+
+      - name: Verify backend observability config
+        run: npm run check:backend-observability
+
       - name: Verify desktop package size config
         run: npm run check:package-size-config
+
+      - name: Run desktop unit tests
+        run: npm run test:unit
+
+      - name: Verify quick-add parser behavior
+        run: npm run check:quick-add-parser
+
+      - name: Verify task ordering behavior
+        run: npm run check:task-order
+
+      - name: Verify sync push handling
+        run: npm run check:sync-push
+
+      - name: Verify sync diagnostics
+        run: npm run check:sync-diagnostics
+
+      - name: Verify sync recovery center
+        run: npm run check:sync-recovery-center
+
+      - name: Verify desktop backup handling
+        run: npm run check:desktop-backup
+
+      - name: Verify desktop theme config
+        run: npm run check:desktop-theme
+
+      - name: Verify desktop docs consistency
+        run: npm run check:desktop-docs
+
+      - name: Verify local bootstrap guidance
+        run: npm run check:local-bootstrap
+
+      - name: Verify release readiness config
+        run: npm run check:release-readiness
+
+      - name: Verify release artifact config
+        run: npm run check:release-artifacts
+
+      - name: Verify production hardening config
+        run: npm run check:production-hardening
+
+      - name: Verify desktop task list completeness
+        run: npm run check:desktop-task-list-completeness
+
+      - name: Verify Android localization config
+        run: npm run check:android-localization
+
+      - name: Verify Android task delete confirmation
+        run: npm run check:android-task-delete-confirmation
+
+      - name: Verify refresh token singleflight config
+        run: npm run check:refresh-singleflight
+
+      - name: Verify registration governance config
+        run: npm run check:registration-governance
+
+      - name: Verify sync retry preservation
+        run: npm run check:sync-retry-preservation
+
+      - name: Verify Android list and realtime config
+        run: npm run check:android-list-realtime
+
+      - name: Verify release endpoint defaults
+        run: npm run check:release-endpoint-defaults
+
+      - name: Verify Android sync status message config
+        run: npm run check:android-sync-status-message
+
+      - name: Verify Android sync recovery config
+        run: npm run check:android-sync-recovery
+
+      - name: Verify CI workflow desktop coverage
+        run: npm run check:ci-workflows
+
+      - name: Verify cross-client contract drift
+        run: npm run check:contract-drift
+
+      - name: Verify source test visibility
+        run: npm run check:source-tests-visible
+
+      - name: Verify supply chain config
+        run: npm run check:supply-chain
+
+      - name: Verify desktop auto-update config
+        run: npm run check:desktop-auto-update
+
+      - name: Verify Android data extraction config
+        run: npm run check:android-data-extraction
+
+      - name: Verify security governance config
+        run: npm run check:security-governance
+
+      - name: Verify Web client shell
+        run: node ..\scripts\check-web-client.mjs
+
+      - name: Run Web unit tests
+        run: npm --prefix .. run test:web
+
+      - name: Verify Web offline-first behavior
+        run: node ..\scripts\check-web-offline-first.mjs
+
+      - name: Verify Web offline core behavior
+        run: node ..\scripts\check-web-offline-core.mjs
+
+      - name: Smoke test Web client shell
+        run: node ..\scripts\smoke-web-client.mjs
+
+      - name: Validate Windows signing secrets
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
+            throw "WINDOWS_CERTIFICATE_BASE64 must be configured for public release artifacts."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw "WINDOWS_CERTIFICATE_PASSWORD must be configured for public release artifacts."
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP "taskbridge-codesign.pfx"
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          if ((Get-Item -LiteralPath $certificatePath).Length -le 0) {
+            throw "Decoded Windows signing certificate is empty."
+          }
+          "CSC_LINK=$certificatePath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
       - name: Build Windows installer
         run: npm run dist
         env:
           TASKBRIDGE_BASE_URL: ${{ env.TASKBRIDGE_BASE_URL }}
           TASKBRIDGE_WS_URL: ${{ env.TASKBRIDGE_WS_URL }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_LINK: ${{ runner.temp }}\\taskbridge-codesign.pfx
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           ELECTRON_CACHE: ${{ github.workspace }}\\.cache\\electron
           ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.cache\\electron-builder
+
+      - name: Verify Windows installer signatures
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -Path release -File | Where-Object { $_.Extension -eq '.exe' })
+          if ($installers.Count -eq 0) {
+            throw "No Windows installer .exe was produced."
+          }
+          foreach ($installer in $installers) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+            if ($signature.Status -ne 'Valid') {
+              throw "Windows installer is not signed with a valid Authenticode signature: $($installer.FullName) [$($signature.Status)]"
+            }
+          }
 
       - name: Prepare desktop artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path ..\artifacts | Out-Null
           Get-ChildItem -Path release -Recurse -File | Select-Object FullName, Length
-          Get-ChildItem -Path release -File | Where-Object { $_.Extension -eq '.exe' } | ForEach-Object {
+          Get-ChildItem -Path release -File | Where-Object {
+            $_.Extension -in @('.exe', '.yml', '.blockmap') -or $_.Name -eq 'latest.yml'
+          } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination ..\artifacts\$($_.Name)
+          }
+
+      - name: Validate desktop update artifacts
+        shell: pwsh
+        run: |
+          # Desktop auto-update publishes to the stable latest channel.
+          $artifacts = @(Get-ChildItem -Path ..\artifacts -File)
+          if (-not ($artifacts | Where-Object { $_.Name -eq 'latest.yml' })) {
+            throw "No desktop auto-update latest.yml was produced."
+          }
+          if (-not ($artifacts | Where-Object { $_.Extension -eq '.blockmap' })) {
+            throw "No desktop installer blockmap was produced."
+          }
+          if (-not ($artifacts | Where-Object { $_.Extension -eq '.exe' })) {
+            throw "No Windows installer .exe was copied for update delivery."
           }
 
       - name: Upload Windows artifacts
@@ -286,6 +544,23 @@ jobs:
             type=raw,value=${{ env.RELEASE_VERSION }}
             type=raw,value=latest,enable=${{ github.event_name == 'push' || inputs.publish_latest == true }}
 
+      - name: Build backend image for vulnerability scan
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: false
+          load: true
+          tags: taskbridge:release-scan
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Scan backend image before publish
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: taskbridge:release-scan
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
       - name: Build and push backend image
         uses: docker/build-push-action@v6
         with:
@@ -294,6 +569,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
 
   release:
     name: Update GitHub Release
@@ -313,6 +590,17 @@ jobs:
       - name: List release artifacts
         shell: bash
         run: find release-artifacts -maxdepth 1 -type f -print
+
+      - name: Generate release artifact checksums
+        shell: bash
+        run: |
+          cd release-artifacts
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release-artifacts/*
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

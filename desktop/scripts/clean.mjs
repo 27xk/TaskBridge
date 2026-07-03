@@ -1,8 +1,8 @@
 import { rm } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve, sep } from "node:path";
+import { workspaceRoot } from "./script-helpers.mjs";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const root = workspaceRoot(import.meta.url);
 const targets = [
   "out",
   "release",

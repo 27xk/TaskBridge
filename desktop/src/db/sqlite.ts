@@ -46,5 +46,7 @@ export function createEmptyTask(title = ""): TaskRecord {
     createdAt: now,
     updatedAt: now,
     lastSyncAt: null,
+    conflictServerJson: null,
+    conflictLocalJson: null,
   };
 }

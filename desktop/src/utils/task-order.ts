@@ -46,10 +46,15 @@ export function isTaskOverdue(
   now: Date | string | number = new Date(),
   displayTimeZone = "Asia/Shanghai",
 ): boolean {
-  if (task.status === "completed") return false;
+  if (isCompletedStatus(task.status)) return false;
   const dueTime = parseTaskTime(task.dueTime);
   if (dueTime === null) return false;
   return localDateTimeKey(new Date(dueTime), displayTimeZone) < localDateTimeKey(new Date(parseNowTime(now)), displayTimeZone);
+}
+
+export function isCompletedStatus(status: string | null | undefined): boolean {
+  const normalized = status?.trim().toLowerCase();
+  return normalized === "completed" || normalized === "done";
 }
 
 function completedRecencyTime(task: TaskRecencyFields): number {
@@ -64,7 +69,7 @@ function completedRecencyTime(task: TaskRecencyFields): number {
 }
 
 export function taskTimelineSortKey(task: TaskTimelineFields, nowTime: number, displayTimeZone: string): number[] {
-  const isCompleted = task.status === "completed";
+  const isCompleted = isCompletedStatus(task.status);
   const dueTime = parseTaskTime(task.dueTime);
   const plannedTime = parsePlannedDateStart(task.plannedDate, displayTimeZone);
   const updatedTime = parseTaskTime(task.updatedAt);

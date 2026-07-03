@@ -7,7 +7,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
-import android.os.Build
 import android.view.View
 import android.widget.RemoteViews
 import com.taskbridge.app.MainActivity
@@ -211,12 +210,7 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
         }
 
         private fun pendingIntentFlags(): Int {
-            return PendingIntent.FLAG_UPDATE_CURRENT or
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    PendingIntent.FLAG_IMMUTABLE
-                } else {
-                    0
-                }
+            return PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         }
     }
 }

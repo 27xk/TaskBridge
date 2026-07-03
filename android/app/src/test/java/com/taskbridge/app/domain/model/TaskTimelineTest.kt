@@ -1,5 +1,6 @@
 package com.taskbridge.app.domain.model
 
+import com.taskbridge.app.fixtures.SharedTimelineFixtures
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -86,6 +87,29 @@ class TaskTimelineTest {
             listOf("completed-new", "completed-fallback-updated", "completed-old"),
             sorted.map { it.localId },
         )
+    }
+
+    @Test
+    fun matchesSharedTimelineFixtureWithRawWireStatuses() {
+        val fixture = SharedTimelineFixtures.load()
+        val sortedIds = fixture.tasks
+            .map { task ->
+                task to taskTimelineSortKey(
+                    statusWire = task.status,
+                    dueTime = task.dueTime,
+                    plannedDate = task.plannedDate,
+                    completedAt = task.completedAt,
+                    priority = task.priority,
+                    sortOrder = task.sortOrder,
+                    updatedAt = task.updatedAt,
+                    now = Instant.parse(fixture.now),
+                    displayTimeZone = fixture.displayTimeZone,
+                )
+            }
+            .sortedBy { it.second }
+            .map { it.first.id }
+
+        assertEquals(fixture.expectedOrder, sortedIds)
     }
 
     private fun task(

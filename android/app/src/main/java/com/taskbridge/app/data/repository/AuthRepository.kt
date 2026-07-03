@@ -34,9 +34,22 @@ class AuthRepository(
         }
     }
 
+    suspend fun registrationEnabled(): Result<Boolean> {
+        return runCatching {
+            apiService.registrationStatus().data?.registrationEnabled ?: true
+        }
+    }
+
     suspend fun currentUser(): Result<UserDto> {
         return runCatching {
             apiService.me().data ?: error("Not authenticated")
+        }
+    }
+
+    suspend fun testConnection(): Result<Unit> {
+        return runCatching {
+            apiService.syncStatus()
+            Unit
         }
     }
 

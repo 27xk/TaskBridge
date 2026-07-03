@@ -21,6 +21,7 @@ enum class SyncStatus(val wireName: String) {
     PendingCreate("pending_create"),
     PendingUpdate("pending_update"),
     PendingDelete("pending_delete"),
+    Failed("sync_failed"),
     Conflict("conflict");
 
     companion object {
@@ -54,6 +55,8 @@ data class Task(
     val version: Int,
     val isDeleted: Boolean,
     val syncStatus: SyncStatus,
+    val conflictServerJson: String? = null,
+    val conflictLocalJson: String? = null,
     val createdAt: String,
     val updatedAt: String,
     val lastSyncAt: String?,
@@ -84,6 +87,8 @@ fun TaskEntity.toDomain(): Task {
         version = version,
         isDeleted = isDeleted,
         syncStatus = SyncStatus.fromWire(syncStatus),
+        conflictServerJson = conflictServerJson,
+        conflictLocalJson = conflictLocalJson,
         createdAt = createdAt,
         updatedAt = updatedAt,
         lastSyncAt = lastSyncAt,

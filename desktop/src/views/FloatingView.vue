@@ -92,13 +92,13 @@ function stopResize(): void {
         {{ settingsStore.t("floating.loginRequired") }}
       </div>
 
-      <div v-else-if="floating.tasks.length === 0" class="floating-empty">
+      <div v-else-if="floating.openTasks.length === 0" class="floating-empty">
         {{ settingsStore.t("floating.noToday") }}
       </div>
 
       <div v-else class="floating-task-list">
         <FloatingTaskItem
-          v-for="task in floating.tasks"
+          v-for="task in floating.openTasks"
           :key="task.localId"
           :task="task"
           @complete="floating.complete"

@@ -1,10 +1,13 @@
 import { defineStore } from "pinia";
 import { computed, onScopeDispose, ref, shallowRef } from "vue";
 
+import { deleteTask as deleteRemoteTask, purgeTask as purgeRemoteTask } from "../api/task";
 import { createEmptyTask, nowIso } from "../db/sqlite";
 import { enqueueChange, removeQueueByLocalId } from "../db/sync-queue.dao";
-import { listTasks, listTodayTasks, saveTask } from "../db/task.dao";
-import { sortCompletedTasksByRecency, sortTasksByTimeline } from "../utils/task-order";
+import { listTasks, listTodayTasks, purgeLocalTask, saveTask } from "../db/task.dao";
+import type { ServerTaskDto } from "../api/task";
+import { serverTaskToLocal } from "../sync/task-mapper";
+import { isCompletedStatus, sortCompletedTasksByRecency, sortTasksByTimeline } from "../utils/task-order";
 import { parseQuickTask, parseTaskBridgeDate, shanghaiDateTimeInputToIso, todayLocalDate } from "../../shared/quick-add-parser";
 import { useSettingsStore } from "./settings";
 import { useSyncStore } from "./sync";
@@ -21,8 +24,15 @@ export interface TaskDraft {
   repeatRule?: string | null;
   plannedDate?: string | null;
   checklistText?: string | null;
+  checklistItems?: ChecklistDraftItem[] | null;
   isTemplate?: boolean;
   templateName?: string | null;
+}
+
+export interface ChecklistDraftItem {
+  id?: string | null;
+  title: string;
+  done?: boolean;
 }
 
 interface MutationOptions {
@@ -46,15 +56,18 @@ export const useTaskStore = defineStore("task", () => {
       displayTimeZone: settingsStore.displayTimeZone,
     }),
   );
-  const openTasks = computed(() => activeTasks.value.filter((task) => task.status !== "completed"));
-  const completedTasks = computed(() => sortCompletedTasksByRecency(activeTasks.value.filter((task) => task.status === "completed")));
+  const openTasks = computed(() => activeTasks.value.filter((task) => !isCompletedStatus(task.status)));
+  const completedTasks = computed(() => sortCompletedTasksByRecency(activeTasks.value.filter((task) => isCompletedStatus(task.status))));
+  const trashTasks = computed(() =>
+    sortCompletedTasksByRecency(tasks.value.filter((task) => task.isDeleted)),
+  );
   const projects = computed(() => uniqueSorted(activeTasks.value.map((task) => task.project)));
   const tags = computed(() => uniqueSorted(activeTasks.value.map((task) => task.tag)));
 
   async function load(): Promise<void> {
     loading.value = true;
     try {
-      tasks.value = await listTasks();
+      tasks.value = await listTasks(undefined, 0, true);
       todayTasks.value = await listTodayTasks();
     } finally {
       loading.value = false;
@@ -70,13 +83,13 @@ export const useTaskStore = defineStore("task", () => {
       content: draft.content?.trim() || null,
       priority: draft.priority && draft.priority > 0 ? draft.priority : parsed.priority,
       tag: draft.tag?.trim() || parsed.tag,
-      project: draft.project?.trim() || null,
-      listType: draft.listType || (plannedDate ? "today" : "inbox"),
+      project: draft.project?.trim() || parsed.project,
+      listType: draft.listType || "inbox",
       dueTime,
       remindTime: draft.remindTime || null,
       repeatRule: draft.repeatRule || null,
       plannedDate,
-      checklistJson: checklistTextToJson(draft.checklistText),
+      checklistJson: checklistTextToJson(draft.checklistText, null, draft.checklistItems),
       isTemplate: draft.isTemplate ?? false,
       templateName: draft.templateName?.trim() || null,
     };
@@ -102,11 +115,13 @@ export const useTaskStore = defineStore("task", () => {
       remindTime: draft.remindTime || null,
       repeatRule: draft.repeatRule || null,
       plannedDate: draft.plannedDate ?? task.plannedDate,
-      checklistJson: draft.checklistText === undefined ? task.checklistJson : checklistTextToJson(draft.checklistText),
+      checklistJson: draft.checklistText === undefined ? task.checklistJson : checklistTextToJson(draft.checklistText, task.checklistJson, draft.checklistItems),
       isTemplate: draft.isTemplate ?? task.isTemplate,
       templateName,
       syncStatus: task.serverId ? "pending_update" : "pending_create",
       updatedAt: now,
+      conflictServerJson: null,
+      conflictLocalJson: null,
     };
     await saveTask(next);
     await queueTaskChange(next, task.serverId ? "update" : "create");
@@ -122,6 +137,8 @@ export const useTaskStore = defineStore("task", () => {
       completedAt: now,
       syncStatus: task.serverId ? "pending_update" : "pending_create",
       updatedAt: now,
+      conflictServerJson: null,
+      conflictLocalJson: null,
     } satisfies TaskRecord;
     await saveTask(next);
     await queueTaskChange(next, task.serverId ? "complete" : "create");
@@ -132,7 +149,7 @@ export const useTaskStore = defineStore("task", () => {
   }
 
   async function batchComplete(selected: TaskRecord[]): Promise<void> {
-    const targets = selected.filter((item) => item.status !== "completed");
+    const targets = selected.filter((item) => !isCompletedStatus(item.status));
     for (const task of targets) {
       await completeTask(task, { reload: false });
     }
@@ -146,12 +163,28 @@ export const useTaskStore = defineStore("task", () => {
     if (selected.length > 0) await load();
   }
 
+  async function batchRestore(selected: TaskRecord[]): Promise<void> {
+    for (const task of selected) {
+      await restoreTask(task, { reload: false });
+    }
+    if (selected.length > 0) await load();
+  }
+
+  async function batchPurge(selected: TaskRecord[]): Promise<void> {
+    for (const task of selected) {
+      await purgeTask(task, { reload: false });
+    }
+    if (selected.length > 0) await load();
+  }
+
   async function resolveConflictUseServer(task: TaskRecord): Promise<void> {
+    const serverTask = parseConflictServerTask(task.conflictServerJson);
+    if (!serverTask) return;
     const next = {
-      ...task,
-      syncStatus: "synced",
-      updatedAt: nowIso(),
-    } satisfies TaskRecord;
+      ...serverTaskToLocal(serverTask, task.localId, "synced"),
+      conflictServerJson: null,
+      conflictLocalJson: null,
+    };
     await saveTask(next);
     await removeQueueByLocalId(task.localId);
     await load();
@@ -162,13 +195,15 @@ export const useTaskStore = defineStore("task", () => {
       ...task,
       syncStatus: task.serverId ? "pending_update" : "pending_create",
       updatedAt: nowIso(),
+      conflictServerJson: null,
+      conflictLocalJson: null,
     } satisfies TaskRecord;
     await saveTask(next);
     await queueTaskChange(next, task.serverId ? "update" : "create");
     await load();
   }
 
-  async function restoreTask(task: TaskRecord): Promise<void> {
+  async function restoreTask(task: TaskRecord, options: MutationOptions = {}): Promise<void> {
     const next = {
       ...task,
       status: "todo",
@@ -176,10 +211,12 @@ export const useTaskStore = defineStore("task", () => {
       completedAt: null,
       syncStatus: task.serverId ? "pending_update" : "pending_create",
       updatedAt: nowIso(),
+      conflictServerJson: null,
+      conflictLocalJson: null,
     } satisfies TaskRecord;
     await saveTask(next);
     await queueTaskChange(next, task.serverId ? "restore" : "create");
-    await load();
+    if (options.reload !== false) await load();
   }
 
   async function postponeTomorrow(task: TaskRecord): Promise<void> {
@@ -192,6 +229,8 @@ export const useTaskStore = defineStore("task", () => {
       snoozedUntil: null,
       syncStatus: task.serverId ? "pending_update" : "pending_create",
       updatedAt: now,
+      conflictServerJson: null,
+      conflictLocalJson: null,
     } satisfies TaskRecord;
     await saveTask(next);
     await queueTaskChange(next, task.serverId ? "update" : "create");
@@ -206,6 +245,8 @@ export const useTaskStore = defineStore("task", () => {
       snoozedUntil,
       syncStatus: task.serverId ? "pending_update" : "pending_create",
       updatedAt: now,
+      conflictServerJson: null,
+      conflictLocalJson: null,
     } satisfies TaskRecord;
     await saveTask(next);
     await queueTaskChange(next, task.serverId ? "update" : "create");
@@ -220,6 +261,8 @@ export const useTaskStore = defineStore("task", () => {
       plannedDate: todayLocalDate(new Date(), settingsStore.displayTimeZone),
       syncStatus: task.serverId ? "pending_update" : "pending_create",
       updatedAt: now,
+      conflictServerJson: null,
+      conflictLocalJson: null,
     } satisfies TaskRecord;
     await saveTask(next);
     await queueTaskChange(next, task.serverId ? "update" : "create");
@@ -249,6 +292,8 @@ export const useTaskStore = defineStore("task", () => {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       lastSyncAt: null,
+      conflictServerJson: null,
+      conflictLocalJson: null,
     } satisfies TaskRecord;
     await saveTask(next);
     await queueTaskChange(next, "create");
@@ -276,6 +321,8 @@ export const useTaskStore = defineStore("task", () => {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       lastSyncAt: null,
+      conflictServerJson: null,
+      conflictLocalJson: null,
     } satisfies TaskRecord;
     await saveTask(next);
     await queueTaskChange(next, "create");
@@ -289,6 +336,8 @@ export const useTaskStore = defineStore("task", () => {
       isDeleted: true,
       syncStatus: task.serverId ? "pending_delete" : "synced",
       updatedAt: nowIso(),
+      conflictServerJson: null,
+      conflictLocalJson: null,
     } satisfies TaskRecord;
     await saveTask(next);
     if (task.serverId) {
@@ -296,6 +345,24 @@ export const useTaskStore = defineStore("task", () => {
     } else {
       await removeQueueByLocalId(task.localId);
     }
+    if (options.reload !== false) await load();
+  }
+
+  async function purgeTask(task: TaskRecord, options: MutationOptions = {}): Promise<void> {
+    if (task.serverId) {
+      try {
+        await purgeRemoteTask(task.serverId);
+      } catch {
+        try {
+          await deleteRemoteTask(task.serverId);
+        } catch {
+          // The server may already have the task in trash; purge below is the decisive operation.
+        }
+        await purgeRemoteTask(task.serverId);
+      }
+    }
+    await removeQueueByLocalId(task.localId);
+    await purgeLocalTask(task.localId);
     if (options.reload !== false) await load();
   }
 
@@ -317,6 +384,8 @@ export const useTaskStore = defineStore("task", () => {
         [field]: normalizedNew,
         syncStatus: task.serverId ? "pending_update" : "pending_create",
         updatedAt: nowIso(),
+        conflictServerJson: null,
+        conflictLocalJson: null,
       } satisfies TaskRecord;
       await saveTask(next);
       await queueTaskChange(next, task.serverId ? "update" : "create");
@@ -362,6 +431,7 @@ export const useTaskStore = defineStore("task", () => {
     activeTasks,
     openTasks,
     completedTasks,
+    trashTasks,
     projects,
     tags,
     timelineNow,
@@ -371,10 +441,13 @@ export const useTaskStore = defineStore("task", () => {
     completeTask,
     batchComplete,
     batchDelete,
+    batchRestore,
+    batchPurge,
     resolveConflictUseServer,
     forceOverwriteServer,
     restoreTask,
     deleteTask,
+    purgeTask,
     postponeTomorrow,
     snoozeOneHour,
     planToday,
@@ -385,15 +458,62 @@ export const useTaskStore = defineStore("task", () => {
   };
 });
 
-function checklistTextToJson(value?: string | null): string {
+interface ChecklistItem {
+  id?: string;
+  title?: string;
+  done?: boolean;
+}
+
+function checklistTextToJson(value?: string | null, existingJson?: string | null, draftItems?: ChecklistDraftItem[] | null): string {
   if (!value?.trim()) return "[]";
+  const existing = parseChecklistJson(existingJson);
+  const submitted = Array.isArray(draftItems) ? draftItems : [];
+  const usedIndexes = new Set<number>();
   const items = value
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
     .slice(0, 100)
-    .map((title) => ({ id: crypto.randomUUID(), title, done: false }));
+    .map((title, index) => {
+      const draftItem = submitted[index]?.title.trim() === title ? submitted[index] : null;
+      const previous = draftItem ?? preserveChecklistItemState(title, index, existing, usedIndexes);
+      return {
+        id: previous?.id || crypto.randomUUID(),
+        title,
+        done: previous?.done ?? false,
+      };
+    });
   return JSON.stringify(items);
+}
+
+function parseChecklistJson(value?: string | null): ChecklistItem[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is ChecklistItem => typeof item?.title === "string");
+  } catch {
+    return [];
+  }
+}
+
+function preserveChecklistItemState(
+  title: string,
+  index: number,
+  existing: ChecklistItem[],
+  usedIndexes: Set<number>,
+): ChecklistItem | null {
+  const direct = existing[index];
+  if (direct && !usedIndexes.has(index) && direct.title?.trim() === title) {
+    usedIndexes.add(index);
+    return direct;
+  }
+  const matchingIndex = existing.findIndex((item, itemIndex) => !usedIndexes.has(itemIndex) && item.title?.trim() === title);
+  if (matchingIndex >= 0) {
+    usedIndexes.add(matchingIndex);
+    return existing[matchingIndex];
+  }
+  return null;
 }
 
 function resetChecklist(value: string): string {
@@ -434,4 +554,27 @@ function uniqueSorted(values: Array<string | null>): string[] {
   return Array.from(
     new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))),
   ).sort((a, b) => a.localeCompare(b));
+}
+
+function parseConflictServerTask(value: string | null): ServerTaskDto | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<ServerTaskDto>;
+    if (
+      typeof parsed.id !== "number" ||
+      typeof parsed.user_id !== "number" ||
+      typeof parsed.title !== "string" ||
+      typeof parsed.status !== "string" ||
+      typeof parsed.priority !== "number" ||
+      typeof parsed.version !== "number" ||
+      typeof parsed.is_deleted !== "boolean" ||
+      typeof parsed.created_at !== "string" ||
+      typeof parsed.updated_at !== "string"
+    ) {
+      return null;
+    }
+    return parsed as ServerTaskDto;
+  } catch {
+    return null;
+  }
 }

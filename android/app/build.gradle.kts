@@ -22,18 +22,17 @@ android {
             ?: localProperties.getProperty(name)
             ?: defaultValue
 
-    val taskBridgeBaseUrl = taskBridgeProperty("TASKBRIDGE_BASE_URL", "http://192.168.10.30:8000/api/v1/")
-    val taskBridgeWebSocketUrl = taskBridgeProperty("TASKBRIDGE_WS_URL", "ws://192.168.10.30:8000/ws/sync")
+    val taskBridgeBaseUrl = taskBridgeProperty("TASKBRIDGE_BASE_URL", "https://taskbridge.example.invalid/api/v1/")
+    val taskBridgeWebSocketUrl = taskBridgeProperty("TASKBRIDGE_WS_URL", "wss://taskbridge.example.invalid/ws/sync")
     val taskBridgeUsesCleartext =
         taskBridgeBaseUrl.startsWith("http://") || taskBridgeWebSocketUrl.startsWith("ws://")
+    val releaseEndpointLooksPlaceholder =
+        taskBridgeBaseUrl.contains("example.invalid") || taskBridgeWebSocketUrl.contains("example.invalid")
+    val releaseUsesCleartext = taskBridgeUsesCleartext
     val releaseKeystorePath = taskBridgeProperty("ANDROID_KEYSTORE_PATH", System.getenv("ANDROID_KEYSTORE_PATH") ?: "")
     val releaseKeystorePassword = taskBridgeProperty("ANDROID_KEYSTORE_PASSWORD", System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "")
     val releaseKeyAlias = taskBridgeProperty("ANDROID_KEY_ALIAS", System.getenv("ANDROID_KEY_ALIAS") ?: "")
     val releaseKeyPassword = taskBridgeProperty("ANDROID_KEY_PASSWORD", System.getenv("ANDROID_KEY_PASSWORD") ?: "")
-    val allowUnsignedRelease = taskBridgeProperty(
-        "TASKBRIDGE_ALLOW_UNSIGNED_RELEASE",
-        System.getenv("TASKBRIDGE_ALLOW_UNSIGNED_RELEASE") ?: "",
-    ).equals("true", ignoreCase = true)
     val hasReleaseSigning = listOf(
         releaseKeystorePath,
         releaseKeystorePassword,
@@ -122,11 +121,20 @@ android {
                 it.name == "bundleRelease" ||
                 it.name == "packageRelease"
         }
-        if (requiresSignedRelease && !hasReleaseSigning && !allowUnsignedRelease) {
+        if (requiresSignedRelease && !hasReleaseSigning) {
             throw org.gradle.api.GradleException(
                 "Release signing is required. Configure ANDROID_KEYSTORE_PATH, " +
-                    "ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD. " +
-                    "For local unsigned release experiments, set TASKBRIDGE_ALLOW_UNSIGNED_RELEASE=true.",
+                    "ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD.",
+            )
+        }
+        if (requiresSignedRelease && releaseEndpointLooksPlaceholder) {
+            throw org.gradle.api.GradleException(
+                "Release endpoints must be configured with TASKBRIDGE_BASE_URL and TASKBRIDGE_WS_URL.",
+            )
+        }
+        if (requiresSignedRelease && releaseUsesCleartext) {
+            throw org.gradle.api.GradleException(
+                "Release endpoints must use HTTPS and WSS. Refusing cleartext public release config.",
             )
         }
     }

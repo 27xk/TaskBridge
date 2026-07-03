@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +39,7 @@ import com.taskbridge.app.domain.model.isOverdueAt
 import com.taskbridge.app.ui.components.AppHeader
 import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
+import com.taskbridge.app.ui.i18n.LocalAppLanguage
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
 import com.taskbridge.app.utils.ShanghaiTime
 import kotlinx.coroutines.launch
@@ -64,8 +66,11 @@ fun TaskDetailScreen(
 ) {
     var task by remember(localId) { mutableStateOf<Task?>(null) }
     var newChecklistTitle by remember(localId) { mutableStateOf("") }
+    var pendingChecklistDelete by remember(localId) { mutableStateOf<UiChecklistItem?>(null) }
+    var pendingTaskDelete by remember(localId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val strings = LocalTaskBridgeStrings.current
+    val languageCode = LocalAppLanguage.current.code
     val lifecycleOwner = LocalLifecycleOwner.current
     val now = rememberTimelineNow()
 
@@ -107,9 +112,81 @@ fun TaskDetailScreen(
                     }
                 }
             } else {
+                if (pendingTaskDelete) {
+                    AlertDialog(
+                        onDismissRequest = { pendingTaskDelete = false },
+                        title = { Text(strings.delete) },
+                        text = {
+                            Text(
+                                if (languageCode == "en-US") {
+                                    "Move this task to trash?"
+                                } else {
+                                    "\u5C06\u8FD9\u6761\u4EFB\u52A1\u79FB\u5230\u56DE\u6536\u7AD9\uFF1F"
+                                },
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        taskRepository.softDeleteTask(current.localId)
+                                        pendingTaskDelete = false
+                                        onTaskChanged()
+                                        onBack()
+                                    }
+                                },
+                            ) {
+                                Text(strings.delete)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { pendingTaskDelete = false }) {
+                                Text(strings.cancel)
+                            }
+                        },
+                    )
+                }
+                pendingChecklistDelete?.let { pending ->
+                    AlertDialog(
+                        onDismissRequest = { pendingChecklistDelete = null },
+                        title = { Text(strings.delete) },
+                        text = {
+                            Text(
+                                if (languageCode == "en-US") {
+                                    "Delete \"${pending.title}\" from this checklist?"
+                                } else {
+                                    "确认删除清单项「${pending.title}」？"
+                                },
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        taskRepository.deleteChecklistItem(current.localId, pending.id)
+                                        pendingChecklistDelete = null
+                                        onTaskChanged()
+                                        task = taskRepository.getTask(localId)
+                                    }
+                                },
+                            ) {
+                                Text(strings.delete)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { pendingChecklistDelete = null }) {
+                                Text(strings.cancel)
+                            }
+                        },
+                    )
+                }
                 AppHeader(
                     title = current.title,
-                    subtitle = if (current.status == TaskStatus.Completed) strings.completed else strings.todo,
+                    subtitle = when {
+                        current.isDeleted -> strings.trash
+                        current.status == TaskStatus.Completed -> strings.completed
+                        else -> strings.todo
+                    },
                 )
                 AppPanel {
                     Text(
@@ -118,171 +195,180 @@ fun TaskDetailScreen(
                         style = MaterialTheme.typography.bodyLarge,
                     )
                     Text(
-                        text = current.detailMeta(strings, displayTimeZone, now),
+                        text = current.detailMeta(strings, displayTimeZone, now, languageCode),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
 
-                AppPanel {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(strings.checklist, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            text = parseChecklist(current.checklistJson).size.toString(),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                    val checklist = remember(current.checklistJson) {
-                        parseChecklist(current.checklistJson)
-                    }
-                    checklist.forEach { item ->
+                if (current.isDeleted) {
+                    DeletedTaskActions(
+                        current = current,
+                        taskRepository = taskRepository,
+                        onTaskChanged = onTaskChanged,
+                        onBack = onBack,
+                    )
+                } else {
+                    AppPanel {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Checkbox(
-                                checked = item.done,
-                                onCheckedChange = {
-                                    scope.launch {
-                                        taskRepository.toggleChecklistItem(current.localId, item.id)
-                                        onTaskChanged()
-                                        task = taskRepository.getTask(localId)
-                                    }
-                                },
-                            )
+                            Text(strings.checklist, style = MaterialTheme.typography.titleMedium)
                             Text(
-                                text = item.title,
+                                text = parseChecklist(current.checklistJson).size.toString(),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                        val checklist = remember(current.checklistJson) {
+                            parseChecklist(current.checklistJson)
+                        }
+                        checklist.forEach { item ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = item.done,
+                                    onCheckedChange = {
+                                        scope.launch {
+                                            taskRepository.toggleChecklistItem(current.localId, item.id)
+                                            onTaskChanged()
+                                            task = taskRepository.getTask(localId)
+                                        }
+                                    },
+                                )
+                                Text(
+                                    text = item.title,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                TextButton(
+                                    onClick = { pendingChecklistDelete = item },
+                                ) {
+                                    Text(strings.delete)
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            OutlinedTextField(
+                                value = newChecklistTitle,
+                                onValueChange = { newChecklistTitle = it },
+                                label = { Text(strings.newChecklistItem) },
                                 modifier = Modifier.weight(1f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
                             )
                             TextButton(
                                 onClick = {
-                                    scope.launch {
-                                        taskRepository.deleteChecklistItem(current.localId, item.id)
-                                        onTaskChanged()
-                                        task = taskRepository.getTask(localId)
+                                    val title = newChecklistTitle.trim()
+                                    if (title.isNotBlank()) {
+                                        scope.launch {
+                                            taskRepository.addChecklistItem(current.localId, title)
+                                            newChecklistTitle = ""
+                                            onTaskChanged()
+                                            task = taskRepository.getTask(localId)
+                                        }
                                     }
                                 },
                             ) {
-                                Text(strings.delete)
+                                Text(strings.add)
                             }
                         }
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        OutlinedTextField(
-                            value = newChecklistTitle,
-                            onValueChange = { newChecklistTitle = it },
-                            label = { Text(strings.newChecklistItem) },
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(
-                            onClick = {
-                                val title = newChecklistTitle.trim()
-                                if (title.isNotBlank()) {
-                                    scope.launch {
-                                        taskRepository.addChecklistItem(current.localId, title)
-                                        newChecklistTitle = ""
-                                        onTaskChanged()
-                                        task = taskRepository.getTask(localId)
-                                    }
-                                }
-                            },
-                        ) {
-                            Text(strings.add)
-                        }
-                    }
-                }
 
-                AppPanel {
-                    Button(
-                        onClick = { onEditClick(current.localId) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(strings.edit)
-                    }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                if (current.status == TaskStatus.Completed) {
-                                    taskRepository.undoCompleteTask(current.localId)
-                                } else {
-                                    taskRepository.completeTask(current.localId)
-                                }
-                                onTaskChanged()
-                                task = taskRepository.getTask(localId)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(if (current.status == TaskStatus.Completed) strings.restore else strings.complete)
-                    }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val tomorrow = ShanghaiTime.todayDate(displayTimeZone).plusDays(1)
-                                val dueTime = tomorrow
-                                    .atTime(9, 0)
-                                    .atZone(ShanghaiTime.zone(displayTimeZone))
-                                    .toInstant()
-                                    .toString()
-                                taskRepository.postponeTask(current.localId, dueTime, null, tomorrow.toString())
-                                onTaskChanged()
-                                task = taskRepository.getTask(localId)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(strings.postponeTomorrow)
-                    }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                taskRepository.snoozeTask(
-                                    current.localId,
-                                    Instant.now().plusSeconds(3_600).toString(),
-                                )
-                                onTaskChanged()
-                                task = taskRepository.getTask(localId)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(strings.snoozeOneHour)
-                    }
-                    if (!current.repeatRule.isNullOrBlank()) {
+                    AppPanel {
                         Button(
-                            onClick = {
-                                scope.launch {
-                                    taskRepository.createNextOccurrence(current.localId)
-                                    onTaskChanged()
-                                }
-                            },
+                            onClick = { onEditClick(current.localId) },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text(strings.createNextOccurrence)
+                            Text(strings.edit)
                         }
-                    }
-                    if (current.isTemplate) {
+                        Button(
+                            onClick = { pendingTaskDelete = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(strings.delete)
+                        }
                         Button(
                             onClick = {
                                 scope.launch {
-                                    taskRepository.instantiateTemplate(current.localId)
+                                    if (current.status == TaskStatus.Completed) {
+                                        taskRepository.undoCompleteTask(current.localId)
+                                    } else {
+                                        taskRepository.completeTask(current.localId)
+                                    }
                                     onTaskChanged()
+                                    task = taskRepository.getTask(localId)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text(strings.useTemplate)
+                            Text(if (current.status == TaskStatus.Completed) strings.restore else strings.complete)
+                        }
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val tomorrow = ShanghaiTime.todayDate(displayTimeZone).plusDays(1)
+                                    val dueTime = tomorrow
+                                        .atTime(9, 0)
+                                        .atZone(ShanghaiTime.zone(displayTimeZone))
+                                        .toInstant()
+                                        .toString()
+                                    taskRepository.postponeTask(current.localId, dueTime, null, tomorrow.toString())
+                                    onTaskChanged()
+                                    task = taskRepository.getTask(localId)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(strings.postponeTomorrow)
+                        }
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    taskRepository.snoozeTask(
+                                        current.localId,
+                                        Instant.now().plusSeconds(3_600).toString(),
+                                    )
+                                    onTaskChanged()
+                                    task = taskRepository.getTask(localId)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(strings.snoozeOneHour)
+                        }
+                        if (!current.repeatRule.isNullOrBlank()) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        taskRepository.createNextOccurrence(current.localId)
+                                        onTaskChanged()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(strings.createNextOccurrence)
+                            }
+                        }
+                        if (current.isTemplate) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        taskRepository.instantiateTemplate(current.localId)
+                                        onTaskChanged()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(strings.useTemplate)
+                            }
                         }
                     }
                 }
@@ -291,10 +377,45 @@ fun TaskDetailScreen(
     }
 }
 
+@Composable
+private fun DeletedTaskActions(
+    current: Task,
+    taskRepository: TaskRepository,
+    onTaskChanged: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val strings = LocalTaskBridgeStrings.current
+    val scope = rememberCoroutineScope()
+    AppPanel {
+        Text(
+            text = if (LocalAppLanguage.current.code == "en-US") {
+                "This task is in Trash. Restore it before editing or changing its checklist."
+            } else {
+                "这条任务在回收站中。恢复后才能编辑或修改清单。"
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Button(
+            onClick = {
+                scope.launch {
+                    taskRepository.restoreDeletedTask(current.localId)
+                    onTaskChanged()
+                    onBack()
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(strings.restore)
+        }
+    }
+}
+
 private fun Task.detailMeta(
     strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings,
     displayTimeZone: String,
     now: Instant,
+    languageCode: String,
 ): String {
     return listOfNotNull(
         strings.overdue.takeIf { isOverdueAt(now, displayTimeZone) },
@@ -305,8 +426,11 @@ private fun Task.detailMeta(
         snoozedUntil?.let { "${strings.snoozed} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
         completedAt?.let { "${strings.completed} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
         tag?.let { "#$it" },
-        "${strings.list} $listType",
-        "${strings.priority} $priority",
+        repeatRule?.takeIf { it.isNotBlank() }?.let {
+            "${strings.repeatRule} ${getTaskRepeatRuleLabel(it, languageCode)}"
+        },
+        "${strings.list} ${getTaskListTypeLabel(listType, languageCode)}",
+        if (priority > 0) "${strings.priority} ${getTaskPriorityLabel(priority, languageCode)}" else null,
     ).joinToString("\n")
 }
 

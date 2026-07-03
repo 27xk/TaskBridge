@@ -1,12 +1,16 @@
 /// <reference types="vite/client" />
 
+import type { DesktopThemeId } from "../shared/desktop-theme";
+
 export {};
 
 declare global {
   interface TaskBridgeSettings {
     baseUrl: string;
     wsUrl: string;
+    currentUserId: number | null;
     language: "zh-CN" | "en-US";
+    desktopTheme: DesktopThemeId;
     displayTimeZone: string;
     deviceId: string;
     lastSyncTime: string;
@@ -42,10 +46,12 @@ declare global {
     sortOrder: number;
     version: number;
     isDeleted: boolean;
-    syncStatus: "synced" | "pending_create" | "pending_update" | "pending_delete" | "conflict";
+    syncStatus: "synced" | "pending_create" | "pending_update" | "pending_delete" | "sync_failed" | "conflict";
     createdAt: string;
     updatedAt: string;
     lastSyncAt: string | null;
+    conflictServerJson: string | null;
+    conflictLocalJson: string | null;
   }
 
   interface SyncQueueRecord {
@@ -77,6 +83,59 @@ declare global {
     attemptCount?: number;
   }
 
+  interface SyncQueueCounts {
+    total: number;
+    pending: number;
+    exhausted: number;
+  }
+
+  interface BackupImportError {
+    code: "file_too_large" | "invalid_json" | "unsupported_format" | "missing_tasks" | "too_many_tasks";
+    message: string;
+  }
+
+  interface BackupImportResult {
+    canceled: boolean;
+    importedCount?: number;
+    scannedCount?: number;
+    skippedCount?: number;
+    importedLocalIds?: string[];
+    error?: BackupImportError;
+  }
+
+  interface BackupImportUndoResult {
+    undoneCount: number;
+    skippedChangedCount: number;
+  }
+
+  interface BackupImportPreview {
+    canceled: boolean;
+    filePath?: string;
+    importableCount?: number;
+    scannedCount?: number;
+    skippedCount?: number;
+    error?: BackupImportError;
+  }
+
+  type UpdateState =
+    | "disabled"
+    | "idle"
+    | "checking"
+    | "available"
+    | "not-available"
+    | "downloading"
+    | "downloaded"
+    | "error";
+
+  interface UpdateStatus {
+    state: UpdateState;
+    message: string;
+    version?: string;
+    percent?: number;
+    error?: string;
+    checkedAt: string;
+  }
+
   interface Window {
     taskBridge?: {
       platform: string;
@@ -92,7 +151,11 @@ declare global {
         notify: (title: string, body: string) => Promise<void>;
         toggleFloating: () => Promise<boolean>;
         showFloating: () => Promise<boolean>;
+        openExternal: (url: string) => Promise<boolean>;
         setAutoStart: (enabled: boolean) => Promise<TaskBridgeSettings>;
+        getUpdateStatus: () => Promise<UpdateStatus>;
+        checkForUpdates: () => Promise<UpdateStatus>;
+        onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
       };
       auth: {
         hasTokens: () => Promise<boolean>;
@@ -119,8 +182,11 @@ declare global {
         upsertTask: (task: TaskRecord) => Promise<TaskRecord>;
         upsertTasks: (tasks: TaskRecord[]) => Promise<TaskRecord[]>;
         deleteLocalTask: (localId: string) => Promise<void>;
+        purgeLocalTask: (localId: string) => Promise<void>;
+        clearLocalDeviceData: () => Promise<{ tasks: number; queue: number }>;
         completeLocalTask: (localId: string) => Promise<TaskRecord | null>;
         listQueue: (limit?: number, includeExhausted?: boolean) => Promise<SyncQueueRecord[]>;
+        getQueueCounts: () => Promise<SyncQueueCounts>;
         enqueueChange: (change: SyncQueueRecord) => Promise<number>;
         removeQueueItem: (id: number) => Promise<void>;
         removeQueueByLocalId: (localId: string) => Promise<void>;
@@ -152,8 +218,13 @@ declare global {
         quickAdd: (title: string) => Promise<TaskRecord | null>;
         complete: (localId: string) => Promise<TaskRecord | null>;
         openDetail: (localId: string) => Promise<void>;
-        exportJson: () => Promise<{ canceled: boolean; filePath?: string }>;
-        importJson: () => Promise<{ canceled: boolean; importedCount?: number }>;
+        exportJson: () => Promise<{ canceled: boolean; filePath?: string; exportedCount?: number }>;
+        chooseImportJson: () => Promise<BackupImportPreview>;
+        confirmImportJson: () => Promise<BackupImportResult>;
+        getLastImportUndoSummary: () => Promise<{ count: number; localIds: string[] }>;
+        undoLastImportJson: () => Promise<BackupImportUndoResult>;
+        importJson: () => Promise<BackupImportResult>;
+        exportDiagnostics: () => Promise<{ canceled: boolean; filePath?: string }>;
       };
       sync: {
         getStatus: () => Promise<string>;

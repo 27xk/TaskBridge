@@ -14,7 +14,6 @@ object WidgetConstants {
     const val UPDATE_WORK_NAME = "taskbridge-widget-update"
 
     const val MAX_TASKS = 8
-    const val HIGH_PRIORITY = 3
     const val TASK_SCOPE_TODAY = "today"
     const val TASK_SCOPE_ALL = "all"
     const val COMPLETION_SCOPE_OPEN = "open"

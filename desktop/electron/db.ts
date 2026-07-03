@@ -1,12 +1,13 @@
 import { app } from "electron";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
+import { copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { parseQuickTask, shanghaiDayBounds, todayLocalDate } from "../shared/quick-add-parser";
 import { getSettings } from "./state";
 
-export type SyncStatus = "synced" | "pending_create" | "pending_update" | "pending_delete" | "conflict";
+export type SyncStatus = "synced" | "pending_create" | "pending_update" | "pending_delete" | "sync_failed" | "conflict";
 export type SyncAction = "create" | "update" | "delete" | "complete" | "restore";
 
 export interface TaskRecord {
@@ -36,6 +37,8 @@ export interface TaskRecord {
   createdAt: string;
   updatedAt: string;
   lastSyncAt: string | null;
+  conflictServerJson: string | null;
+  conflictLocalJson: string | null;
 }
 
 export interface SyncQueueRecord {
@@ -67,6 +70,22 @@ export interface SyncQueueRecord {
   attemptCount?: number;
 }
 
+export interface SyncQueueCounts {
+  total: number;
+  pending: number;
+  exhausted: number;
+}
+
+export interface BackupImportUndoItem {
+  localId: string;
+  importedUpdatedAt: string;
+}
+
+export interface BackupImportUndoResult {
+  undoneCount: number;
+  skippedChangedCount: number;
+}
+
 interface TaskRow {
   local_id: string;
   server_id: number | null;
@@ -94,6 +113,8 @@ interface TaskRow {
   created_at: string;
   updated_at: string;
   last_sync_at: string | null;
+  conflict_server_json: string | null;
+  conflict_local_json: string | null;
 }
 
 interface SyncQueueRow {
@@ -126,10 +147,18 @@ interface SyncQueueRow {
 }
 
 let db: Database.Database | null = null;
+let dbUserKey = "";
 
 export function database(): Database.Database {
-  if (db) return db;
-  const dbPath = join(app.getPath("userData"), "taskbridge.sqlite");
+  const { key: nextUserKey, path: dbPath } = currentUserDatabaseKey();
+  if (db && dbUserKey === nextUserKey) return db;
+  if (db && dbUserKey !== nextUserKey) {
+    db.close();
+    db = null;
+  }
+  if (nextUserKey.startsWith("user-")) {
+    migrateLegacyGlobalDatabase(dbPath);
+  }
   try {
     db = new Database(dbPath);
   } catch (error) {
@@ -163,7 +192,9 @@ export function database(): Database.Database {
       sync_status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      last_sync_at TEXT
+      last_sync_at TEXT,
+      conflict_server_json TEXT,
+      conflict_local_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sync_queue (
@@ -202,7 +233,34 @@ export function database(): Database.Database {
   `);
   migrateSchema(db);
   db.pragma("optimize");
+  dbUserKey = nextUserKey;
   return db;
+}
+
+function currentUserDatabaseKey(): { key: string; path: string } {
+  const currentUserId = getSettings().currentUserId;
+  if (typeof currentUserId === "number" && Number.isFinite(currentUserId) && currentUserId > 0) {
+    const userId = Math.trunc(currentUserId);
+    return {
+      key: `user-${userId}`,
+      path: join(app.getPath("userData"), `taskbridge-user-${userId}.sqlite`),
+    };
+  }
+  return {
+    key: "signed-out",
+    path: join(app.getPath("userData"), "taskbridge-signed-out.sqlite"),
+  };
+}
+
+function legacyGlobalDatabasePath(): string {
+  const userDataPath = app.getPath("userData");
+  return join(userDataPath, "taskbridge.sqlite");
+}
+
+function migrateLegacyGlobalDatabase(dbPath: string): void {
+  const legacyPath = legacyGlobalDatabasePath();
+  if (existsSync(dbPath) || !existsSync(legacyPath)) return;
+  copyFileSync(legacyPath, dbPath);
 }
 
 function normalizeDatabaseOpenError(error: unknown): Error {
@@ -235,6 +293,8 @@ function migrateSchema(target: Database.Database): void {
   ensureColumn(target, "tasks", "is_template", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(target, "tasks", "template_name", "TEXT");
   ensureColumn(target, "tasks", "sort_order", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(target, "tasks", "conflict_server_json", "TEXT");
+  ensureColumn(target, "tasks", "conflict_local_json", "TEXT");
 
   ensureColumn(target, "sync_queue", "project", "TEXT");
   ensureColumn(target, "sync_queue", "list_type", "TEXT");
@@ -253,6 +313,8 @@ function migrateSchema(target: Database.Database): void {
     CREATE INDEX IF NOT EXISTS ix_tasks_deleted_updated ON tasks(is_deleted, updated_at);
     CREATE INDEX IF NOT EXISTS ix_tasks_status_priority ON tasks(status, priority);
     CREATE INDEX IF NOT EXISTS ix_tasks_today_due ON tasks(is_deleted, due_time, remind_time, planned_date);
+    CREATE INDEX IF NOT EXISTS ix_tasks_active_timeline ON tasks(status, due_time, planned_date, completed_at, updated_at, sort_order, priority, local_id) WHERE is_deleted = 0;
+    CREATE INDEX IF NOT EXISTS ix_tasks_active_reminders ON tasks(remind_time, due_time, status, updated_at, local_id) WHERE is_deleted = 0;
     CREATE INDEX IF NOT EXISTS ix_tasks_project ON tasks(project);
     CREATE INDEX IF NOT EXISTS ix_tasks_tag ON tasks(tag);
     CREATE INDEX IF NOT EXISTS ix_tasks_template ON tasks(is_template);
@@ -279,11 +341,12 @@ export function listTasks(includeDeleted: boolean, limit = 200, offset = 0): Tas
       SELECT * FROM tasks
       ${includeDeleted ? "" : "WHERE is_deleted = 0"}
       ORDER BY
-        CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
-        CASE WHEN status = 'completed' THEN COALESCE(datetime(completed_at), datetime(updated_at), datetime(due_time), datetime(planned_date), datetime(created_at)) END DESC,
+        CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
+        CASE WHEN status IN ('completed', 'done') THEN COALESCE(datetime(completed_at), datetime(updated_at), datetime(due_time), datetime(planned_date), datetime(created_at)) END DESC,
         CASE WHEN due_time IS NULL THEN 1 ELSE 0 END,
         due_time ASC,
-        updated_at DESC
+        updated_at DESC,
+        local_id ASC
       LIMIT @limit OFFSET @offset
       `,
     )
@@ -305,24 +368,27 @@ export function listTodayTasks(limit = 120): TaskRecord[] {
           (due_time IS NOT NULL AND datetime(due_time) >= datetime(@startTime) AND datetime(due_time) < datetime(@endTime))
           OR (remind_time IS NOT NULL AND datetime(remind_time) >= datetime(@startTime) AND datetime(remind_time) < datetime(@endTime))
           OR planned_date = @plannedDate
-          OR (status != 'completed' AND due_time IS NOT NULL AND datetime(due_time) < datetime(@nowTime))
+          OR list_type = 'today'
+          OR (status NOT IN ('completed', 'done') AND due_time IS NOT NULL AND datetime(due_time) < datetime(@nowTime))
         )
       ORDER BY
-        CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
+        CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
         CASE
-          WHEN status = 'completed' THEN 4
-          WHEN status != 'completed' AND due_time IS NOT NULL AND datetime(due_time) < datetime(@nowTime) THEN 0
+          WHEN status IN ('completed', 'done') THEN 4
+          WHEN status NOT IN ('completed', 'done') AND due_time IS NOT NULL AND datetime(due_time) < datetime(@nowTime) THEN 0
           WHEN due_time IS NOT NULL THEN 1
+          WHEN list_type = 'today' THEN 2
           WHEN planned_date IS NOT NULL THEN 2
           ELSE 3
         END,
-        CASE WHEN status = 'completed' THEN COALESCE(datetime(completed_at), datetime(updated_at), datetime(due_time), datetime(planned_date), datetime(created_at)) END DESC,
-        CASE WHEN status != 'completed' AND due_time IS NULL THEN 1 ELSE 0 END,
-        CASE WHEN status != 'completed' THEN due_time END ASC,
-        CASE WHEN status != 'completed' THEN planned_date END ASC,
+        CASE WHEN status IN ('completed', 'done') THEN COALESCE(datetime(completed_at), datetime(updated_at), datetime(due_time), datetime(planned_date), datetime(created_at)) END DESC,
+        CASE WHEN status NOT IN ('completed', 'done') AND due_time IS NULL THEN 1 ELSE 0 END,
+        CASE WHEN status NOT IN ('completed', 'done') THEN due_time END ASC,
+        CASE WHEN status NOT IN ('completed', 'done') THEN planned_date END ASC,
         sort_order ASC,
         priority DESC,
-        updated_at DESC
+        updated_at DESC,
+        local_id ASC
       LIMIT @limit
       `,
     )
@@ -343,21 +409,22 @@ export function listTodayFloatingTasks(limit = 8): TaskRecord[] {
           (due_time IS NOT NULL AND datetime(due_time) >= datetime(@startTime) AND datetime(due_time) < datetime(@endTime))
           OR (remind_time IS NOT NULL AND datetime(remind_time) >= datetime(@startTime) AND datetime(remind_time) < datetime(@endTime))
           OR planned_date = @plannedDate
-          OR (status = 'todo' AND priority >= @highPriority)
+          OR list_type = 'today'
         )
       ORDER BY
-        CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
-        CASE WHEN status = 'completed' THEN COALESCE(datetime(completed_at), datetime(updated_at), datetime(due_time), datetime(planned_date), datetime(created_at)) END DESC,
+        CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
+        CASE WHEN status IN ('completed', 'done') THEN COALESCE(datetime(completed_at), datetime(updated_at), datetime(due_time), datetime(planned_date), datetime(created_at)) END DESC,
         CASE WHEN planned_date = @plannedDate THEN 0 ELSE 1 END,
         CASE WHEN due_time IS NULL THEN 1 ELSE 0 END,
         CASE WHEN due_time IS NOT NULL THEN datetime(due_time) END ASC,
         due_time ASC,
         priority DESC,
-        updated_at DESC
+        updated_at DESC,
+        local_id ASC
       LIMIT @limit
       `,
     )
-    .all({ startTime, endTime, plannedDate: today, highPriority: 3, limit: clampLimit(limit, 1, 30) }) as TaskRow[];
+    .all({ startTime, endTime, plannedDate: today, limit: clampLimit(limit, 1, 30) }) as TaskRow[];
   return rows.map(taskFromRow);
 }
 
@@ -409,12 +476,14 @@ export function upsertTasks(tasks: TaskRecord[]): TaskRecord[] {
       local_id, server_id, title, content, status, priority, tag, project, list_type,
       due_time, remind_time, repeat_rule, planned_date, completed_at, snoozed_until,
       parent_server_id, checklist_json, is_template, template_name, sort_order,
-      version, is_deleted, sync_status, created_at, updated_at, last_sync_at
+      version, is_deleted, sync_status, created_at, updated_at, last_sync_at,
+      conflict_server_json, conflict_local_json
     ) VALUES (
       @localId, @serverId, @title, @content, @status, @priority, @tag, @project, @listType,
       @dueTime, @remindTime, @repeatRule, @plannedDate, @completedAt, @snoozedUntil,
       @parentServerId, @checklistJson, @isTemplateInt, @templateName, @sortOrder,
-      @version, @isDeletedInt, @syncStatus, @createdAt, @updatedAt, @lastSyncAt
+      @version, @isDeletedInt, @syncStatus, @createdAt, @updatedAt, @lastSyncAt,
+      @conflictServerJson, @conflictLocalJson
     )
     ON CONFLICT(local_id) DO UPDATE SET
       server_id = excluded.server_id,
@@ -440,7 +509,9 @@ export function upsertTasks(tasks: TaskRecord[]): TaskRecord[] {
       is_deleted = excluded.is_deleted,
       sync_status = excluded.sync_status,
       updated_at = excluded.updated_at,
-      last_sync_at = excluded.last_sync_at
+      last_sync_at = excluded.last_sync_at,
+      conflict_server_json = excluded.conflict_server_json,
+      conflict_local_json = excluded.conflict_local_json
     `,
   );
   const deleteMergedLocalTask = target.prepare("DELETE FROM tasks WHERE local_id = ? AND server_id IS NULL");
@@ -484,6 +555,8 @@ function saveTaskRecord(
     templateName: normalizedTask.templateName ?? null,
     sortOrder: normalizedTask.sortOrder ?? 0,
     isDeletedInt: normalizedTask.isDeleted ? 1 : 0,
+    conflictServerJson: normalizedTask.conflictServerJson ?? null,
+    conflictLocalJson: normalizedTask.conflictLocalJson ?? null,
   });
 
   if (shouldRemoveMergedDuplicate) {
@@ -500,11 +573,118 @@ export function softDeleteLocalTask(localId: string): void {
       UPDATE tasks
       SET is_deleted = 1,
           sync_status = 'pending_delete',
-          updated_at = ?
+          updated_at = ?,
+          conflict_server_json = NULL,
+          conflict_local_json = NULL
       WHERE local_id = ?
       `,
     )
     .run(new Date().toISOString(), localId);
+}
+
+export function purgeLocalTask(localId: string): void {
+  const target = localId.trim();
+  if (!target) return;
+  const db = database();
+  const run = db.transaction((id: string) => {
+    db.prepare("DELETE FROM sync_queue WHERE local_id = ?").run(id);
+    db.prepare("DELETE FROM tasks WHERE local_id = ?").run(id);
+  });
+  run(target);
+}
+
+export function clearLocalDeviceData(): { tasks: number; queue: number } {
+  const db = database();
+  const run = db.transaction(() => {
+    const queue = Number(db.prepare("DELETE FROM sync_queue").run().changes || 0);
+    const tasks = Number(db.prepare("DELETE FROM tasks").run().changes || 0);
+    return { tasks, queue };
+  });
+  return run();
+}
+
+export function deleteLocalUnsyncedTasks(localIds: string[]): number {
+  const uniqueIds = Array.from(new Set(localIds.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return 0;
+  const db = database();
+  const deleteQueue = db.prepare("DELETE FROM sync_queue WHERE local_id = ?");
+  const deleteTask = db.prepare("DELETE FROM tasks WHERE local_id = ? AND server_id IS NULL");
+  const run = db.transaction((ids: string[]) => {
+    let deleted = 0;
+    for (const localId of ids) {
+      deleteQueue.run(localId);
+      deleted += Number(deleteTask.run(localId).changes || 0);
+    }
+    return deleted;
+  });
+  return run(uniqueIds);
+}
+
+export function undoImportedBackupTasks(items: BackupImportUndoItem[]): BackupImportUndoResult {
+  const uniqueItems = Array.from(
+    new Map(
+      items
+        .map((item) => ({
+          localId: item.localId.trim(),
+          importedUpdatedAt: item.importedUpdatedAt.trim(),
+        }))
+        .filter((item) => item.localId && item.importedUpdatedAt)
+        .map((item) => [item.localId, item]),
+    ).values(),
+  );
+  if (uniqueItems.length === 0) {
+    return { undoneCount: 0, skippedChangedCount: 0 };
+  }
+  const db = database();
+  const getTaskByLocalId = db.prepare("SELECT * FROM tasks WHERE local_id = ?");
+  const deleteQueue = db.prepare("DELETE FROM sync_queue WHERE local_id = ?");
+  const deleteUnsyncedTask = db.prepare("DELETE FROM tasks WHERE local_id = ? AND server_id IS NULL");
+  const softDeleteSyncedTask = db.prepare(
+    `
+    UPDATE tasks
+    SET is_deleted = 1,
+        sync_status = 'pending_delete',
+        updated_at = ?,
+        conflict_server_json = NULL,
+        conflict_local_json = NULL
+    WHERE local_id = ? AND server_id IS NOT NULL
+    `,
+  );
+  const run = db.transaction((undoItems: BackupImportUndoItem[]) => {
+    let undoneCount = 0;
+    let skippedChangedCount = 0;
+    for (const item of undoItems) {
+      const task = getTaskByLocalId.get(item.localId) as TaskRow | undefined;
+      if (!task) continue;
+      if (task.updated_at !== item.importedUpdatedAt) {
+        skippedChangedCount += 1;
+        continue;
+      }
+      deleteQueue.run(item.localId);
+      if (task.server_id === null) {
+        undoneCount += Number(deleteUnsyncedTask.run(item.localId).changes || 0);
+        continue;
+      }
+      const updatedAt = new Date().toISOString();
+      const changes = Number(softDeleteSyncedTask.run(updatedAt, item.localId).changes || 0);
+      if (changes > 0) {
+        undoneCount += changes;
+        enqueueTaskChange(
+          {
+            ...taskFromRow(task),
+            isDeleted: true,
+            syncStatus: "pending_delete",
+            updatedAt,
+            conflictServerJson: null,
+            conflictLocalJson: null,
+          },
+          "delete",
+        );
+      }
+    }
+    return { undoneCount, skippedChangedCount };
+  });
+  return run(uniqueItems);
 }
 
 export function markTaskCompleted(localId: string): TaskRecord | null {
@@ -517,6 +697,8 @@ export function markTaskCompleted(localId: string): TaskRecord | null {
     completedAt: now,
     syncStatus: task.serverId ? "pending_update" : "pending_create",
     updatedAt: now,
+    conflictServerJson: null,
+    conflictLocalJson: null,
   };
   return upsertTask(next);
 }
@@ -525,10 +707,20 @@ export function createLocalTask(title: string): TaskRecord | null {
   const trimmed = title.trim();
   if (!trimmed) return null;
 
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
   const timeZone = getSettings().displayTimeZone;
-  const parsed = parseQuickTask(trimmed, new Date(), timeZone);
-  const plannedDate = parsed.plannedDate ?? todayLocalDate(new Date(), timeZone);
+  const parsed = parseQuickTask(trimmed, nowDate, timeZone);
+  const today = todayLocalDate(nowDate, timeZone);
+  const { startTime, endTime } = shanghaiDayBounds(today, timeZone);
+  const dueTimeMs = parsed.dueTime ? new Date(parsed.dueTime).getTime() : Number.NaN;
+  const hasDueTimeToday =
+    Number.isFinite(dueTimeMs) &&
+    dueTimeMs >= new Date(startTime).getTime() &&
+    dueTimeMs < new Date(endTime).getTime();
+  const shouldDefaultToToday = !parsed.plannedDate && !parsed.dueTime;
+  const plannedDate = parsed.plannedDate ?? (shouldDefaultToToday ? today : null);
+  const isTodayTask = plannedDate === today || hasDueTimeToday;
   const task: TaskRecord = {
     localId: `local-${randomUUID()}`,
     serverId: null,
@@ -537,8 +729,8 @@ export function createLocalTask(title: string): TaskRecord | null {
     status: "todo",
     priority: parsed.priority,
     tag: parsed.tag,
-    project: null,
-    listType: "today",
+    project: parsed.project,
+    listType: isTodayTask ? "today" : "inbox",
     dueTime: parsed.dueTime,
     remindTime: null,
     repeatRule: null,
@@ -556,6 +748,8 @@ export function createLocalTask(title: string): TaskRecord | null {
     createdAt: now,
     updatedAt: now,
     lastSyncAt: null,
+    conflictServerJson: null,
+    conflictLocalJson: null,
   };
 
   upsertTask(task);
@@ -582,6 +776,25 @@ export function listQueue(limit = 100, includeExhausted = false): SyncQueueRecor
     )
     .all({ limit: clampLimit(limit, 1, 100) }) as SyncQueueRow[];
   return rows.map(queueFromRow);
+}
+
+export function getSyncQueueCounts(): SyncQueueCounts {
+  const row = database()
+    .prepare(
+      `
+      SELECT
+        COUNT(*) AS total,
+        COALESCE(SUM(CASE WHEN attempt_count < 8 THEN 1 ELSE 0 END), 0) AS pending,
+        COALESCE(SUM(CASE WHEN attempt_count >= 8 THEN 1 ELSE 0 END), 0) AS exhausted
+      FROM sync_queue
+      `,
+    )
+    .get() as { total?: number; pending?: number; exhausted?: number } | undefined;
+  return {
+    total: Number(row?.total ?? 0),
+    pending: Number(row?.pending ?? 0),
+    exhausted: Number(row?.exhausted ?? 0),
+  };
 }
 
 export function enqueueChange(change: SyncQueueRecord): number {
@@ -689,6 +902,8 @@ function taskFromRow(row: TaskRow): TaskRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastSyncAt: row.last_sync_at,
+    conflictServerJson: row.conflict_server_json,
+    conflictLocalJson: row.conflict_local_json,
   };
 }
 
@@ -729,6 +944,7 @@ function toSyncStatus(value: string): SyncStatus {
     value === "pending_create" ||
     value === "pending_update" ||
     value === "pending_delete" ||
+    value === "sync_failed" ||
     value === "conflict"
   ) {
     return value;

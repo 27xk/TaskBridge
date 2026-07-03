@@ -8,13 +8,18 @@ const electronViteConfig = readFileSync(new URL("../electron.vite.config.ts", im
 const files = config.files ?? [];
 
 assert.ok(Array.isArray(files), "electron-builder files must be an array");
-assert.deepEqual(Object.keys(packageJson.dependencies ?? {}).sort(), ["better-sqlite3"], "desktop production dependencies should stay minimal");
+const expectedRuntimeDependencies = ["better-sqlite3", "electron-updater"];
+assert.deepEqual(
+  Object.keys(packageJson.dependencies ?? {}).sort(),
+  expectedRuntimeDependencies,
+  "desktop production dependencies should stay minimal and limited to native storage plus updater runtime",
+);
 assert.ok(!packageJson.dependencies?.vue, "vue should stay bundled at build time, not installed as a runtime dependency");
 assert.ok(!packageJson.dependencies?.pinia, "pinia should stay bundled at build time, not installed as a runtime dependency");
 assert.deepEqual(
   Object.keys(packageLock.packages?.[""]?.dependencies ?? {}).sort(),
-  ["better-sqlite3"],
-  "package-lock root production dependencies should stay minimal",
+  expectedRuntimeDependencies,
+  "package-lock root production dependencies should stay minimal and limited to approved runtime modules",
 );
 for (const name of ["electron-store", "conf", "dot-prop", "atomically", "ajv-formats"]) {
   assert.ok(!packageLock.packages?.[`node_modules/${name}`], `package-lock should not include removed runtime dependency ${name}`);
@@ -23,7 +28,7 @@ assert.deepEqual(config.electronLanguages, ["zh-CN", "en-US"], "desktop package 
 assert.ok(config.asar === true, "desktop package should use asar");
 assert.ok(config.asarUnpack?.includes("**/better_sqlite3.node"), "only the better-sqlite3 native binding should be unpacked");
 assert.ok(!config.asarUnpack?.includes("**/*.node"), "do not unpack every native module by default");
-assert.equal(config.nsis?.differentialPackage, false, "desktop release should not emit NSIS differential blockmaps");
+assert.equal(config.nsis?.differentialPackage, true, "desktop release should emit NSIS differential blockmaps for auto update");
 assert.equal((electronViteConfig.match(/minify: "esbuild"/g) ?? []).length, 3, "desktop main, preload, and renderer builds should be minified");
 assert.equal((electronViteConfig.match(/sourcemap: false/g) ?? []).length, 3, "desktop main, preload, and renderer builds should not emit sourcemaps");
 

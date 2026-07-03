@@ -62,6 +62,8 @@ export function serverTaskToLocal(
     createdAt: task.created_at,
     updatedAt: task.updated_at,
     lastSyncAt: nowIso(),
+    conflictServerJson: null,
+    conflictLocalJson: null,
   };
 }
 
@@ -71,13 +73,15 @@ export function mergePulledTask(task: ServerTaskDto, existing?: TaskRecord): Tas
       ...existing,
       syncStatus: "conflict",
       lastSyncAt: nowIso(),
+      conflictServerJson: safeStringify(task),
+      conflictLocalJson: existing.conflictLocalJson ?? safeStringify(existing),
     };
   }
   return serverTaskToLocal(task, existing?.localId);
 }
 
 function isLocalPending(task: TaskRecord): boolean {
-  return task.syncStatus.startsWith("pending_") || task.syncStatus === "conflict";
+  return task.syncStatus.startsWith("pending_") || task.syncStatus === "sync_failed" || task.syncStatus === "conflict";
 }
 
 function parseChecklist(value: string | null): Array<{ id: string; title: string; done: boolean }> | null {
@@ -96,6 +100,14 @@ function parseChecklist(value: string | null): Array<{ id: string; title: string
         );
       })
       .slice(0, 100);
+  } catch {
+    return null;
+  }
+}
+
+function safeStringify(value: unknown): string | null {
+  try {
+    return JSON.stringify(value);
   } catch {
     return null;
   }

@@ -7,7 +7,8 @@ import androidx.room.PrimaryKey
 @Entity(
     tableName = "tasks",
     indices = [
-        Index(value = ["serverId"], unique = true),
+        Index(value = ["ownerUserId", "serverId"], unique = true),
+        Index(value = ["ownerUserId"]),
         Index(value = ["syncStatus"]),
         Index(value = ["dueTime"]),
         Index(value = ["listType"]),
@@ -19,6 +20,7 @@ import androidx.room.PrimaryKey
 )
 data class TaskEntity(
     @PrimaryKey val localId: String,
+    val ownerUserId: String,
     val serverId: Int?,
     val title: String,
     val content: String?,
@@ -41,6 +43,8 @@ data class TaskEntity(
     val version: Int,
     val isDeleted: Boolean,
     val syncStatus: String,
+    val conflictServerJson: String?,
+    val conflictLocalJson: String?,
     val createdAt: String,
     val updatedAt: String,
     val lastSyncAt: String?,

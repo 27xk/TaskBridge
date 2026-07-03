@@ -3,28 +3,58 @@ export type AppLanguage = "zh-CN" | "en-US";
 type MessageKey =
   | "app.reminder"
   | "auth.subtitle"
+  | "auth.firstUseTitle"
+  | "auth.firstUseHint"
+  | "auth.firstUseExistingServer"
+  | "auth.firstUseExistingServerTitle"
+  | "auth.firstUseNoServer"
+  | "auth.firstUseNoServerTitle"
+  | "auth.firstUseLocalTrial"
+  | "auth.firstUseLocalTrialTitle"
+  | "auth.firstUseSelfHost"
+  | "auth.firstUseSelfHostTitle"
+  | "auth.setupChecklistTitle"
+  | "auth.setupStepServer"
+  | "auth.setupStepCheck"
+  | "auth.setupStepAccount"
+  | "auth.openLocalTrialGuide"
+  | "auth.noServerHelpSummary"
+  | "auth.noServerHelpBody"
+  | "auth.copyLocalTrialReference"
+  | "auth.localTrialReferenceCopied"
+  | "auth.localTrialReferenceCopyFailed"
   | "auth.mode"
   | "auth.login"
   | "auth.register"
+  | "auth.registrationUnknown"
+  | "auth.registrationClosed"
   | "auth.username"
   | "auth.usernameOrEmail"
   | "auth.email"
   | "auth.password"
+  | "auth.showPassword"
+  | "auth.hidePassword"
   | "auth.processing"
   | "auth.createAccount"
   | "auth.loginFailed"
   | "auth.registerFailed"
+  | "auth.serverUrlRequired"
+  | "auth.networkError"
+  | "auth.serverError"
   | "nav.label"
   | "nav.today"
   | "nav.all"
   | "nav.settings"
   | "nav.logout"
   | "task.add"
+  | "task.showAllTasks"
+  | "task.clearFilters"
   | "task.addToday"
   | "task.edit"
   | "task.save"
   | "task.cancel"
   | "task.close"
+  | "task.discardChangesConfirm"
   | "task.delete"
   | "task.editAction"
   | "task.complete"
@@ -44,11 +74,29 @@ type MessageKey =
   | "task.reminder"
   | "task.repeat"
   | "task.template"
+  | "task.trash"
+  | "task.emptyTrash"
+  | "task.restoreFromTrash"
+  | "task.purge"
+  | "task.purgeConfirm"
+  | "task.restoreSelectedTrash"
+  | "task.purgeSelectedTrash"
+  | "task.purgeSelectedConfirm"
   | "task.project"
   | "task.list"
   | "task.checklist"
   | "task.noDue"
   | "task.search"
+  | "task.clearSearch"
+  | "task.currentFilters"
+  | "task.syncHealthTitle"
+  | "task.syncHealthReady"
+  | "task.syncHealthNeedsReview"
+  | "task.syncHealthUnknown"
+  | "task.syncHealthDegraded"
+  | "task.syncHealthAction"
+  | "task.emptySearch"
+  | "task.emptyFiltered"
   | "task.empty"
   | "task.emptyToday"
   | "task.allTitle"
@@ -58,6 +106,7 @@ type MessageKey =
   | "task.overdueCountSuffix"
   | "task.upcomingToday"
   | "task.openCountSuffix"
+  | "task.selectedCountSuffix"
   | "task.completedCountPrefix"
   | "task.inbox"
   | "task.filterOpen"
@@ -65,6 +114,8 @@ type MessageKey =
   | "task.filterWeek"
   | "task.filterHigh"
   | "task.filterPending"
+  | "task.moreFilters"
+  | "task.projectTagFilters"
   | "task.statusFilters"
   | "task.allProjects"
   | "task.allTags"
@@ -72,13 +123,25 @@ type MessageKey =
   | "task.checklistPlaceholder"
   | "task.quickPlaceholder"
   | "task.autoFillHint"
+  | "task.scheduleHelp"
   | "task.moreSettings"
   | "task.hideSettings"
   | "task.saveTemplate"
   | "task.feedbackSaved"
   | "task.feedbackCompleted"
   | "task.feedbackRestored"
+  | "task.feedbackDeleted"
+  | "task.feedbackPurged"
   | "task.feedbackBatchCompleted"
+  | "task.feedbackBatchDeleted"
+  | "task.feedbackBatchRestored"
+  | "task.feedbackBatchPurged"
+  | "task.completeVisible"
+  | "task.completeVisibleConfirm"
+  | "task.deleteVisible"
+  | "task.deleteVisibleConfirm"
+  | "task.bulkActions"
+  | "task.clearSelection"
   | "sync.synced"
   | "sync.syncing"
   | "sync.offline"
@@ -87,18 +150,92 @@ type MessageKey =
   | "sync.pendingCreate"
   | "sync.pendingUpdate"
   | "sync.pendingDelete"
+  | "sync.failed"
   | "sync.conflict"
   | "sync.conflictExists"
+  | "sync.localSnapshot"
+  | "sync.cloudSnapshot"
+  | "sync.cloudSnapshotMissing"
+  | "sync.conflictFields"
+  | "sync.conflictNoFieldDiff"
+  | "sync.useServer"
+  | "sync.overwriteServer"
   | "sync.useCloud"
   | "sync.overwriteCloud"
+  | "sync.conflictHelp"
+  | "sync.useCloudConfirm"
+  | "sync.overwriteCloudConfirm"
+  | "sync.logoutPendingWarning"
   | "settings.title"
   | "settings.subtitle"
+  | "settings.navCommon"
+  | "settings.navDataSafety"
+  | "settings.navSyncRecovery"
+  | "settings.navAdvancedMaintenance"
   | "settings.save"
+  | "settings.saveDisplayPreferences"
+  | "settings.saveHint"
+  | "settings.autoSaved"
+  | "settings.autoSaveHint"
   | "settings.language"
   | "settings.languageZh"
   | "settings.languageEn"
+  | "settings.desktopTheme"
+  | "settings.desktopThemeHint"
+  | "settings.connection"
+  | "settings.serverUrl"
+  | "settings.serverUrlHint"
+  | "settings.applyServerUrl"
+  | "settings.saveConnection"
+  | "settings.checkAndSaveConnection"
+  | "settings.checkAndSaveAdvancedConnection"
+  | "settings.testConnection"
+  | "settings.connectionTesting"
+  | "settings.loginAutoChecksConnection"
+  | "settings.connectionSaved"
+  | "settings.connectionReady"
+  | "settings.connectionFailed"
+  | "settings.serverUrlRequired"
+  | "settings.localhostHint"
+  | "settings.showAdvancedConnection"
+  | "settings.advancedEndpoints"
+  | "settings.resetGeneratedEndpoints"
+  | "settings.baseUrl"
+  | "settings.wsUrl"
+  | "settings.baseUrlHint"
+  | "settings.wsUrlHint"
   | "settings.deviceId"
   | "settings.lastSyncTime"
+  | "settings.syncAtAGlance"
+  | "settings.syncLooksGood"
+  | "settings.syncNeedsAttention"
+  | "settings.syncNextStep"
+  | "settings.syncNextStepNone"
+  | "settings.syncNextStepReview"
+  | "settings.localDataTrust"
+  | "settings.syncDiagnostics"
+  | "settings.pendingQueueCount"
+  | "settings.exhaustedQueueCount"
+  | "settings.failedTaskCount"
+  | "settings.conflictCount"
+  | "settings.diagnosticsUpdatedAt"
+  | "settings.refreshDiagnostics"
+  | "settings.syncRecoveryCenter"
+  | "settings.retryExhaustedQueue"
+  | "settings.retryExhaustedDone"
+  | "settings.noExhaustedQueueItems"
+  | "settings.pendingOrFailedSyncRetryAvailable"
+  | "settings.syncIssueAction"
+  | "settings.syncIssueAttempts"
+  | "settings.syncIssueCreatedAt"
+  | "settings.exportDiagnostics"
+  | "settings.diagnosticsSupportTools"
+  | "settings.diagnosticsSensitiveHint"
+  | "settings.confirmDiagnosticsExport"
+  | "settings.diagnosticsExported"
+  | "settings.diagnosticsExportCanceled"
+  | "settings.updateStatus"
+  | "settings.updateTechnicalDetails"
   | "settings.autoStart"
   | "settings.floatingVisibleOnStart"
   | "settings.floatingOpacity"
@@ -106,24 +243,41 @@ type MessageKey =
   | "settings.displayTimeZoneHint"
   | "settings.accountDisplay"
   | "settings.dataSession"
+  | "settings.dataTools"
   | "settings.general"
   | "settings.window"
   | "settings.backup"
+  | "settings.session"
+  | "settings.updates"
   | "settings.metadata"
   | "settings.exportBackup"
   | "settings.importBackup"
+  | "settings.checkUpdates"
+  | "settings.clearLocalData"
+  | "settings.clearLocalDataSafetyHint"
+  | "settings.clearLocalDataBlocked"
+  | "settings.clearLocalDataConfirm"
+  | "settings.clearLocalDataConfirmMessage"
+  | "settings.localDataCleared"
+  | "settings.confirmBackupImport"
+  | "settings.undoLastImport"
+  | "settings.importUndoDone"
   | "settings.projectFrom"
   | "settings.projectTo"
   | "settings.tagFrom"
   | "settings.tagTo"
   | "settings.renameProject"
   | "settings.renameTag"
+  | "settings.confirmMetadataRename"
   | "settings.saved"
   | "settings.exportCanceled"
   | "settings.exported"
   | "settings.importCanceled"
   | "settings.imported"
   | "settings.importedSuffix"
+  | "settings.importFailed"
+  | "settings.importSkippedPrefix"
+  | "settings.importSkippedSuffix"
   | "settings.projectRenamed"
   | "settings.tagRenamed"
   | "floating.todayTasks"
@@ -131,40 +285,110 @@ type MessageKey =
   | "floating.loginRequired"
   | "floating.noToday"
   | "floating.openMain"
+  | "floating.openMainShort"
   | "floating.hide"
+  | "floating.hideShort"
+  | "floating.tools"
   | "floating.opacity"
   | "floating.addTask"
   | "floating.refresh"
   | "floating.resize"
   | "floating.feedbackAdded"
+  | "floating.feedbackAddedInbox"
   | "floating.feedbackCompleted"
   | "floating.placeholder";
 
 const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "app.reminder": { "zh-CN": "TaskBridge 提醒", "en-US": "TaskBridge reminder" },
-  "auth.subtitle": { "zh-CN": "Windows 桌面同步客户端", "en-US": "Windows desktop sync client" },
+  "auth.subtitle": { "zh-CN": "跨设备待办", "en-US": "Cross-device tasks" },
+  "auth.firstUseTitle": { "zh-CN": "已有服务器地址就能登录", "en-US": "Sign in with a server address" },
+  "auth.firstUseHint": {
+    "zh-CN": "把管理员给你的 TaskBridge 服务器地址填到下方，然后直接登录；客户端会自动检查连接。",
+    "en-US": "Enter the TaskBridge server address your administrator gave you, then sign in. The app checks the connection automatically.",
+  },
+  "auth.firstUseExistingServer": {
+    "zh-CN": "直接填写管理员给你的服务器地址，检查通过后登录或注册。",
+    "en-US": "Enter the server address from your administrator, then sign in or register after the check passes.",
+  },
+  "auth.firstUseExistingServerTitle": { "zh-CN": "服务器地址", "en-US": "Server address" },
+  "auth.firstUseNoServer": {
+    "zh-CN": "先展开下方帮助，选择本机试用或生产自托管路径。",
+    "en-US": "Open the help below first, then choose local trial or production self-hosting.",
+  },
+  "auth.firstUseNoServerTitle": { "zh-CN": "没有服务器地址", "en-US": "No server address" },
+  "auth.firstUseLocalTrial": {
+    "zh-CN": "本机试用：保持默认地址，先在这台电脑启动后端；不需要修改高级连接设置。",
+    "en-US": "Local trial: keep the default address and start the backend on this computer first. No advanced connection settings are needed.",
+  },
+  "auth.firstUseLocalTrialTitle": { "zh-CN": "本机试用", "en-US": "Local trial" },
+  "auth.firstUseSelfHost": {
+    "zh-CN": "自托管：先按部署说明启动服务，再把服务器根地址填到这里。",
+    "en-US": "Self-hosting: deploy the service first, then enter the server root address here.",
+  },
+  "auth.firstUseSelfHostTitle": { "zh-CN": "生产自托管", "en-US": "Production self-host" },
+  "auth.setupChecklistTitle": { "zh-CN": "推荐顺序", "en-US": "Recommended order" },
+  "auth.setupStepServer": { "zh-CN": "先确认服务器地址。", "en-US": "Confirm the server address first." },
+  "auth.setupStepCheck": { "zh-CN": "直接登录或注册，客户端会自动检查连接。", "en-US": "Sign in or register directly. The app checks the connection automatically." },
+  "auth.setupStepAccount": { "zh-CN": "检查连接只用于排查服务器地址。", "en-US": "Use connection testing only to troubleshoot the server address." },
+  "auth.openLocalTrialGuide": { "zh-CN": "打开本机试用说明", "en-US": "Open local trial guide" },
+  "auth.noServerHelpSummary": { "zh-CN": "没有服务器？查看本机试用说明", "en-US": "No server? Local trial guide" },
+  "auth.noServerHelpBody": {
+    "zh-CN": "没有服务器时，先在后端电脑准备 TaskBridge 源码或部署包，并按部署说明启动服务。启动后，同一台电脑保持默认地址；手机或另一台电脑填写后端电脑的局域网 IP。",
+    "en-US": "No server yet? Prepare the TaskBridge source or deployment package on the backend computer, then start the service from the deployment guide. Keep the default address on the same computer, or use the backend computer's LAN IP from another device.",
+  },
+  "auth.copyLocalTrialReference": { "zh-CN": "复制本机试用参考", "en-US": "Copy local trial reference" },
+  "auth.localTrialReferenceCopied": { "zh-CN": "已复制本机试用参考。", "en-US": "Copied local trial reference." },
+  "auth.localTrialReferenceCopyFailed": {
+    "zh-CN": "复制失败，请按上方说明准备后端，或在项目部署说明中查看更完整的自托管步骤。",
+    "en-US": "Copy failed. Use the guidance above, or check the project deployment guide for full self-hosting details.",
+  },
   "auth.mode": { "zh-CN": "认证模式", "en-US": "Authentication mode" },
   "auth.login": { "zh-CN": "登录", "en-US": "Log in" },
   "auth.register": { "zh-CN": "注册", "en-US": "Register" },
+  "auth.registrationUnknown": {
+    "zh-CN": "点击“注册”会自动检查当前服务器是否开放注册。已有账号可直接登录。",
+    "en-US": "Click Register to check automatically whether this server allows registration. Existing accounts can sign in now.",
+  },
+  "auth.registrationClosed": {
+    "zh-CN": "当前服务器已关闭开放注册。请使用已有账号登录，或联系服务器管理员创建账号。",
+    "en-US": "Open registration is disabled on this server. Use an existing account or ask the server admin to create one.",
+  },
   "auth.username": { "zh-CN": "用户名", "en-US": "Username" },
   "auth.usernameOrEmail": { "zh-CN": "用户名或邮箱", "en-US": "Username or email" },
   "auth.email": { "zh-CN": "邮箱", "en-US": "Email" },
   "auth.password": { "zh-CN": "密码", "en-US": "Password" },
+  "auth.showPassword": { "zh-CN": "显示密码", "en-US": "Show password" },
+  "auth.hidePassword": { "zh-CN": "隐藏密码", "en-US": "Hide password" },
   "auth.processing": { "zh-CN": "处理中...", "en-US": "Working..." },
   "auth.createAccount": { "zh-CN": "创建账号", "en-US": "Create account" },
   "auth.loginFailed": { "zh-CN": "登录失败", "en-US": "Login failed" },
   "auth.registerFailed": { "zh-CN": "注册失败", "en-US": "Registration failed" },
+  "auth.serverUrlRequired": { "zh-CN": "请输入服务器地址。", "en-US": "Enter the server address." },
+  "auth.networkError": {
+    "zh-CN": "无法连接服务器，请检查服务器地址和网络后重试。",
+    "en-US": "Cannot reach the server. Check the server URL and network, then try again.",
+  },
+  "auth.serverError": {
+    "zh-CN": "服务器暂时无法完成请求，请稍后重试或联系管理员。",
+    "en-US": "The server could not complete the request. Try again later or contact the admin.",
+  },
   "nav.label": { "zh-CN": "TaskBridge 导航", "en-US": "TaskBridge navigation" },
   "nav.today": { "zh-CN": "今日", "en-US": "Today" },
   "nav.all": { "zh-CN": "全部", "en-US": "All" },
   "nav.settings": { "zh-CN": "设置", "en-US": "Settings" },
   "nav.logout": { "zh-CN": "退出登录", "en-US": "Log out" },
   "task.add": { "zh-CN": "添加待办", "en-US": "Add task" },
+  "task.showAllTasks": { "zh-CN": "查看全部待办", "en-US": "Show all tasks" },
+  "task.clearFilters": { "zh-CN": "清空筛选", "en-US": "Clear filters" },
   "task.addToday": { "zh-CN": "添加今日待办", "en-US": "Add today" },
   "task.edit": { "zh-CN": "编辑待办", "en-US": "Edit task" },
   "task.save": { "zh-CN": "保存", "en-US": "Save" },
   "task.cancel": { "zh-CN": "取消", "en-US": "Cancel" },
   "task.close": { "zh-CN": "关闭", "en-US": "Close" },
+  "task.discardChangesConfirm": {
+    "zh-CN": "当前编辑内容尚未保存，关闭后会丢失这些修改。仍要关闭吗？",
+    "en-US": "This task has unsaved edits. Closing now will discard them. Close anyway?",
+  },
   "task.delete": { "zh-CN": "删除", "en-US": "Delete" },
   "task.editAction": { "zh-CN": "编辑", "en-US": "Edit" },
   "task.complete": { "zh-CN": "完成", "en-US": "Complete" },
@@ -174,7 +398,7 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.snooze": { "zh-CN": "稍后", "en-US": "Snooze" },
   "task.next": { "zh-CN": "下一次", "en-US": "Next" },
   "task.use": { "zh-CN": "使用", "en-US": "Use" },
-  "task.moreActions": { "zh-CN": "更多", "en-US": "More" },
+  "task.moreActions": { "zh-CN": "操作", "en-US": "Actions" },
   "task.title": { "zh-CN": "标题", "en-US": "Title" },
   "task.content": { "zh-CN": "内容", "en-US": "Content" },
   "task.priority": { "zh-CN": "优先级", "en-US": "Priority" },
@@ -184,13 +408,58 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.reminder": { "zh-CN": "提醒", "en-US": "Reminder" },
   "task.repeat": { "zh-CN": "重复", "en-US": "Repeat" },
   "task.template": { "zh-CN": "模板", "en-US": "Template" },
+  "task.trash": { "zh-CN": "回收站", "en-US": "Trash" },
+  "task.emptyTrash": { "zh-CN": "回收站暂无待办。", "en-US": "No tasks in trash." },
+  "task.restoreFromTrash": { "zh-CN": "从回收站恢复", "en-US": "Restore from trash" },
+  "task.purge": { "zh-CN": "永久删除", "en-US": "Delete permanently" },
+  "task.purgeConfirm": { "zh-CN": "确认永久删除“{title}”？此操作不能从回收站恢复。", "en-US": "Permanently delete \"{title}\"? This cannot be restored from trash." },
+  "task.restoreSelectedTrash": { "zh-CN": "恢复所选", "en-US": "Restore selected" },
+  "task.purgeSelectedTrash": { "zh-CN": "永久删除所选", "en-US": "Delete selected permanently" },
+  "task.purgeSelectedConfirm": {
+    "zh-CN": "确认永久删除所选 {count} 条任务？此操作不能从回收站恢复。",
+    "en-US": "Permanently delete {count} selected tasks? This cannot be restored from trash.",
+  },
   "task.project": { "zh-CN": "项目", "en-US": "Project" },
-  "task.list": { "zh-CN": "清单", "en-US": "List" },
+  "task.list": { "zh-CN": "归类", "en-US": "Location" },
   "task.checklist": { "zh-CN": "子清单", "en-US": "Checklist" },
   "task.noDue": { "zh-CN": "无截止时间", "en-US": "No due time" },
   "task.search": { "zh-CN": "搜索标题、内容、标签或项目", "en-US": "Search title, content, tag or project" },
-  "task.empty": { "zh-CN": "当前视图暂无待办。", "en-US": "No tasks in this view." },
-  "task.emptyToday": { "zh-CN": "今天暂无待办。", "en-US": "No tasks due today." },
+  "task.clearSearch": { "zh-CN": "清空搜索", "en-US": "Clear search" },
+  "task.currentFilters": { "zh-CN": "当前筛选", "en-US": "Current filters" },
+  "task.syncHealthTitle": { "zh-CN": "同步状态", "en-US": "Sync status" },
+  "task.syncHealthReady": {
+    "zh-CN": "当前无需处理，继续记录任务，TaskBridge 会自动同步。",
+    "en-US": "No action needed. Keep adding tasks and TaskBridge will sync automatically.",
+  },
+  "task.syncHealthNeedsReview": {
+    "zh-CN": "有 {count} 条任务待同步、失败或冲突。清除此设备数据前请先打开同步详情处理。",
+    "en-US": "{count} tasks are pending, failed, or conflicted. Open sync details before clearing this device.",
+  },
+  "task.syncHealthUnknown": {
+    "zh-CN": "尚未刷新同步状态。离线时也可以继续记录任务，联网后会自动同步。",
+    "en-US": "Sync status has not refreshed yet. You can keep adding tasks offline and sync later.",
+  },
+  "task.syncHealthDegraded": {
+    "zh-CN": "同步服务需要检查。任务会先保存在这台设备，服务恢复后再同步。",
+    "en-US": "Sync service needs a check. Tasks stay on this device and sync after service recovery.",
+  },
+  "task.syncHealthAction": { "zh-CN": "查看同步详情", "en-US": "View sync details" },
+  "task.emptySearch": {
+    "zh-CN": "没有匹配任务。可以清空搜索，或试试：明天下午 3 点写周报 #工作 P3。",
+    "en-US": "No matching tasks. Clear search or try: write weekly report tomorrow 3pm #work P3.",
+  },
+  "task.emptyFiltered": {
+    "zh-CN": "当前筛选下暂无待办。清空筛选可查看其他任务；新建时可以直接输入：明天下午 3 点写周报 #工作 P3。",
+    "en-US": "No tasks match these filters. Clear filters to review the rest, or add one with: write weekly report tomorrow 3pm #work P3.",
+  },
+  "task.empty": {
+    "zh-CN": "当前视图暂无待办。可以直接输入：明天下午 3 点写周报 #工作 P3。",
+    "en-US": "No tasks in this view. Try: write weekly report tomorrow 3pm #work P3.",
+  },
+  "task.emptyToday": {
+    "zh-CN": "今天暂无待办。可以直接输入：明天下午 3 点写周报 #工作 P3。",
+    "en-US": "No tasks due today. Try: write weekly report tomorrow 3pm #work P3.",
+  },
   "task.allTitle": { "zh-CN": "全部待办", "en-US": "All tasks" },
   "task.todayTitle": { "zh-CN": "今日待办", "en-US": "Today" },
   "task.todayCountSuffix": { "zh-CN": "条今日待办", "en-US": "tasks today" },
@@ -198,6 +467,7 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.overdueCountSuffix": { "zh-CN": "条逾期", "en-US": "overdue" },
   "task.upcomingToday": { "zh-CN": "稍后处理", "en-US": "Upcoming" },
   "task.openCountSuffix": { "zh-CN": "条待办", "en-US": "open tasks" },
+  "task.selectedCountSuffix": { "zh-CN": "条已选", "en-US": "selected" },
   "task.completedCountPrefix": { "zh-CN": "已完成", "en-US": "Completed" },
   "task.inbox": { "zh-CN": "收件箱", "en-US": "Inbox" },
   "task.filterOpen": { "zh-CN": "未完成", "en-US": "Open" },
@@ -205,6 +475,8 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.filterWeek": { "zh-CN": "本周", "en-US": "This week" },
   "task.filterHigh": { "zh-CN": "高优先级", "en-US": "High priority" },
   "task.filterPending": { "zh-CN": "未同步", "en-US": "Pending sync" },
+  "task.moreFilters": { "zh-CN": "列表与状态", "en-US": "Lists and status" },
+  "task.projectTagFilters": { "zh-CN": "项目与标签", "en-US": "Projects and tags" },
   "task.statusFilters": { "zh-CN": "待办状态筛选", "en-US": "Task status filters" },
   "task.allProjects": { "zh-CN": "全部项目", "en-US": "All projects" },
   "task.allTags": { "zh-CN": "全部标签", "en-US": "All tags" },
@@ -218,13 +490,34 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
     "zh-CN": "只填标题即可保存。可输入“明天下午 3 点写周报 #工作 P3”，系统会自动识别时间、标签和优先级。",
     "en-US": "Title is enough. Try \"write weekly report tomorrow 3pm #work P3\" to auto-fill time, tag and priority.",
   },
-  "task.moreSettings": { "zh-CN": "更多设置", "en-US": "More settings" },
-  "task.hideSettings": { "zh-CN": "收起设置", "en-US": "Hide settings" },
+  "task.scheduleHelp": {
+    "zh-CN": "计划表示哪天要做；截止表示最晚完成时间；提醒只负责通知。",
+    "en-US": "Plan is when you intend to work on it; due is the latest finish time; reminder only sends a notification.",
+  },
+  "task.moreSettings": { "zh-CN": "更多属性", "en-US": "More properties" },
+  "task.hideSettings": { "zh-CN": "收起属性", "en-US": "Hide properties" },
   "task.saveTemplate": { "zh-CN": "保存为模板", "en-US": "Save as template" },
   "task.feedbackSaved": { "zh-CN": "已保存", "en-US": "Saved" },
   "task.feedbackCompleted": { "zh-CN": "已完成", "en-US": "Completed" },
   "task.feedbackRestored": { "zh-CN": "已恢复", "en-US": "Restored" },
-  "task.feedbackBatchCompleted": { "zh-CN": "当前视图待办已完成", "en-US": "Current view completed" },
+  "task.feedbackDeleted": { "zh-CN": "已删除，可在回收站恢复", "en-US": "Deleted. You can restore it from the recycle bin." },
+  "task.feedbackPurged": { "zh-CN": "已永久删除", "en-US": "Permanently deleted" },
+  "task.feedbackBatchCompleted": { "zh-CN": "已完成所选待办", "en-US": "Selected tasks completed" },
+  "task.feedbackBatchDeleted": { "zh-CN": "所选待办已移入回收站", "en-US": "Selected tasks moved to trash" },
+  "task.feedbackBatchRestored": { "zh-CN": "所选任务已恢复", "en-US": "Selected tasks restored" },
+  "task.feedbackBatchPurged": { "zh-CN": "所选任务已永久删除", "en-US": "Selected tasks permanently deleted" },
+  "task.completeVisible": { "zh-CN": "完成所选", "en-US": "Complete selected" },
+  "task.completeVisibleConfirm": {
+    "zh-CN": "确认完成所选 {count} 条未完成待办？完成后可以在已完成中查看。",
+    "en-US": "Complete {count} selected open tasks? You can review them in completed items.",
+  },
+  "task.deleteVisible": { "zh-CN": "删除所选", "en-US": "Delete selected" },
+  "task.deleteVisibleConfirm": {
+    "zh-CN": "确认删除所选 {count} 条未完成待办？删除后可以在回收站恢复。",
+    "en-US": "Delete {count} selected open tasks? You can restore them from trash.",
+  },
+  "task.bulkActions": { "zh-CN": "所选任务批量操作", "en-US": "Selected task batch actions" },
+  "task.clearSelection": { "zh-CN": "取消选择", "en-US": "Clear selection" },
   "sync.synced": { "zh-CN": "已同步", "en-US": "Synced" },
   "sync.syncing": { "zh-CN": "同步中", "en-US": "Syncing" },
   "sync.offline": { "zh-CN": "离线", "en-US": "Offline" },
@@ -233,18 +526,125 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "sync.pendingCreate": { "zh-CN": "待创建", "en-US": "Pending create" },
   "sync.pendingUpdate": { "zh-CN": "待同步", "en-US": "Pending sync" },
   "sync.pendingDelete": { "zh-CN": "待删除", "en-US": "Pending delete" },
+  "sync.failed": { "zh-CN": "同步失败", "en-US": "Sync failed" },
   "sync.conflict": { "zh-CN": "冲突", "en-US": "Conflict" },
   "sync.conflictExists": { "zh-CN": "存在同步冲突", "en-US": "has a sync conflict" },
-  "sync.useCloud": { "zh-CN": "采用云端", "en-US": "Use cloud" },
-  "sync.overwriteCloud": { "zh-CN": "覆盖云端", "en-US": "Overwrite cloud" },
+  "sync.localSnapshot": { "zh-CN": "这台设备", "en-US": "This device" },
+  "sync.cloudSnapshot": { "zh-CN": "同步来的版本", "en-US": "Synced version" },
+  "sync.cloudSnapshotMissing": { "zh-CN": "同步来的版本暂不可预览", "en-US": "Synced version preview unavailable" },
+  "sync.conflictFields": { "zh-CN": "差异", "en-US": "Differences" },
+  "sync.conflictNoFieldDiff": {
+    "zh-CN": "未检测到可展示的字段差异，请根据两侧版本信息选择保留哪一版",
+    "en-US": "No displayable field differences were detected. Use the version details to choose which version to keep",
+  },
+  "sync.useServer": { "zh-CN": "保留同步来的版本", "en-US": "Keep synced version" },
+  "sync.overwriteServer": { "zh-CN": "保留这台设备版本", "en-US": "Keep this device version" },
+  "sync.useCloud": { "zh-CN": "保留同步来的版本", "en-US": "Keep synced version" },
+  "sync.overwriteCloud": { "zh-CN": "保留这台设备版本", "en-US": "Keep this device" },
+  "sync.conflictHelp": {
+    "zh-CN": "请先比较这台设备和同步来的版本。保留同步来的版本会放弃这台设备的修改；保留这台设备版本会同步到其他设备。",
+    "en-US": "Compare this device and the synced version first. Keeping the synced version discards this device's changes; keeping this device syncs it to other devices.",
+  },
+  "sync.useCloudConfirm": {
+    "zh-CN": "确认保留同步来的版本？这会放弃这台设备上的当前修改。",
+    "en-US": "Keep the synced version? This discards the current changes on this device.",
+  },
+  "sync.overwriteCloudConfirm": {
+    "zh-CN": "确认保留这台设备版本？同步后其他设备会看到这个版本。",
+    "en-US": "Keep this device's version? Other devices will see this version after sync.",
+  },
+  "sync.logoutPendingWarning": {
+    "zh-CN": "当前仍有未同步、同步失败或冲突的任务。退出后本机数据仍保留，但其他设备暂时看不到这些修改。仍要退出吗？",
+    "en-US": "Some tasks are still pending, failed, or conflicted. Local data stays on this device, but other devices may not see those changes yet. Log out anyway?",
+  },
   "settings.title": { "zh-CN": "设置", "en-US": "Settings" },
   "settings.subtitle": { "zh-CN": "桌面端配置", "en-US": "Desktop client" },
+  "settings.navCommon": { "zh-CN": "常用设置", "en-US": "Common settings" },
+  "settings.navDataSafety": { "zh-CN": "数据安全", "en-US": "Data safety" },
+  "settings.navSyncRecovery": { "zh-CN": "同步问题", "en-US": "Sync issues" },
+  "settings.navAdvancedMaintenance": { "zh-CN": "高级维护", "en-US": "Advanced maintenance" },
   "settings.save": { "zh-CN": "保存", "en-US": "Save" },
+  "settings.saveDisplayPreferences": { "zh-CN": "保存显示与窗口设置", "en-US": "Save display and window settings" },
+  "settings.saveHint": {
+    "zh-CN": "语言和主题会立即应用；窗口、悬浮窗和开机启动点击此处保存。连接、备份和诊断操作在各自区域立即执行。",
+    "en-US": "Language and theme apply immediately. Use this button for window, floating window, and auto-start settings. Connection, backup, and diagnostics run in their own sections.",
+  },
+  "settings.autoSaved": { "zh-CN": "已自动保存。", "en-US": "Auto-saved." },
+  "settings.autoSaveHint": {
+    "zh-CN": "语言、主题、时区、窗口和开机启动会立即保存；连接、备份和诊断在各自区域内直接生效。",
+    "en-US": "Language, theme, time zone, window, and auto-start settings save immediately. Connection, backup, and diagnostics apply in their own areas.",
+  },
   "settings.language": { "zh-CN": "界面语言", "en-US": "Language" },
   "settings.languageZh": { "zh-CN": "中文", "en-US": "Chinese" },
   "settings.languageEn": { "zh-CN": "英文", "en-US": "English" },
+  "settings.desktopTheme": { "zh-CN": "桌面主题", "en-US": "Desktop theme" },
+  "settings.desktopThemeHint": { "zh-CN": "点击色块会立即切换，并自动记住当前选择。", "en-US": "Pick a palette to apply it immediately and remember the choice." },
+  "settings.connection": { "zh-CN": "连接与同步", "en-US": "Connection and sync" },
+  "settings.serverUrl": { "zh-CN": "服务器地址", "en-US": "Server URL" },
+  "settings.serverUrlHint": { "zh-CN": "填写 TaskBridge 服务器地址即可，高级连接设置会自动生成。", "en-US": "Enter the TaskBridge server address. Advanced connection settings are generated automatically." },
+  "settings.applyServerUrl": { "zh-CN": "应用地址", "en-US": "Apply URL" },
+  "settings.saveConnection": { "zh-CN": "保存连接", "en-US": "Save connection" },
+  "settings.checkAndSaveConnection": { "zh-CN": "检查连接", "en-US": "Test connection" },
+  "settings.checkAndSaveAdvancedConnection": { "zh-CN": "保存并检查高级连接", "en-US": "Save and test advanced connection" },
+  "settings.testConnection": { "zh-CN": "测试连接", "en-US": "Test connection" },
+  "settings.connectionTesting": { "zh-CN": "测试中...", "en-US": "Testing..." },
+  "settings.loginAutoChecksConnection": {
+    "zh-CN": "登录会自动检查连接；检查连接只用于排查服务器地址。",
+    "en-US": "Signing in checks the connection automatically. Use Test connection only when troubleshooting the server address.",
+  },
+  "settings.connectionSaved": { "zh-CN": "连接设置已保存。", "en-US": "Connection settings saved." },
+  "settings.connectionReady": { "zh-CN": "连接可用。现在可以直接登录。", "en-US": "Connection is ready. You can sign in now." },
+  "settings.connectionFailed": { "zh-CN": "连接失败：", "en-US": "Connection failed: " },
+  "settings.serverUrlRequired": { "zh-CN": "请输入服务器地址。", "en-US": "Enter the server address." },
+  "settings.localhostHint": {
+    "zh-CN": "127.0.0.1 只适合连接这台电脑上的后端；手机或另一台电脑请填写后端所在电脑的局域网 IP 或域名。",
+    "en-US": "127.0.0.1 only reaches the backend on this computer. Phones or other computers need the backend computer's LAN IP or domain.",
+  },
+  "settings.showAdvancedConnection": { "zh-CN": "自定义代理或高级部署设置", "en-US": "Custom proxy or advanced deployment settings" },
+  "settings.advancedEndpoints": { "zh-CN": "高级连接设置", "en-US": "Advanced connection settings" },
+  "settings.resetGeneratedEndpoints": { "zh-CN": "按服务器地址重新生成", "en-US": "Regenerate from server URL" },
+  "settings.baseUrl": { "zh-CN": "请求地址（高级）", "en-US": "Request URL (advanced)" },
+  "settings.wsUrl": { "zh-CN": "同步连接地址（高级）", "en-US": "Sync connection URL (advanced)" },
+  "settings.baseUrlHint": { "zh-CN": "仅在反向代理拆分接口路径时修改，保存后新的请求会使用这个地址。", "en-US": "Change only when a reverse proxy splits the request path. New requests use this address after saving." },
+  "settings.wsUrlHint": { "zh-CN": "仅在反向代理拆分同步路径时修改，保存后同步连接会使用这个地址。", "en-US": "Change only when a reverse proxy splits the sync path. Sync uses this address after saving." },
   "settings.deviceId": { "zh-CN": "设备 ID", "en-US": "Device ID" },
   "settings.lastSyncTime": { "zh-CN": "上次同步时间", "en-US": "Last sync time" },
+  "settings.syncAtAGlance": { "zh-CN": "同步一眼判断", "en-US": "Sync at a glance" },
+  "settings.syncLooksGood": { "zh-CN": "当前没有待同步、失败或冲突的任务，通常不需要手动处理。", "en-US": "No pending, failed, or conflicting tasks are shown. You usually do not need to do anything." },
+  "settings.syncNeedsAttention": { "zh-CN": "存在待同步、失败或冲突的任务，请在同步详情中处理。", "en-US": "Pending, failed, or conflicting tasks need attention. Check sync details." },
+  "settings.syncNextStep": { "zh-CN": "下一步", "en-US": "Next step" },
+  "settings.syncNextStepNone": { "zh-CN": "继续记录任务，TaskBridge 会自动同步。", "en-US": "Keep adding tasks. TaskBridge will sync automatically." },
+  "settings.syncNextStepReview": { "zh-CN": "打开同步详情，先处理失败或冲突，再清除这台设备的数据。", "en-US": "Open sync details, resolve failed items or conflicts, then clear this device only after it is clean." },
+  "settings.localDataTrust": { "zh-CN": "本机数据只影响这台设备；清除这台设备不会删除服务器上的任务。操作前可先导出本机备份。", "en-US": "Local data only affects this device. Clearing this device will not delete server tasks. Export a local backup first if needed." },
+  "settings.syncDiagnostics": { "zh-CN": "同步详情", "en-US": "Sync details" },
+  "settings.pendingQueueCount": { "zh-CN": "等待同步", "en-US": "Waiting to sync" },
+  "settings.exhaustedQueueCount": { "zh-CN": "需要重试", "en-US": "Needs retry" },
+  "settings.failedTaskCount": { "zh-CN": "同步失败", "en-US": "Failed sync" },
+  "settings.conflictCount": { "zh-CN": "冲突任务", "en-US": "Conflicts" },
+  "settings.diagnosticsUpdatedAt": { "zh-CN": "诊断刷新时间", "en-US": "Diagnostics updated" },
+  "settings.refreshDiagnostics": { "zh-CN": "刷新诊断", "en-US": "Refresh diagnostics" },
+  "settings.syncRecoveryCenter": { "zh-CN": "同步问题", "en-US": "Sync issues" },
+  "settings.retryExhaustedQueue": { "zh-CN": "重试待处理或失败同步", "en-US": "Retry pending or failed sync" },
+  "settings.retryExhaustedDone": { "zh-CN": "已重新发起待处理或失败的同步。", "en-US": "Retry for pending or failed sync has started." },
+  "settings.noExhaustedQueueItems": { "zh-CN": "当前没有需要手动重试的任务。", "en-US": "No tasks need a manual retry." },
+  "settings.pendingOrFailedSyncRetryAvailable": { "zh-CN": "有等待中或失败的同步修改，可以立即重试。", "en-US": "Pending or failed sync changes can be retried now." },
+  "settings.syncIssueAction": { "zh-CN": "动作", "en-US": "Action" },
+  "settings.syncIssueAttempts": { "zh-CN": "重试次数", "en-US": "Attempts" },
+  "settings.syncIssueCreatedAt": { "zh-CN": "入队时间", "en-US": "Queued at" },
+  "settings.exportDiagnostics": { "zh-CN": "导出诊断包", "en-US": "Export diagnostics" },
+  "settings.diagnosticsSupportTools": { "zh-CN": "技术信息（排查时使用）", "en-US": "Technical information (for troubleshooting)" },
+  "settings.diagnosticsSensitiveHint": {
+    "zh-CN": "诊断包会包含任务标题、冲突快照和同步详情，分享前请确认接收方可信。",
+    "en-US": "Diagnostics include task titles, conflict snapshots, and sync details. Share only with trusted recipients.",
+  },
+  "settings.confirmDiagnosticsExport": {
+    "zh-CN": "诊断包可能包含任务标题、冲突快照和同步详情。确认要导出吗？",
+    "en-US": "Diagnostics may include task titles, conflict snapshots, and sync details. Export anyway?",
+  },
+  "settings.diagnosticsExported": { "zh-CN": "诊断包已导出：", "en-US": "Diagnostics exported: " },
+  "settings.diagnosticsExportCanceled": { "zh-CN": "已取消诊断包导出。", "en-US": "Diagnostics export canceled." },
+  "settings.updateStatus": { "zh-CN": "更新状态", "en-US": "Update status" },
+  "settings.updateTechnicalDetails": { "zh-CN": "更新技术详情", "en-US": "Update technical details" },
   "settings.autoStart": { "zh-CN": "开机启动 TaskBridge", "en-US": "Start TaskBridge with Windows" },
   "settings.floatingVisibleOnStart": { "zh-CN": "启动后显示悬浮窗", "en-US": "Show floating window on start" },
   "settings.floatingOpacity": { "zh-CN": "悬浮窗透明度", "en-US": "Floating opacity" },
@@ -254,25 +654,60 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
     "en-US": "Task times use this time zone. Sync data remains stored as UTC.",
   },
   "settings.accountDisplay": { "zh-CN": "账号与显示", "en-US": "Account and display" },
-  "settings.dataSession": { "zh-CN": "数据与会话", "en-US": "Data and session" },
+  "settings.dataSession": { "zh-CN": "数据与备份", "en-US": "Data and backups" },
+  "settings.dataTools": { "zh-CN": "备份与本机数据", "en-US": "Backups and local data" },
   "settings.general": { "zh-CN": "基础", "en-US": "General" },
   "settings.window": { "zh-CN": "窗口", "en-US": "Window" },
   "settings.backup": { "zh-CN": "备份", "en-US": "Backup" },
+  "settings.session": { "zh-CN": "会话", "en-US": "Session" },
+  "settings.updates": { "zh-CN": "更新", "en-US": "Updates" },
   "settings.metadata": { "zh-CN": "项目与标签", "en-US": "Projects and tags" },
   "settings.exportBackup": { "zh-CN": "导出本地备份", "en-US": "Export local backup" },
   "settings.importBackup": { "zh-CN": "导入本地备份", "en-US": "Import local backup" },
+  "settings.checkUpdates": { "zh-CN": "检查更新", "en-US": "Check updates" },
+  "settings.clearLocalData": { "zh-CN": "退出并清除此设备数据", "en-US": "Log out and clear this device" },
+  "settings.clearLocalDataSafetyHint": {
+    "zh-CN": "清除前先确认没有待同步、同步失败或冲突的任务；不确定时先导出本地备份。",
+    "en-US": "Before clearing, check that there are no pending, failed, or conflicting tasks. Export a local backup if unsure.",
+  },
+  "settings.clearLocalDataBlocked": {
+    "zh-CN": "当前还有待同步、同步失败或冲突的任务。请先处理同步详情，或先导出本地备份后再清除此设备数据。",
+    "en-US": "This device still has pending, failed, or conflicting tasks. Handle sync details, or export a local backup before clearing this device.",
+  },
+  "settings.clearLocalDataConfirm": {
+    "zh-CN": "这会退出登录，并删除这台电脑上的本地任务、等待同步的修改和离线缓存。服务器上的任务不会被删除。建议先导出本地备份。",
+    "en-US": "This logs out and deletes local tasks, waiting-to-sync changes, and offline cache on this computer. Server tasks will not be deleted. Export a local backup first if needed.",
+  },
+  "settings.clearLocalDataConfirmMessage": {
+    "zh-CN": "这会退出登录，并删除这台电脑上的本地任务、等待同步的修改和离线缓存。服务器上的任务不会被删除。清除前请确认没有待同步、同步失败或冲突的任务；不确定时先导出本地备份。",
+    "en-US": "This logs out and deletes local tasks, waiting-to-sync changes, and offline cache on this computer. Server tasks will not be deleted. Before clearing, check there are no pending, failed, or conflicting tasks. Export a local backup first if unsure.",
+  },
+  "settings.localDataCleared": { "zh-CN": "已清除此设备数据。", "en-US": "This device's local data was cleared." },
+  "settings.confirmBackupImport": {
+    "zh-CN": "将从所选备份导入 {count} 条任务，跳过 {skipped} 条无效任务。只能撤销最近一次导入，且导入后编辑过的任务会保留。是否继续？",
+    "en-US": "Import {count} tasks from the selected backup and skip {skipped} invalid tasks. Only the most recent import can be undone, and tasks edited after import will be kept. Continue?",
+  },
+  "settings.undoLastImport": { "zh-CN": "撤销上次导入", "en-US": "Undo last import" },
+  "settings.importUndoDone": { "zh-CN": "已撤销 {count} 条导入任务。", "en-US": "Undid {count} imported tasks." },
   "settings.projectFrom": { "zh-CN": "项目原名", "en-US": "Current project name" },
   "settings.projectTo": { "zh-CN": "项目新名", "en-US": "New project name" },
   "settings.tagFrom": { "zh-CN": "标签原名", "en-US": "Current tag name" },
   "settings.tagTo": { "zh-CN": "标签新名", "en-US": "New tag name" },
   "settings.renameProject": { "zh-CN": "重命名项目", "en-US": "Rename project" },
   "settings.renameTag": { "zh-CN": "重命名标签", "en-US": "Rename tag" },
+  "settings.confirmMetadataRename": {
+    "zh-CN": "将影响 {count} 条任务。新名称为空时会清空该字段。是否继续？",
+    "en-US": "This affects {count} tasks. Leaving the new name empty clears this field. Continue?",
+  },
   "settings.saved": { "zh-CN": "设置已保存。", "en-US": "Settings saved." },
   "settings.exportCanceled": { "zh-CN": "已取消导出。", "en-US": "Export canceled." },
   "settings.exported": { "zh-CN": "已导出：", "en-US": "Exported: " },
   "settings.importCanceled": { "zh-CN": "已取消导入。", "en-US": "Import canceled." },
   "settings.imported": { "zh-CN": "已导入 ", "en-US": "Imported " },
   "settings.importedSuffix": { "zh-CN": " 条任务。", "en-US": " tasks." },
+  "settings.importFailed": { "zh-CN": "导入失败：", "en-US": "Import failed: " },
+  "settings.importSkippedPrefix": { "zh-CN": " 跳过 ", "en-US": " Skipped " },
+  "settings.importSkippedSuffix": { "zh-CN": " 条无效任务。", "en-US": " invalid tasks." },
   "settings.projectRenamed": { "zh-CN": "项目已更新。", "en-US": "Project updated." },
   "settings.tagRenamed": { "zh-CN": "标签已更新。", "en-US": "Tag updated." },
   "floating.todayTasks": { "zh-CN": "项今日待办", "en-US": "tasks today" },
@@ -280,16 +715,20 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "floating.loginRequired": { "zh-CN": "请先登录 TaskBridge", "en-US": "Please log in to TaskBridge" },
   "floating.noToday": { "zh-CN": "今天暂无待办", "en-US": "No tasks today" },
   "floating.openMain": { "zh-CN": "打开主窗口", "en-US": "Open main window" },
+  "floating.openMainShort": { "zh-CN": "打开", "en-US": "Open" },
   "floating.hide": { "zh-CN": "隐藏悬浮窗", "en-US": "Hide floating window" },
+  "floating.hideShort": { "zh-CN": "隐藏", "en-US": "Hide" },
+  "floating.tools": { "zh-CN": "工具", "en-US": "Tools" },
   "floating.opacity": { "zh-CN": "透明度", "en-US": "Opacity" },
   "floating.addTask": { "zh-CN": "添加待办", "en-US": "Add task" },
   "floating.refresh": { "zh-CN": "刷新", "en-US": "Refresh" },
   "floating.resize": { "zh-CN": "调整大小", "en-US": "Resize" },
   "floating.feedbackAdded": { "zh-CN": "已添加", "en-US": "Added" },
+  "floating.feedbackAddedInbox": { "zh-CN": "已添加到收件箱，可在主窗口查看", "en-US": "Added to Inbox. Open the main window to view" },
   "floating.feedbackCompleted": { "zh-CN": "已完成", "en-US": "Completed" },
   "floating.placeholder": {
-    "zh-CN": "例如：明天下午 3 点写周报 #工作 P3",
-    "en-US": "Example: write weekly report tomorrow 3pm #work P3",
+    "zh-CN": "快速添加待办",
+    "en-US": "Quick add task",
   },
 };
 

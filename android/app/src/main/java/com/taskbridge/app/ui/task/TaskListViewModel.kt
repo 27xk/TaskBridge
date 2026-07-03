@@ -8,6 +8,7 @@ import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.repository.TaskRepository
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.notification.ReminderManager
+import com.taskbridge.app.ui.components.SyncStatusMessage
 import com.taskbridge.app.sync.SyncManager
 import com.taskbridge.app.utils.ShanghaiTime
 import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
@@ -25,7 +26,7 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 
 data class TaskListUiState(
-    val syncText: String = "本地缓存已就绪",
+    val syncMessage: SyncStatusMessage = SyncStatusMessage.LocalCacheReady,
     val searchQuery: String = "",
     val filter: TaskListFilter = TaskListFilter.All,
 )
@@ -40,6 +41,7 @@ enum class TaskListFilter(val label: String) {
     PendingSync("未同步"),
     Conflict("冲突"),
     Templates("模板"),
+    Trash("回收站"),
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -49,7 +51,7 @@ class TaskListViewModel(
     private val syncManager: SyncManager,
     private val tokenDataStore: TokenDataStore,
 ) : ViewModel() {
-    private val reminderManager = ReminderManager(appContext)
+    private val reminderManager = ReminderManager(appContext, tokenDataStore)
     val displayTimeZone: StateFlow<String> = tokenDataStore.displayTimeZone
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ShanghaiTime.DEFAULT_ZONE_ID)
 
@@ -63,6 +65,9 @@ class TaskListViewModel(
 
     val tasks: StateFlow<List<Task>> = timelineNow
         .flatMapLatest { now -> taskRepository.observeTasks(now) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val trashTasks: StateFlow<List<Task>> = taskRepository.observeTrashTasks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val todayTasks: StateFlow<List<Task>> = combine(tokenDataStore.displayTimeZone, timelineNow) { timeZoneId, now ->
@@ -90,7 +95,7 @@ class TaskListViewModel(
             taskRepository.completeTask(localId)
             taskRepository.getTask(localId)?.let(reminderManager::cancel)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("完成已加入同步队列")
+            requestSync(SyncStatusMessage.CompletionQueued)
         }
     }
 
@@ -98,7 +103,30 @@ class TaskListViewModel(
         viewModelScope.launch {
             taskRepository.undoCompleteTask(localId)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("恢复待办已加入同步队列")
+            requestSync(SyncStatusMessage.RestoreQueued)
+        }
+    }
+
+    fun restoreDeleted(localId: String) {
+        viewModelScope.launch {
+            taskRepository.restoreDeletedTask(localId)
+            TodayTaskWidgetUpdateWorker.enqueue(appContext)
+            requestSync(SyncStatusMessage.RestoreQueued)
+        }
+    }
+
+    fun purgeDeleted(localId: String) {
+        viewModelScope.launch {
+            runCatching {
+                val taskBeforePurge = taskRepository.getTask(localId)
+                taskBeforePurge?.let(reminderManager::cancel)
+                taskRepository.purgeDeletedTask(localId)
+                TodayTaskWidgetUpdateWorker.enqueue(appContext)
+            }.onSuccess {
+                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.Purged) }
+            }.onFailure {
+                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.PurgeFailed) }
+            }
         }
     }
 
@@ -107,7 +135,7 @@ class TaskListViewModel(
             taskRepository.softDeleteTask(localId)
             taskRepository.getTask(localId)?.let(reminderManager::cancel)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("删除已加入同步队列")
+            requestSync(SyncStatusMessage.DeleteQueued)
         }
     }
 
@@ -115,7 +143,7 @@ class TaskListViewModel(
         viewModelScope.launch {
             taskRepository.batchComplete(localIds)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("已批量完成 ${localIds.size} 条任务")
+            requestSync(SyncStatusMessage.BatchCompleted(localIds.size))
         }
     }
 
@@ -123,7 +151,31 @@ class TaskListViewModel(
         viewModelScope.launch {
             taskRepository.batchDelete(localIds)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("已批量删除 ${localIds.size} 条任务")
+            requestSync(SyncStatusMessage.BatchDeleted(localIds.size))
+        }
+    }
+
+    fun batchRestoreDeleted(localIds: List<String>) {
+        viewModelScope.launch {
+            taskRepository.batchRestoreDeleted(localIds)
+            TodayTaskWidgetUpdateWorker.enqueue(appContext)
+            requestSync(SyncStatusMessage.BatchRestored(localIds.size))
+        }
+    }
+
+    fun batchPurgeDeleted(localIds: List<String>) {
+        viewModelScope.launch {
+            runCatching {
+                localIds.distinct().forEach { localId ->
+                    taskRepository.getTask(localId)?.let(reminderManager::cancel)
+                }
+                taskRepository.batchPurgeDeleted(localIds)
+                TodayTaskWidgetUpdateWorker.enqueue(appContext)
+            }.onSuccess {
+                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.BatchPurged(localIds.distinct().size)) }
+            }.onFailure {
+                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.PurgeFailed) }
+            }
         }
     }
 
@@ -131,7 +183,7 @@ class TaskListViewModel(
         viewModelScope.launch {
             taskRepository.resolveConflictUseServer(localId)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("已采用云端版本")
+            requestSync(SyncStatusMessage.UsingCloudVersion)
         }
     }
 
@@ -139,7 +191,7 @@ class TaskListViewModel(
         viewModelScope.launch {
             taskRepository.forceOverwriteServer(localId)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("已排队覆盖云端")
+            requestSync(SyncStatusMessage.OverwriteCloudQueued)
         }
     }
 
@@ -159,7 +211,7 @@ class TaskListViewModel(
             )
             taskRepository.getTask(localId)?.let(reminderManager::schedule)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("已顺延到明天")
+            requestSync(SyncStatusMessage.PostponedToTomorrow)
         }
     }
 
@@ -168,7 +220,7 @@ class TaskListViewModel(
             taskRepository.snoozeTask(localId, Instant.now().plusSeconds(3_600).toString())
             taskRepository.getTask(localId)?.let(reminderManager::schedule)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("已稍后提醒")
+            requestSync(SyncStatusMessage.Snoozed)
         }
     }
 
@@ -177,7 +229,7 @@ class TaskListViewModel(
             taskRepository.planTaskForToday(localId, ShanghaiTime.todayString(displayTimeZone.value))
             taskRepository.getTask(localId)?.let(reminderManager::schedule)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("已加入今日计划")
+            requestSync(SyncStatusMessage.PlannedForToday)
         }
     }
 
@@ -185,12 +237,12 @@ class TaskListViewModel(
         viewModelScope.launch {
             taskRepository.moveTaskToInbox(localId)
             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            requestSync("已移回收件箱")
+            requestSync(SyncStatusMessage.MovedToInbox)
         }
     }
 
     fun refresh() {
-        requestSync("正在同步")
+        requestSync(SyncStatusMessage.Syncing)
     }
 
     fun updateSearchQuery(query: String) {
@@ -201,8 +253,8 @@ class TaskListViewModel(
         _uiState.update { it.copy(filter = filter) }
     }
 
-    private fun requestSync(message: String) {
-        _uiState.update { it.copy(syncText = message) }
+    private fun requestSync(message: SyncStatusMessage) {
+        _uiState.update { it.copy(syncMessage = message) }
         syncManager.enqueueNetworkSync()
         syncManager.syncNow()
     }

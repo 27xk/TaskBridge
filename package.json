@@ -1,0 +1,15 @@
+{
+  "name": "taskbridge",
+  "version": "0.1.6",
+  "private": true,
+  "type": "module",
+  "description": "TaskBridge workspace toolchain constraints",
+  "packageManager": "npm@10.9.0",
+  "scripts": {
+    "test:web": "node --test \"web/tests/**/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=22.12.0 <24",
+    "npm": ">=10 <12"
+  }
+}

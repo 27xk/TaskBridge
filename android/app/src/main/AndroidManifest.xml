@@ -4,8 +4,10 @@
 
     <application
         android:allowBackup="${allowBackup}"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/full_backup_content"
         android:icon="@mipmap/ic_launcher"
-        android:label="TaskBridge"
+        android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.TaskBridge"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
@@ -23,6 +25,16 @@
                 <data android:mimeType="application/json" />
             </intent-filter>
         </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <receiver
             android:name=".widget.TodayTaskWidgetProvider"

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useSettingsStore } from "../stores/settings";
 import { formatShanghaiTime } from "../../shared/quick-add-parser";
+import { getTaskPriorityLabel } from "../../shared/task-ui-policy";
+import { isCompletedStatus } from "../utils/task-order";
 
 const props = defineProps<{
   task: TaskRecord;
@@ -12,14 +14,10 @@ defineEmits<{
 }>();
 
 const settingsStore = useSettingsStore();
-const priorityLabel = ["P0", "P1", "P2", "P3", "P4", "P5"];
 
 function priorityLevel(value: number): number {
-  return Math.min(Math.max(value, 0), 5);
-}
-
-function priorityText(value: number): string {
-  return priorityLabel[priorityLevel(value)] ?? `P${value}`;
+  const normalized = Math.trunc(Number.isFinite(value) ? value : 0);
+  return Math.min(Math.max(normalized, 0), 5);
 }
 
 function dueTimeLabel(value: string | null): string {
@@ -35,6 +33,8 @@ function syncStatusText(status: TaskRecord["syncStatus"]): string {
       return settingsStore.t("sync.pendingUpdate");
     case "pending_delete":
       return settingsStore.t("sync.pendingDelete");
+    case "sync_failed":
+      return settingsStore.t("sync.failed");
     case "conflict":
       return settingsStore.t("sync.conflict");
     default:
@@ -44,15 +44,15 @@ function syncStatusText(status: TaskRecord["syncStatus"]): string {
 </script>
 
 <template>
-  <article class="floating-task" :class="{ completed: props.task.status === 'completed' }">
+  <article class="floating-task" :class="{ completed: isCompletedStatus(props.task.status) }">
     <button
       type="button"
       class="floating-check"
-      :title="props.task.status === 'completed' ? settingsStore.t('task.restore') : settingsStore.t('task.complete')"
-      :disabled="props.task.status === 'completed'"
+      :title="isCompletedStatus(props.task.status) ? settingsStore.t('task.restore') : settingsStore.t('task.complete')"
+      :disabled="isCompletedStatus(props.task.status)"
       @click="$emit('complete', props.task)"
     >
-      <span v-if="props.task.status === 'completed'">✓</span>
+      <span v-if="isCompletedStatus(props.task.status)">✓</span>
     </button>
 
     <button type="button" class="floating-task-body" @click="$emit('open', props.task)">
@@ -60,8 +60,8 @@ function syncStatusText(status: TaskRecord["syncStatus"]): string {
       <span class="floating-task-meta">
         <span>{{ dueTimeLabel(props.task.dueTime) }}</span>
         <span v-if="props.task.snoozedUntil">{{ settingsStore.t("task.snooze") }}</span>
-        <span class="floating-priority" :data-level="priorityLevel(props.task.priority)">
-          {{ priorityText(props.task.priority) }}
+        <span v-if="props.task.priority > 0" class="floating-priority" :data-level="priorityLevel(props.task.priority)">
+          {{ getTaskPriorityLabel(props.task.priority, settingsStore.language) }}
         </span>
         <span v-if="props.task.syncStatus !== 'synced'" class="floating-sync-tag">
           {{ syncStatusText(props.task.syncStatus) }}

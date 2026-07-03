@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -42,20 +43,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Audit Python dependencies
+        run: python -m pip_audit -r requirements-dev.txt
+
       - name: Run tests
-        run: |
-          if [ -d tests ]; then
-            python -m pytest tests -q
-          else
-            echo "No backend/tests directory in this checkout; skipping backend tests."
-          fi
+        run: python -m pytest tests -q
+
+      - name: Verify database migrations
+        run: python -m pytest tests/test_migrations.py -q
 
       - name: Compile check
-        run: |
-          python -m compileall -q app
-          if [ -d tests ]; then
-            python -m compileall -q tests
-          fi
+        run: python -m compileall -q app tests tools
+
+      - name: Verify OpenAPI contract
+        run: python -m tools.openapi_contract --check
+
+      - name: Lint backend
+        run: python -m ruff check app tests tools
 
   docker:
     name: Backend Docker build
@@ -78,7 +82,53 @@ jobs:
           context: ./backend
           file: ./backend/Dockerfile
           push: false
+          load: true
           tags: taskbridge:ci
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: taskbridge:ci
+          format: sarif
+          output: trivy-results.sarif
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+
+  security:
+    name: Security governance
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      security-events: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency review
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@v2
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload Scorecard SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: scorecard-results.sarif
 
   desktop:
     name: Desktop build
@@ -97,17 +147,137 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
+      - name: Verify version source
+        run: node ..\scripts\check-version-source.mjs
+
       - name: Verify desktop lockfile registry metadata
         run: npm run check:lockfile-registry
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
+
+      - name: Verify desktop endpoint config
+        run: npm run check:desktop-endpoint-config
+
       - name: Verify security-sensitive config
         run: npm run check:security-config
 
+      - name: Verify auth session governance
+        run: npm run check:auth-session-config
+
+      - name: Verify backend observability config
+        run: npm run check:backend-observability
+
       - name: Verify desktop package size config
         run: npm run check:package-size-config
+
+      - name: Run desktop unit tests
+        run: npm run test:unit
+
+      - name: Verify quick-add parser behavior
+        run: npm run check:quick-add-parser
+
+      - name: Verify task ordering behavior
+        run: npm run check:task-order
+
+      - name: Verify sync push handling
+        run: npm run check:sync-push
+
+      - name: Verify sync diagnostics
+        run: npm run check:sync-diagnostics
+
+      - name: Verify sync recovery center
+        run: npm run check:sync-recovery-center
+
+      - name: Verify desktop backup handling
+        run: npm run check:desktop-backup
+
+      - name: Verify desktop theme config
+        run: npm run check:desktop-theme
+
+      - name: Verify desktop docs consistency
+        run: npm run check:desktop-docs
+
+      - name: Verify local bootstrap guidance
+        run: npm run check:local-bootstrap
+
+      - name: Verify release readiness config
+        run: npm run check:release-readiness
+
+      - name: Verify release artifact config
+        run: npm run check:release-artifacts
+
+      - name: Verify production hardening config
+        run: npm run check:production-hardening
+
+      - name: Verify desktop task list completeness
+        run: npm run check:desktop-task-list-completeness
+
+      - name: Verify Android localization config
+        run: npm run check:android-localization
+
+      - name: Verify Android task delete confirmation
+        run: npm run check:android-task-delete-confirmation
+
+      - name: Verify refresh token singleflight config
+        run: npm run check:refresh-singleflight
+
+      - name: Verify registration governance config
+        run: npm run check:registration-governance
+
+      - name: Verify sync retry preservation
+        run: npm run check:sync-retry-preservation
+
+      - name: Verify Android list and realtime config
+        run: npm run check:android-list-realtime
+
+      - name: Verify release endpoint defaults
+        run: npm run check:release-endpoint-defaults
+
+      - name: Verify Android sync status message config
+        run: npm run check:android-sync-status-message
+
+      - name: Verify Android sync recovery config
+        run: npm run check:android-sync-recovery
+
+      - name: Verify CI workflow desktop coverage
+        run: npm run check:ci-workflows
+
+      - name: Verify cross-client contract drift
+        run: npm run check:contract-drift
+
+      - name: Verify source test visibility
+        run: npm run check:source-tests-visible
+
+      - name: Verify supply chain config
+        run: npm run check:supply-chain
+
+      - name: Verify desktop auto-update config
+        run: npm run check:desktop-auto-update
+
+      - name: Verify Android data extraction config
+        run: npm run check:android-data-extraction
+
+      - name: Verify security governance config
+        run: npm run check:security-governance
+
+      - name: Verify Web client shell
+        run: node ..\scripts\check-web-client.mjs
+
+      - name: Run Web unit tests
+        run: npm --prefix .. run test:web
+
+      - name: Verify Web offline-first behavior
+        run: node ..\scripts\check-web-offline-first.mjs
+
+      - name: Verify Web offline core behavior
+        run: node ..\scripts\check-web-offline-core.mjs
+
+      - name: Smoke test Web client shell
+        run: node ..\scripts\smoke-web-client.mjs
 
       - name: Build desktop app
         run: npm run build

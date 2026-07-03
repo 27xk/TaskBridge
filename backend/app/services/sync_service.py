@@ -3,10 +3,11 @@ from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.task import Task
 from app.models.sync_log import SyncLog
+from app.models.task import Task
 from app.models.user import User
 from app.repositories.sync_repository import list_changed_tasks_page
 from app.schemas.sync import (
@@ -54,6 +55,14 @@ NOTIFICATION_ACTIONS = {
     "complete": "completed",
     "restore": "restored",
 }
+SYNC_LOG_IDEMPOTENCY_CONSTRAINT = "uq_sync_logs_idempotency"
+SYNC_LOG_IDEMPOTENCY_COLUMNS = (
+    "user_id",
+    "device_id",
+    "local_id",
+    "operation",
+    "client_version",
+)
 
 
 @dataclass
@@ -139,6 +148,8 @@ def push_changes(
     db: Session,
     current_user: User,
     payload: SyncPushRequest,
+    *,
+    retry_on_idempotency_conflict: bool = True,
 ) -> tuple[SyncPushResponse, list[SyncNotification]]:
     results: list[SyncChangeResult] = []
     notifications: list[SyncNotification] = []
@@ -159,8 +170,68 @@ def push_changes(
         if notification is not None:
             notifications.append(notification)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        if not retry_on_idempotency_conflict or not _is_sync_log_idempotency_integrity_error(exc):
+            raise
+        db.rollback()
+        return push_changes(
+            db,
+            current_user,
+            payload,
+            retry_on_idempotency_conflict=False,
+        )
     return SyncPushResponse(results=results, server_time=server_time), notifications
+
+
+def _is_sync_log_idempotency_integrity_error(exc: IntegrityError) -> bool:
+    original = getattr(exc, "orig", None)
+    message_parts = [str(exc), str(original)]
+    message_parts.extend(str(part) for part in getattr(original, "args", ()))
+    message = " ".join(message_parts).lower()
+    if SYNC_LOG_IDEMPOTENCY_CONSTRAINT in message:
+        return True
+    return "sync_logs" in message and all(column in message for column in SYNC_LOG_IDEMPOTENCY_COLUMNS)
+
+
+def _can_merge_stale_update(db: Session, user_id: int, task: Task, change: SyncChange) -> bool:
+    if change.action != "update" or task.is_deleted:
+        return False
+    changed_fields = set(change.model_fields_set).intersection(TASK_SYNC_FIELDS)
+    if not changed_fields:
+        return True
+    base_payload = _load_task_version_payload(db, user_id=user_id, task_id=task.id, version=change.version)
+    if base_payload is None:
+        return False
+    current_payload = _task_payload(task)
+    for field in changed_fields:
+        if current_payload.get(field) != base_payload.get(field):
+            return False
+    return True
+
+
+def _load_task_version_payload(
+    db: Session,
+    *,
+    user_id: int,
+    task_id: int,
+    version: int,
+) -> dict[str, Any] | None:
+    sync_log = db.scalar(
+        select(SyncLog)
+        .where(
+            SyncLog.user_id == user_id,
+            SyncLog.task_id == task_id,
+            SyncLog.result == "applied",
+            SyncLog.version == version,
+            SyncLog.payload.is_not(None),
+        )
+        .order_by(SyncLog.id.desc()),
+    )
+    if not isinstance(sync_log, SyncLog) or not isinstance(sync_log.payload, dict):
+        return None
+    return sync_log.payload
 
 
 def _prepare_push_context(
@@ -281,7 +352,7 @@ def _apply_change(
             None,
         )
 
-    if change.version < task.version:
+    if change.version < task.version and not _can_merge_stale_update(db, current_user.id, task, change):
         return (
             SyncChangeResult(
                 local_id=change.local_id,
@@ -347,35 +418,57 @@ def _result_from_existing_applied_change(
     context: SyncPushContext,
     change: SyncChange,
 ) -> SyncChangeResult | None:
-    sync_log = None
-    task = None
     for candidate in context.applied_logs:
         if (
             candidate.local_id != change.local_id
             or candidate.action != change.action
             or candidate.client_version != change.version
-            or candidate.task_id is None
         ):
             continue
+        task = context.tasks_by_id.get(candidate.task_id) if candidate.task_id is not None else None
+        server_id = task.id if task is not None else candidate.server_id
+        version = task.version if task is not None else candidate.version
         if change.server_id is not None and candidate.server_id != change.server_id:
-            continue
+            return _idempotency_mismatch_result(change, server_id, version, task)
+        if candidate.task_id is None or task is None:
+            return _idempotency_mismatch_result(change, server_id, version, task)
         if not _change_matches_logged_payload(change, candidate.payload):
-            continue
-        task = context.tasks_by_id.get(candidate.task_id)
-        if task is None:
-            continue
-        sync_log = candidate
-        break
-    if sync_log is None or task is None:
-        return None
+            return _idempotency_mismatch_result(change, server_id, version, task)
 
+        return SyncChangeResult(
+            local_id=change.local_id,
+            server_id=task.id,
+            action=change.action,
+            status="applied",
+            version=task.version,
+            task=TaskRead.model_validate(task),
+        )
+    return None
+
+
+def _idempotency_mismatch_result(
+    change: SyncChange,
+    server_id: int | None,
+    version: int | None,
+    task: Task | None,
+) -> SyncChangeResult:
+    if change.action != "create" and task is not None and change.version < task.version:
+        return SyncChangeResult(
+            local_id=change.local_id,
+            server_id=task.id,
+            action=change.action,
+            status="conflict",
+            version=task.version,
+            message="version conflict",
+            server_task=TaskRead.model_validate(task),
+        )
     return SyncChangeResult(
         local_id=change.local_id,
-        server_id=task.id,
+        server_id=server_id,
         action=change.action,
-        status="applied",
-        version=task.version,
-        task=TaskRead.model_validate(task),
+        status="failed",
+        version=version,
+        message="idempotency key reused with different payload",
     )
 
 

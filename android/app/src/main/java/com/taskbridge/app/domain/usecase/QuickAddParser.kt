@@ -10,6 +10,7 @@ data class ParsedQuickTask(
     val title: String,
     val priority: Int,
     val tag: String?,
+    val project: String?,
     val dueTime: String?,
     val plannedDate: String?,
 )
@@ -17,6 +18,7 @@ data class ParsedQuickTask(
 object QuickAddParser {
     private val priorityRegex = Regex("""(?i)\bP([0-5])\b""")
     private val tagRegex = Regex("""#([\p{L}\p{N}_-]{1,32})""")
+    private val projectRegex = Regex("""@([\p{L}\p{N}_-]{1,64})""")
     private val timeRegex = Regex("""(?:(上午|下午|晚上|中午)\s*)?(\d{1,2})(?::(\d{2}))?\s*(点|:)?""")
 
     fun parse(
@@ -32,6 +34,9 @@ object QuickAddParser {
 
         val tag = tagRegex.find(working)?.groupValues?.getOrNull(1)
         working = working.replace(tagRegex, "").trim()
+
+        val project = projectRegex.find(working)?.groupValues?.getOrNull(1)
+        working = working.replace(projectRegex, "").trim()
 
         val date = when {
             working.contains("后天") -> now.toLocalDate().plusDays(2)
@@ -77,6 +82,7 @@ object QuickAddParser {
             title = working.ifBlank { input.trim() },
             priority = priority,
             tag = tag?.lowercase(Locale.getDefault()),
+            project = project,
             dueTime = dueTime,
             plannedDate = plannedDate,
         )

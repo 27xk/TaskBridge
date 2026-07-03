@@ -28,6 +28,7 @@ $RECYCLE.BIN/
 !**/*.env.example
 *.local
 *.local.*
+!deploy/.env.local.example
 local.properties
 backend/.env
 backend/.env.*
@@ -96,6 +97,7 @@ backend/tmp/
 backend/temp/
 backend/logs/
 backend/data/
+deploy/backups/
 
 # Node / Electron / Vue 桌面端
 node_modules/
@@ -178,13 +180,13 @@ captures/
 
 # 测试、报告与生成文件
 test-results/
-tests/
 reports/
 playwright-report/
 blob-report/
 junit.xml
 *.lcov
 lcov.info
+.impeccable/
 
 # 压缩包与本地备份
 *.zip

@@ -1,7 +1,12 @@
 package com.taskbridge.app
 
+import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,22 +24,28 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.google.gson.JsonParser
+import com.taskbridge.app.ui.editor.EditorEntryPreset
 import com.taskbridge.app.ui.editor.EditorScreen
+import com.taskbridge.app.ui.editor.sharedTextToEditorDraft
 import com.taskbridge.app.ui.i18n.AppLanguage
 import com.taskbridge.app.ui.i18n.TaskBridgeLanguageProvider
 import com.taskbridge.app.ui.editor.EditorViewModelFactory
@@ -50,6 +61,9 @@ import com.taskbridge.app.utils.ShanghaiTime
 import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
 import com.taskbridge.app.widget.WidgetConstants
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
+
+private const val MAX_SHARED_TEXT_BYTES = 20_000_000
 
 private object Routes {
     const val Login = "login"
@@ -57,10 +71,13 @@ private object Routes {
     const val Tasks = "tasks"
     const val Today = "today"
     const val Editor = "editor"
+    const val EditorToday = "editor-today"
     const val EditorPattern = "editor/{localId}"
     const val Settings = "settings"
+    const val SettingsPattern = "settings?section={section}"
     const val TaskDetailPattern = "task-detail/{localId}"
 
+    fun settings(section: String? = null): String = if (section.isNullOrBlank()) Settings else "$Settings?section=$section"
     fun editTask(localId: String): String = "editor/$localId"
     fun taskDetail(localId: String): String = "task-detail/$localId"
 }
@@ -75,14 +92,17 @@ class MainActivity : ComponentActivity() {
         container.reminderManager.ensureChannel()
         TodayTaskWidgetUpdateWorker.enqueue(this)
         widgetLaunchState = mutableStateOf(WidgetLaunchTarget.fromIntent(intent))
-        sharedTextState = mutableStateOf(sharedTextFromIntent(intent))
+        sharedTextState = mutableStateOf(sharedTextFromIntent(applicationContext, intent))
 
         setContent {
             TaskBridgeTheme {
+                val fallbackWidgetLaunchState = remember { mutableStateOf<WidgetLaunchTarget?>(null) }
+                val fallbackSharedTextState = remember { mutableStateOf<String?>(null) }
                 TaskBridgeApp(
                     container,
-                    widgetLaunchState ?: mutableStateOf<WidgetLaunchTarget?>(null),
-                    sharedTextState ?: mutableStateOf<String?>(null),
+                    widgetLaunchState ?: fallbackWidgetLaunchState,
+                    sharedTextState ?: fallbackSharedTextState,
+                    onRequestNotificationPermission = ::requestNotificationPermissionIfNeeded,
                 )
             }
         }
@@ -92,7 +112,22 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         widgetLaunchState?.value = WidgetLaunchTarget.fromIntent(intent)
-        sharedTextState?.value = sharedTextFromIntent(intent)
+        sharedTextState?.value = sharedTextFromIntent(applicationContext, intent)
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATION_PERMISSION)
+    }
+
+    companion object {
+        private const val REQUEST_NOTIFICATION_PERMISSION = 2401
     }
 }
 
@@ -101,6 +136,7 @@ fun TaskBridgeApp(
     container: AppContainer,
     widgetLaunchState: MutableState<WidgetLaunchTarget?>,
     sharedTextState: MutableState<String?>,
+    onRequestNotificationPermission: () -> Unit,
 ) {
     val navController = rememberNavController()
     val appContext = LocalContext.current.applicationContext
@@ -116,7 +152,7 @@ fun TaskBridgeApp(
     LaunchedEffect(token, widgetLaunchTarget) {
         if (token.isNullOrBlank()) return@LaunchedEffect
 
-        val targetRoute = widgetLaunchTarget?.toRoute() ?: Routes.Tasks
+        val targetRoute = widgetLaunchTarget?.toRoute() ?: Routes.Today
         if (widgetLaunchTarget != null || navController.currentDestination?.route == Routes.Login) {
             navController.navigate(targetRoute) {
                 popUpTo(Routes.Login) { inclusive = true }
@@ -132,7 +168,7 @@ fun TaskBridgeApp(
     }
 
     TaskBridgeLanguageProvider(language) {
-        TaskBridgeNavHost(container, navController, sharedTextState, language)
+        TaskBridgeNavHost(container, navController, sharedTextState, language, onRequestNotificationPermission)
         val pendingBackupText = sharedText
         if (!token.isNullOrBlank() && pendingBackupText != null && isTaskBridgeBackupText(pendingBackupText)) {
             SharedBackupImportDialog(
@@ -193,6 +229,7 @@ private fun TaskBridgeNavHost(
     navController: NavHostController,
     sharedTextState: MutableState<String?>,
     language: AppLanguage,
+    onRequestNotificationPermission: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -203,7 +240,7 @@ private fun TaskBridgeNavHost(
     NavHost(navController = navController, startDestination = Routes.Login) {
         composable(Routes.Login) {
             val viewModel = viewModel<com.taskbridge.app.ui.login.LoginViewModel>(
-                factory = LoginViewModelFactory(container.authRepository, container.syncManager),
+                factory = LoginViewModelFactory(container.authRepository, container.syncManager, container.tokenDataStore),
             )
             LoginScreen(
                 viewModel = viewModel,
@@ -213,7 +250,7 @@ private fun TaskBridgeNavHost(
                     }
                 },
                 onLoginSuccess = {
-                    navController.navigate(Routes.Tasks) {
+                    navController.navigate(Routes.Today) {
                         popUpTo(Routes.Login) { inclusive = true }
                     }
                 },
@@ -223,7 +260,7 @@ private fun TaskBridgeNavHost(
 
         composable(Routes.Register) {
             val viewModel = viewModel<com.taskbridge.app.ui.login.RegisterViewModel>(
-                factory = RegisterViewModelFactory(container.authRepository, container.syncManager),
+                factory = RegisterViewModelFactory(container.authRepository, container.syncManager, container.tokenDataStore),
             )
             RegisterScreen(
                 viewModel = viewModel,
@@ -233,7 +270,7 @@ private fun TaskBridgeNavHost(
                     }
                 },
                 onRegisterSuccess = {
-                    navController.navigate(Routes.Tasks) {
+                    navController.navigate(Routes.Today) {
                         popUpTo(Routes.Login) { inclusive = true }
                     }
                 },
@@ -254,8 +291,10 @@ private fun TaskBridgeNavHost(
                 viewModel = viewModel,
                 todayOnly = false,
                 onAddClick = { navController.navigate(Routes.Editor) },
+                onTaskClick = { navController.navigate(Routes.taskDetail(it)) },
                 onEditClick = { navController.navigate(Routes.editTask(it)) },
                 onSettingsClick = { navController.navigate(Routes.Settings) },
+                onSyncDetailsClick = { navController.navigate(Routes.settings("sync-recovery")) },
                 onTodayClick = { navController.navigate(Routes.Today) },
                 onAllClick = { },
             )
@@ -273,9 +312,11 @@ private fun TaskBridgeNavHost(
             TaskListScreen(
                 viewModel = viewModel,
                 todayOnly = true,
-                onAddClick = { navController.navigate(Routes.Editor) },
+                onAddClick = { navController.navigate(Routes.EditorToday) },
+                onTaskClick = { navController.navigate(Routes.taskDetail(it)) },
                 onEditClick = { navController.navigate(Routes.editTask(it)) },
                 onSettingsClick = { navController.navigate(Routes.Settings) },
+                onSyncDetailsClick = { navController.navigate(Routes.settings("sync-recovery")) },
                 onTodayClick = { },
                 onAllClick = { navController.navigate(Routes.Tasks) },
             )
@@ -285,8 +326,29 @@ private fun TaskBridgeNavHost(
             EditorRoute(
                 container = container,
                 localId = null,
+                entryPreset = EditorEntryPreset.Default,
                 displayTimeZone = displayTimeZone,
                 sharedTextState = sharedTextState,
+                onRequestNotificationPermission = onRequestNotificationPermission,
+                onSaved = {
+                    sharedTextState.value = null
+                    navController.popBackStack()
+                },
+                onCancel = {
+                    sharedTextState.value = null
+                    navController.popBackStack()
+                },
+            )
+        }
+
+        composable(Routes.EditorToday) {
+            EditorRoute(
+                container = container,
+                localId = null,
+                entryPreset = EditorEntryPreset.Today,
+                displayTimeZone = displayTimeZone,
+                sharedTextState = sharedTextState,
+                onRequestNotificationPermission = onRequestNotificationPermission,
                 onSaved = {
                     sharedTextState.value = null
                     navController.popBackStack()
@@ -303,8 +365,10 @@ private fun TaskBridgeNavHost(
             EditorRoute(
                 container = container,
                 localId = localId,
+                entryPreset = EditorEntryPreset.Default,
                 displayTimeZone = displayTimeZone,
                 sharedTextState = sharedTextState,
+                onRequestNotificationPermission = onRequestNotificationPermission,
                 onSaved = {
                     sharedTextState.value = null
                     navController.popBackStack()
@@ -339,11 +403,20 @@ private fun TaskBridgeNavHost(
             )
         }
 
-        composable(Routes.Settings) {
+        composable(
+            route = Routes.SettingsPattern,
+            arguments = listOf(navArgument("section") {
+                type = NavType.StringType
+                defaultValue = ""
+            }),
+        ) { backStackEntry ->
             SettingsScreen(
                 taskRepository = container.taskRepository,
+                authRepository = container.authRepository,
+                syncManager = container.syncManager,
                 tokenDataStore = container.tokenDataStore,
                 language = language,
+                initialSection = backStackEntry.arguments?.getString("section"),
                 onLanguageChange = { nextLanguage ->
                     scope.launch {
                         container.tokenDataStore.saveLanguage(nextLanguage.code)
@@ -369,8 +442,10 @@ private fun TaskBridgeNavHost(
 private fun EditorRoute(
     container: AppContainer,
     localId: String?,
+    entryPreset: EditorEntryPreset,
     displayTimeZone: String,
     sharedTextState: MutableState<String?>,
+    onRequestNotificationPermission: () -> Unit,
     onSaved: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -383,28 +458,67 @@ private fun EditorRoute(
             container.tokenDataStore,
         ),
     )
-    LaunchedEffect(localId) {
+    LaunchedEffect(localId, entryPreset) {
         if (!localId.isNullOrBlank()) {
             viewModel.loadTask(localId)
+        } else {
+            viewModel.startNewTask(entryPreset)
         }
     }
     LaunchedEffect(sharedTextState.value) {
         val text = sharedTextState.value ?: return@LaunchedEffect
         if (isTaskBridgeBackupText(text)) return@LaunchedEffect
-        viewModel.updateTitle(text.take(255))
+        val draft = sharedTextToEditorDraft(text)
+        viewModel.updateTitle(draft.title)
+        viewModel.updateContent(draft.content)
     }
     EditorScreen(
         viewModel = viewModel,
         displayTimeZone = displayTimeZone,
+        onRequestNotificationPermission = onRequestNotificationPermission,
         onSaved = onSaved,
         onCancel = onCancel,
     )
 }
 
-private fun sharedTextFromIntent(intent: Intent?): String? {
+private fun sharedTextFromIntent(context: Context, intent: Intent?): String? {
     val mimeType = intent?.type ?: return null
     if (intent.action != Intent.ACTION_SEND || mimeType !in setOf("text/plain", "application/json")) return null
-    return intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.takeIf { it.isNotBlank() }
+    val inlineText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.takeIf { it.isNotBlank() }
+    if (inlineText != null) return inlineText
+
+    val streamUri = sharedStreamUri(intent) ?: return null
+    return readSharedStreamText(context, streamUri)?.trim()?.takeIf { it.isNotBlank() }
+}
+
+private fun sharedStreamUri(intent: Intent): Uri? {
+    @Suppress("DEPRECATION")
+    val extraStream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+    if (extraStream != null) return extraStream
+    return intent.clipData
+        ?.takeIf { it.itemCount > 0 }
+        ?.getItemAt(0)
+        ?.uri
+}
+
+private fun readSharedStreamText(context: Context, uri: Uri): String? {
+    return runCatching {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var totalBytes = 0
+            while (true) {
+                val read = input.read(buffer)
+                if (read == -1) break
+                totalBytes += read
+                if (totalBytes > MAX_SHARED_TEXT_BYTES) {
+                    throw IllegalArgumentException("Shared payload is too large")
+                }
+                output.write(buffer, 0, read)
+            }
+            output.toString(Charsets.UTF_8.name())
+        }
+    }.getOrNull()
 }
 
 private fun isTaskBridgeBackupText(value: String): Boolean {

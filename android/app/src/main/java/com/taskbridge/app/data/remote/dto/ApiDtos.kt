@@ -22,6 +22,10 @@ data class RegisterRequestDto(
     @SerializedName("device_id") val deviceId: String,
 )
 
+data class RegistrationStatusDto(
+    @SerializedName("registration_enabled") val registrationEnabled: Boolean,
+)
+
 data class LoginRequestDto(
     @SerializedName("username_or_email") val usernameOrEmail: String,
     val password: String,
@@ -166,6 +170,7 @@ data class TaskUpdateRequestDto(
     @SerializedName("is_template") val isTemplate: Boolean?,
     @SerializedName("template_name") val templateName: String?,
     @SerializedName("sort_order") val sortOrder: Int?,
+    @SerializedName("expected_version") val expectedVersion: Int? = null,
 )
 
 data class SyncChangeDto(

@@ -36,20 +36,42 @@ function updateOpacity(event: Event): void {
     </div>
 
     <div class="floating-window-actions">
-      <button type="button" :title="settingsStore.t('floating.openMain')" @click="$emit('openMain')">↗</button>
-      <button type="button" :title="settingsStore.t('floating.hide')" @click="$emit('hide')">−</button>
+      <button
+        type="button"
+        :title="settingsStore.t('floating.openMain')"
+        :aria-label="settingsStore.t('floating.openMain')"
+        @click="$emit('openMain')"
+      >
+        {{ settingsStore.t("floating.openMainShort") }}
+      </button>
+      <button
+        type="button"
+        :title="settingsStore.t('floating.hide')"
+        :aria-label="settingsStore.t('floating.hide')"
+        @click="$emit('hide')"
+      >
+        {{ settingsStore.t("floating.hideShort") }}
+      </button>
+      <details class="floating-tools">
+        <summary
+          :title="settingsStore.t('floating.tools')"
+          :aria-label="settingsStore.t('floating.tools')"
+        >
+          {{ settingsStore.t("floating.tools") }}
+        </summary>
+        <label class="floating-opacity">
+          <span>{{ settingsStore.t("floating.opacity") }}</span>
+          <input
+            type="range"
+            min="0.45"
+            max="1"
+            step="0.05"
+            :aria-label="settingsStore.t('floating.opacity')"
+            :value="props.opacity"
+            @input="updateOpacity"
+          />
+        </label>
+      </details>
     </div>
   </header>
-
-  <label class="floating-opacity">
-    <span>{{ settingsStore.t("floating.opacity") }}</span>
-    <input
-      type="range"
-      min="0.45"
-      max="1"
-      step="0.05"
-      :value="props.opacity"
-      @input="updateOpacity"
-    />
-  </label>
 </template>
