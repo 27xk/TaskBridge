@@ -68,7 +68,7 @@ for (const directory of [
 ]) {
   assert.match(dependabotSource, new RegExp(`directory:\\s*"${directory}"`), `Dependabot must cover ${directory}`);
 }
-assert.match(dependabotSource, /open-pull-requests-limit:\s*1/, "Dependabot must cap concurrent update PRs");
+assert.match(dependabotSource, /open-pull-requests-limit:\s*0/, "Dependabot must disable routine version update PRs");
 
 for (const token of [
   "github/codeql-action/init@v4",
