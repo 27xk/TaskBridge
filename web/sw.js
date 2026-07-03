@@ -1,4 +1,4 @@
-const WEB_VERSION = "0.1.6";
+const WEB_VERSION = "0.1.7";
 const CACHE_NAME = `taskbridge-web-shell-v${WEB_VERSION}`;
 const SHELL_ASSETS = [
   "./",

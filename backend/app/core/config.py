@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "TaskBridge API"
-    app_version: str = "0.1.6"
+    app_version: str = "0.1.7"
     environment: str = "development"
     database_url: str = Field(
         default=DEFAULT_DATABASE_URL,

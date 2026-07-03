@@ -10,7 +10,7 @@ import {
   matchesTaskView,
   normalizeRemoteTaskForOffline,
   shouldConfirmTaskAction,
-} from "./offline-core.js?v=0.1.6";
+} from "./offline-core.js?v=0.1.7";
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000/api/v1";
 const DEFAULT_SERVER_BASE_URL = deriveServerBaseUrlFromApi(DEFAULT_API_BASE_URL);
@@ -27,7 +27,7 @@ const LAST_IMPORTED_BACKUP_TASK_IDS_STORAGE_KEY = "lastImportedBackupTaskIds";
 const TASK_LIMIT = 100;
 const MAX_TASK_PAGES = 50;
 const APP_VERSION_META_SELECTOR = 'meta[name="taskbridge-version"]';
-const WEB_APP_VERSION = document.querySelector(APP_VERSION_META_SELECTOR)?.content?.trim() || "0.1.6";
+const WEB_APP_VERSION = document.querySelector(APP_VERSION_META_SELECTOR)?.content?.trim() || "0.1.7";
 const WEB_OFFLINE_DB_VERSION = 1;
 const OFFLINE_TASK_STORE = "tasks";
 const OFFLINE_QUEUE_STORE = "offline_mutations";
