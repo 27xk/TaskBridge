@@ -28,7 +28,6 @@ android {
         taskBridgeBaseUrl.startsWith("http://") || taskBridgeWebSocketUrl.startsWith("ws://")
     val releaseEndpointLooksPlaceholder =
         taskBridgeBaseUrl.contains("example.invalid") || taskBridgeWebSocketUrl.contains("example.invalid")
-    val releaseUsesCleartext = taskBridgeUsesCleartext
     val releaseKeystorePath = taskBridgeProperty("ANDROID_KEYSTORE_PATH", System.getenv("ANDROID_KEYSTORE_PATH") ?: "")
     val releaseKeystorePassword = taskBridgeProperty("ANDROID_KEYSTORE_PASSWORD", System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "")
     val releaseKeyAlias = taskBridgeProperty("ANDROID_KEY_ALIAS", System.getenv("ANDROID_KEY_ALIAS") ?: "")
@@ -130,11 +129,6 @@ android {
         if (requiresSignedRelease && releaseEndpointLooksPlaceholder) {
             throw org.gradle.api.GradleException(
                 "Release endpoints must be configured with TASKBRIDGE_BASE_URL and TASKBRIDGE_WS_URL.",
-            )
-        }
-        if (requiresSignedRelease && releaseUsesCleartext) {
-            throw org.gradle.api.GradleException(
-                "Release endpoints must use HTTPS and WSS. Refusing cleartext public release config.",
             )
         }
     }

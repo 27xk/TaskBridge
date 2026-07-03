@@ -109,14 +109,22 @@ jobs:
           validate_endpoint() {
             local name="$1"
             local value="$2"
-            local required_scheme="$3"
-            local required_path="$4"
+            local required_path="$3"
+            shift 3
+            local allowed_schemes=("$@")
             if [ -z "$value" ]; then
               echo "::error::${name} must be configured in repository variables before release."
               exit 1
             fi
-            if [[ "$value" != ${required_scheme}* ]]; then
-              echo "::error::${name} must use ${required_scheme} for public release artifacts."
+            local scheme_ok=false
+            for scheme in "${allowed_schemes[@]}"; do
+              if [[ "$value" == ${scheme}* ]]; then
+                scheme_ok=true
+                break
+              fi
+            done
+            if [ "$scheme_ok" != true ]; then
+              echo "::error::${name} must use one of: ${allowed_schemes[*]} for release artifacts."
               exit 1
             fi
             if [[ "$value" != *"${required_path}"* ]]; then
@@ -129,8 +137,8 @@ jobs:
               exit 1
             fi
           }
-          validate_endpoint "TASKBRIDGE_BASE_URL" "$TASKBRIDGE_BASE_URL" "https://" "/api/v1/"
-          validate_endpoint "TASKBRIDGE_WS_URL" "$TASKBRIDGE_WS_URL" "wss://" "/ws/sync"
+          validate_endpoint "TASKBRIDGE_BASE_URL" "$TASKBRIDGE_BASE_URL" "/api/v1/" "http://" "https://"
+          validate_endpoint "TASKBRIDGE_WS_URL" "$TASKBRIDGE_WS_URL" "/ws/sync" "ws://" "wss://"
 
       - name: Ensure release tag exists
         if: ${{ github.event_name == 'workflow_dispatch' }}

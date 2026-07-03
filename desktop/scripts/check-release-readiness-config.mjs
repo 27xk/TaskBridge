@@ -66,16 +66,35 @@ for (const token of [
   "validate_endpoint \"TASKBRIDGE_BASE_URL\"",
   "validate_endpoint \"TASKBRIDGE_WS_URL\"",
   "must be configured in repository variables",
+  "http://",
   "https://",
+  "ws://",
   "wss://",
   "private or local network address",
 ]) {
   assert.match(releaseSource, new RegExp(escapeRegExp(token)), `release workflow must enforce ${token}`);
 }
+assert.match(
+  releaseSource,
+  /validate_endpoint "TASKBRIDGE_BASE_URL" "\$TASKBRIDGE_BASE_URL" "\/api\/v1\/" "http:\/\/" "https:\/\/"/,
+  "release workflow must allow configured HTTP or HTTPS API endpoints",
+);
+assert.match(
+  releaseSource,
+  /validate_endpoint "TASKBRIDGE_WS_URL" "\$TASKBRIDGE_WS_URL" "\/ws\/sync" "ws:\/\/" "wss:\/\/"/,
+  "release workflow must allow configured WS or WSS sync endpoints",
+);
+assert.doesNotMatch(
+  releaseSource,
+  /must use https:\/\/ for public release artifacts|must use wss:\/\/ for public release artifacts/i,
+  "release workflow must not require TLS-only endpoint schemes",
+);
 
 for (const token of [
-  "TASKBRIDGE_BASE_URL=https://",
-  "TASKBRIDGE_WS_URL=wss://",
+  "TASKBRIDGE_BASE_URL=http://",
+  "TASKBRIDGE_WS_URL=ws://",
+  "http://` / `https://",
+  "ws://` / `wss://",
   "Release workflow refuses",
 ]) {
   assert.match(releaseDocsSource, new RegExp(escapeRegExp(token)), `release docs must document ${token}`);
@@ -87,4 +106,3 @@ assert.match(
 );
 
 console.log("release readiness config check passed");
-

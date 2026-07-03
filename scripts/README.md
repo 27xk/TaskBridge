@@ -78,7 +78,7 @@ python -m tools.openapi_contract --check
 | `npm run check:desktop-theme` | 检查桌面端主题配置、持久化和设置页入口 |
 | `npm run check:desktop-efficiency` | 检查桌面端设置自愈与恢复通知、提醒去重缓存裁剪以及任务列表排序/索引 |
 | `npm run check:desktop-docs` | 检查桌面端文档和实际连接地址策略一致 |
-| `npm run check:release-readiness` | 检查 release 产物不会写死局域网地址，并要求 HTTPS / WSS 端点 |
+| `npm run check:release-readiness` | 检查 release 产物不会写死局域网地址，并允许 HTTP/HTTPS 与 WS/WSS 端点 |
 | `npm run check:release-artifacts` | 检查 release 会生成 SHA-256 校验清单 |
 | `npm run check:desktop-auto-update` | 检查桌面端自动更新依赖、更新入口和 release manifest / blockmap 产物 |
 | `npm run check:android-data-extraction` | 检查 Android backup / device transfer 排除 Token、设备 ID、本地数据库和导出缓存 |
