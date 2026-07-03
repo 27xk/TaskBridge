@@ -50,16 +50,18 @@ for (const [workflowName, source] of [
 }
 
 assert.match(backendDockerfileSource, /\/ready/, "backend container healthcheck must use the readiness endpoint");
-assert.match(releaseSource, /Validate Windows signing secrets/, "release workflow must validate Windows signing secrets");
-assert.match(releaseSource, /WINDOWS_CERTIFICATE_BASE64/, "release workflow must require a Windows signing certificate");
-assert.match(releaseSource, /CSC_LINK/, "release workflow must pass a signing certificate to electron-builder");
-assert.match(releaseSource, /CSC_KEY_PASSWORD/, "release workflow must pass the Windows signing password to electron-builder");
+assert.match(releaseSource, /Prepare Windows signing certificate/, "release workflow must prepare optional Windows signing");
+assert.match(releaseSource, /TASKBRIDGE_WINDOWS_SIGNED_RELEASE/, "release workflow must track whether Windows artifacts are signed");
+assert.match(releaseSource, /CSC_IDENTITY_AUTO_DISCOVERY=false/, "release workflow must explicitly disable Windows signing when no certificate is configured");
+assert.match(releaseSource, /CSC_LINK/, "release workflow must pass a signing certificate to electron-builder when configured");
+assert.match(releaseSource, /CSC_KEY_PASSWORD/, "release workflow must pass the Windows signing password to electron-builder when configured");
 assert.match(
   releaseSource,
-  /Verify Windows installer signatures[\s\S]*Get-AuthenticodeSignature[\s\S]*Status -ne 'Valid'/,
-  "release workflow must verify Windows Authenticode signatures before uploading artifacts",
+  /Verify Windows installer signatures[\s\S]*TASKBRIDGE_WINDOWS_SIGNED_RELEASE[\s\S]*Get-AuthenticodeSignature[\s\S]*Status -ne 'Valid'/,
+  "release workflow must verify Windows Authenticode signatures when Windows signing is configured",
 );
-assert.match(releaseSource, /Validate Android signing secrets/, "release workflow must validate Android signing secrets");
+assert.match(releaseSource, /Prepare Android signing key/, "release workflow must prepare optional Android signing");
+assert.match(releaseSource, /TASKBRIDGE_ANDROID_SIGNED_RELEASE/, "release workflow must track whether Android artifacts are signed");
 for (const token of [
   "ANDROID_KEYSTORE_BASE64",
   "ANDROID_KEYSTORE_PASSWORD",
@@ -71,39 +73,17 @@ for (const token of [
 }
 assert.match(
   releaseSource,
-  /Verify Android APK signature[\s\S]*apksigner[\s\S]*verify --verbose --print-certs/,
-  "release workflow must verify the Android APK signature before uploading artifacts",
+  /Verify Android APK signature[\s\S]*TASKBRIDGE_ANDROID_SIGNED_RELEASE[\s\S]*apksigner[\s\S]*verify --verbose --print-certs/,
+  "release workflow must verify the Android APK signature when Android signing is configured",
 );
-assert.doesNotMatch(
+assert.match(
   releaseSource,
-  /TASKBRIDGE_ALLOW_UNSIGNED_RELEASE/,
-  "public release workflow must not allow unsigned Android release artifacts",
+  /app-release-unsigned\.apk[\s\S]*android-unsigned\.apk/,
+  "release workflow must publish a clearly named unsigned Android APK when signing is not configured",
 );
-assert.doesNotMatch(
-  androidBuildSource,
-  /TASKBRIDGE_ALLOW_UNSIGNED_RELEASE|allowUnsignedRelease/,
-  "Android release builds must not expose an unsigned release escape hatch",
-);
-assert.doesNotMatch(
-  androidReadmeSource,
-  /TASKBRIDGE_ALLOW_UNSIGNED_RELEASE|unsigned release/i,
-  "Android docs must not teach unsigned release builds",
-);
-assert.doesNotMatch(
-  troubleshootingSource,
-  /unsigned release APK/i,
-  "troubleshooting docs must direct local experiments to debug builds, not unsigned release APKs",
-);
-assert.doesNotMatch(
-  releaseSource,
-  /app-release-unsigned\.apk/,
-  "public release workflow must not publish unsigned Android release artifacts",
-);
-assert.doesNotMatch(
-  releaseSource,
-  /CSC_IDENTITY_AUTO_DISCOVERY:\s*["']false["']/,
-  "public release workflow must not disable Windows signing",
-);
+assert.doesNotMatch(androidBuildSource, /Release signing is required/, "Android release builds must not fail solely because signing is not configured");
+assert.match(androidReadmeSource, /unsigned release/i, "Android docs must explain unsigned release artifacts");
+assert.match(troubleshootingSource, /unsigned release APK/i, "troubleshooting docs must explain unsigned release APKs");
 
 for (const token of [
   "docker compose",
@@ -144,6 +124,7 @@ for (const token of [
   "WINDOWS_CERTIFICATE_BASE64",
   "WINDOWS_CERTIFICATE_PASSWORD",
   "unsigned Android",
+  "unsigned Windows",
 ]) {
   assert.match(releaseDocsSource, new RegExp(escapeRegExp(token)), `release docs must document ${token}`);
 }
@@ -171,4 +152,3 @@ for (const token of [
 }
 
 console.log("production hardening config check passed");
-

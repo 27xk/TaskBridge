@@ -26,7 +26,7 @@
 
 ## Android
 
-- Release APK 必须使用正式签名。缺少签名配置时，`assembleRelease` 会失败。
+- Release APK 优先使用正式签名。缺少签名配置时，`assembleRelease` 会生成 unsigned release APK，不会回退到 debug signing。
 - Release 构建默认关闭 Android backup；Manifest 同时声明 `dataExtractionRules` 和 `fullBackupContent`，即使 debug 或测试构建允许备份，也会排除 `taskbridge_secure_tokens`、`taskbridge_device`、`taskbridge_sync`、`taskbridge.db` 和 `cache/exports` 等敏感或可恢复数据。
 - Token 使用加密存储。
 - 分享导入 TaskBridge 备份时，需要识别备份格式并由用户确认后才写入本地数据。

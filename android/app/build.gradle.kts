@@ -120,12 +120,6 @@ android {
                 it.name == "bundleRelease" ||
                 it.name == "packageRelease"
         }
-        if (requiresSignedRelease && !hasReleaseSigning) {
-            throw org.gradle.api.GradleException(
-                "Release signing is required. Configure ANDROID_KEYSTORE_PATH, " +
-                    "ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD.",
-            )
-        }
         if (requiresSignedRelease && releaseEndpointLooksPlaceholder) {
             throw org.gradle.api.GradleException(
                 "Release endpoints must be configured with TASKBRIDGE_BASE_URL and TASKBRIDGE_WS_URL.",

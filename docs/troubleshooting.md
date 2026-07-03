@@ -21,20 +21,20 @@
 
 ## Android Release 构建失败
 
-当前版本不允许 Release APK 回退到 debug signing。请确认仓库 Secrets 完整：
+Release APK 不会回退到 debug signing。需要已签名产物时，请确认仓库 Secrets 完整：
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-本地临时实验请使用 debug 构建，不要把未签名的 release 产物当正式产物：
+本地临时实验请使用 debug 构建。未配置签名 Secrets 时，GitHub Release 会生成明确标注的 unsigned release APK，不要把它当作已签名正式产物：
 
 ```powershell
 .\gradlew.bat :app:assembleDebug
 ```
 
-Release workflow 不允许发布 unsigned Android artifacts。
+Release workflow 允许发布 unsigned Android artifacts，但文件名会包含 `android-unsigned.apk`。如果只配置了部分 Android 签名 Secrets，workflow 会失败。
 
 ## Gradle JDK 配置无效
 

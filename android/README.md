@@ -84,9 +84,9 @@ Release APK：
 .\gradlew.bat :app:assembleRelease
 ```
 
-Release 构建必须配置正式签名。缺少 keystore、密码、alias 或 key 密码时，`assembleRelease` 会直接失败，避免误发布 debug 签名 APK。
+Release 构建会优先使用正式签名。配置完整 keystore、密码、alias 和 key 密码时会生成已签名 APK；缺少签名配置时，`assembleRelease` 会生成 unsigned release APK，不会回退到 debug signing。
 
-本机临时验证请使用 debug 构建；release 产物必须具备正式签名，不再提供未签名绕过入口。
+本机临时验证仍建议使用 debug 构建；如果需要发布 unsigned release，请在文件名和说明中明确标注，避免用户把它当作已签名正式 APK。
 
 ## Release 签名
 

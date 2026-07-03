@@ -47,15 +47,30 @@ assert.doesNotMatch(
   /signingConfigs\.getByName\("debug"\)/,
   "Android release builds must not fall back to the debug signing key",
 );
-assert.match(
+assert.doesNotMatch(
   androidBuildSource,
   /Release signing is required/,
-  "Android release assemble/bundle tasks must fail clearly when signing secrets are missing",
+  "Android release assemble/bundle tasks must allow explicitly unsigned release APKs",
+);
+assert.match(
+  androidBuildSource,
+  /if \(hasReleaseSigning\)[\s\S]*signingConfig = signingConfigs\.getByName\("release"\)/,
+  "Android release builds must use the release signing config when signing secrets are configured",
 );
 assert.match(
   releaseWorkflowSource,
-  /Validate Android signing secrets/,
-  "GitHub release workflow must validate Android signing secrets before publishing an APK",
+  /Prepare Android signing key/,
+  "GitHub release workflow must prepare Android signing before publishing an APK",
+);
+assert.match(
+  releaseWorkflowSource,
+  /TASKBRIDGE_ANDROID_SIGNED_RELEASE/,
+  "GitHub release workflow must track signed and unsigned Android artifacts",
+);
+assert.match(
+  releaseWorkflowSource,
+  /Incomplete Android signing secrets/,
+  "GitHub release workflow must fail clearly when only part of the Android signing secrets are configured",
 );
 
 for (const [name, source] of [

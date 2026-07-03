@@ -132,6 +132,6 @@ Android 和 Windows 都需要维护：
 - 后端所有业务数据按 `user_id` 过滤，任务父子关系也必须校验归属。
 - Refresh Token 绑定设备；删除设备会撤销该设备登录态。
 - WebSocket 使用短期 Ticket，连接后仍校验 `device_id`。
-- Android Release 必须使用正式签名，缺少签名配置时构建失败。
+- Android Release 优先使用正式签名；缺少签名配置时可构建明确标注的 unsigned release APK。
 - Windows Electron renderer 启用 sandbox，IPC 会校验调用方窗口。
 - Docker release 部署默认只暴露 API，MySQL 和 Redis 保持在 Compose 内部网络。

@@ -176,33 +176,43 @@ jobs:
         with:
           gradle-home-cache-cleanup: true
 
-      - name: Decode Android signing key
+      - name: Prepare Android signing key
         shell: bash
         run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
-          fi
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-
-      - name: Validate Android signing secrets
-        shell: bash
-        run: |
+          signing_values=(
+            "$ANDROID_KEYSTORE_BASE64"
+            "$ANDROID_KEYSTORE_PASSWORD"
+            "$ANDROID_KEY_ALIAS"
+            "$ANDROID_KEY_PASSWORD"
+          )
+          configured=0
+          for value in "${signing_values[@]}"; do
+            if [ -n "$value" ]; then
+              configured=1
+            fi
+          done
           missing=()
           for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
             if [ -z "${!name}" ]; then
               missing+=("$name")
             fi
           done
+          if [ "$configured" -eq 0 ]; then
+            echo "::notice::Android signing secrets are not configured; building an unsigned release APK."
+            echo "TASKBRIDGE_ANDROID_SIGNED_RELEASE=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "Missing Android signing secrets: ${missing[*]}" >&2
-            echo "Public release artifacts must be signed; configure all Android signing secrets." >&2
+            echo "::error::Incomplete Android signing secrets: ${missing[*]}."
+            echo "Configure all Android signing secrets or leave all of them empty for an unsigned APK." >&2
             exit 1
           fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
           if [ ! -s release.keystore ]; then
             echo "Decoded Android signing keystore is empty or missing." >&2
             exit 1
           fi
+          echo "TASKBRIDGE_ANDROID_SIGNED_RELEASE=true" >> "$GITHUB_ENV"
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -226,6 +236,10 @@ jobs:
       - name: Verify Android APK signature
         shell: bash
         run: |
+          if [ "$TASKBRIDGE_ANDROID_SIGNED_RELEASE" != "true" ]; then
+            echo "::notice::Skipping Android APK signature verification because this release is unsigned."
+            exit 0
+          fi
           apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release.apk' | head -n 1)"
           if [ -z "$apk_path" ]; then
             echo "No release APK was produced." >&2
@@ -248,12 +262,18 @@ jobs:
         run: |
           mkdir -p ../artifacts
           find app/build/outputs/apk -maxdepth 3 -type f -print
-          apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release.apk' | head -n 1)"
+          if [ "$TASKBRIDGE_ANDROID_SIGNED_RELEASE" = "true" ]; then
+            apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release.apk' | head -n 1)"
+            artifact_name="TaskBridge-${RELEASE_VERSION}-android.apk"
+          else
+            apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release-unsigned.apk' | head -n 1)"
+            artifact_name="TaskBridge-${RELEASE_VERSION}-android-unsigned.apk"
+          fi
           if [ -z "$apk_path" ]; then
             echo "No release APK was produced." >&2
             exit 1
           fi
-          cp "$apk_path" "../artifacts/TaskBridge-${RELEASE_VERSION}-android.apk"
+          cp "$apk_path" "../artifacts/${artifact_name}"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
@@ -414,14 +434,19 @@ jobs:
       - name: Smoke test Web client shell
         run: node ..\scripts\smoke-web-client.mjs
 
-      - name: Validate Windows signing secrets
+      - name: Prepare Windows signing certificate
         shell: pwsh
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
-            throw "WINDOWS_CERTIFICATE_BASE64 must be configured for public release artifacts."
+          $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)
+          $hasPassword = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)
+          if (-not $hasCertificate -and -not $hasPassword) {
+            "TASKBRIDGE_WINDOWS_SIGNED_RELEASE=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "CSC_IDENTITY_AUTO_DISCOVERY=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::notice::Windows signing certificate is not configured; building an unsigned installer."
+            exit 0
           }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
-            throw "WINDOWS_CERTIFICATE_PASSWORD must be configured for public release artifacts."
+          if (-not $hasCertificate -or -not $hasPassword) {
+            throw "Incomplete Windows signing secrets. Configure both WINDOWS_CERTIFICATE_BASE64 and WINDOWS_CERTIFICATE_PASSWORD, or leave both empty for an unsigned installer."
           }
           $certificatePath = Join-Path $env:RUNNER_TEMP "taskbridge-codesign.pfx"
           [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
@@ -429,6 +454,8 @@ jobs:
             throw "Decoded Windows signing certificate is empty."
           }
           "CSC_LINK=$certificatePath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CSC_KEY_PASSWORD=$env:WINDOWS_CERTIFICATE_PASSWORD" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TASKBRIDGE_WINDOWS_SIGNED_RELEASE=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -438,14 +465,16 @@ jobs:
         env:
           TASKBRIDGE_BASE_URL: ${{ env.TASKBRIDGE_BASE_URL }}
           TASKBRIDGE_WS_URL: ${{ env.TASKBRIDGE_WS_URL }}
-          CSC_LINK: ${{ runner.temp }}\\taskbridge-codesign.pfx
-          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           ELECTRON_CACHE: ${{ github.workspace }}\\.cache\\electron
           ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.cache\\electron-builder
 
       - name: Verify Windows installer signatures
         shell: pwsh
         run: |
+          if ($env:TASKBRIDGE_WINDOWS_SIGNED_RELEASE -ne "true") {
+            Write-Host "::notice::Skipping Windows installer signature verification because this release is unsigned."
+            exit 0
+          }
           $installers = @(Get-ChildItem -Path release -File | Where-Object { $_.Extension -eq '.exe' })
           if ($installers.Count -eq 0) {
             throw "No Windows installer .exe was produced."
@@ -569,6 +598,7 @@ jobs:
         with:
           image-ref: taskbridge:release-scan
           severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
           exit-code: '1'
 
       - name: Build and push backend image

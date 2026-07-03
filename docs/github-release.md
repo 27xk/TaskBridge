@@ -72,7 +72,7 @@ DOCKERHUB_IMAGE=your-dockerhub-name/taskbridge
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-这些 Secrets 是正式发布的强制配置。缺少任一项时，Android 发布 job 会失败，不会回退到 debug signing，也不会发布 unsigned Android artifacts。APK 构建完成后，Release workflow 会继续运行 `apksigner verify --verbose --print-certs`；签名验证失败的 APK 不会上传。
+这些 Secrets 需要成组配置：四项全部存在时会构建已签名 APK，并运行 `apksigner verify --verbose --print-certs`；只配置其中一部分时 Android 发布 job 会失败。四项都未配置时，Release workflow 会构建明确命名的 unsigned Android artifact：`TaskBridge-<version>-android-unsigned.apk`。
 
 生成 `ANDROID_KEYSTORE_BASE64`：
 
@@ -99,7 +99,7 @@ PowerShell：
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("taskbridge-codesign.pfx"))
 ```
 
-缺少任一项时 Windows 发布 job 会失败，不会发布未签名安装包。安装包构建完成后，Release workflow 会通过 `Get-AuthenticodeSignature` 检查 `.exe` 产物；签名状态不是 `Valid` 时不会上传。
+这两个 Secrets 需要成组配置：两项都存在时会构建签名安装包，并通过 `Get-AuthenticodeSignature` 检查 `.exe` 产物；只配置其中一项时 Windows 发布 job 会失败。两项都未配置时，Release workflow 会关闭自动签名发现并构建 unsigned Windows installer。
 
 ## 权限
 
@@ -139,12 +139,12 @@ Release workflow refuses to build public artifacts unless both endpoints are con
 - JDK 是否为 17。
 - `gradlew` 是否有执行权限。
 - 是否关闭了国内镜像：`-PTASKBRIDGE_USE_CHINA_MIRRORS=false`。
-- release 签名 Secrets 是否完整；正式 Release 不允许发布 unsigned Android artifacts，并且会用 `apksigner verify --verbose --print-certs` 校验最终 APK。
+- Android 签名 Secrets 是否完整；四项都缺失时会发布 unsigned Android artifact，部分缺失时会失败；已签名 APK 会用 `apksigner verify --verbose --print-certs` 校验。
 - `ANDROID_KEYSTORE_BASE64` 解码后是否为空。
 
 ### 桌面端打包失败
 
-`electron-builder` 需要下载 Electron 运行时，并且发布工作流要求 Windows 签名 Secrets 完整。发布工作流已设置：
+`electron-builder` 需要下载 Electron 运行时。配置完整 Windows 签名 Secrets 时，发布工作流会设置：
 
 ```text
 CSC_LINK=<runner temp>/taskbridge-codesign.pfx
@@ -153,7 +153,7 @@ ELECTRON_CACHE=<workspace>/.cache/electron
 ELECTRON_BUILDER_CACHE=<workspace>/.cache/electron-builder
 ```
 
-这样可以避免系统缓存目录权限问题。安装包生成后还会执行 `Get-AuthenticodeSignature`，只有 Authenticode 状态为 `Valid` 的 `.exe` 才会作为发布产物上传。
+这样可以避免系统缓存目录权限问题。安装包生成后还会执行 `Get-AuthenticodeSignature`，只有 Authenticode 状态为 `Valid` 的 `.exe` 才会作为已签名发布产物上传。未配置 Windows 签名 Secrets 时，发布工作流会设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`，产出 unsigned Windows installer，并跳过 Authenticode 校验。
 
 ### Docker 发布失败
 

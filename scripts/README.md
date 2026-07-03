@@ -83,7 +83,7 @@ python -m tools.openapi_contract --check
 | `npm run check:desktop-auto-update` | 检查桌面端自动更新依赖、更新入口和 release manifest / blockmap 产物 |
 | `npm run check:android-data-extraction` | 检查 Android backup / device transfer 排除 Token、设备 ID、本地数据库和导出缓存 |
 | `npm run check:security-governance` | 检查 `SECURITY.md`、Dependabot、CodeQL、dependency-review、Scorecard 和 Trivy 治理配置 |
-| `npm run check:production-hardening` | 检查生产发布签名门禁、备份恢复脚本和 readiness 策略 |
+| `npm run check:production-hardening` | 检查发布签名/unsigned 分支、备份恢复脚本和 readiness 策略 |
 | `npm run check:ci-workflows` | 检查 CI / release 是否运行关键守门脚本 |
 | `npm run check:contract-drift` | 检查后端、桌面端和 Android 字段契约是否漂移 |
 

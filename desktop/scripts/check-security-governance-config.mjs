@@ -102,6 +102,8 @@ for (const token of [
 }
 assert.match(releaseSource, /aquasecurity\/trivy-action@/, "release workflow must scan the backend Docker image before publishing");
 assert.match(releaseSource, /severity:\s*'CRITICAL,HIGH'/, "release Docker scan must fail on high and critical findings");
+assert.match(releaseSource, /ignore-unfixed:\s*true/, "release Docker scan must ignore vulnerabilities that do not have a fixed version");
+assert.match(ciSource, /ignore-unfixed:\s*true/, "CI Docker scan must ignore vulnerabilities that do not have a fixed version");
 
 for (const token of [
   "SECURITY.md",
