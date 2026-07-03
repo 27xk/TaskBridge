@@ -48,6 +48,19 @@ assert.equal(
 
 const builderConfig = JSON.parse(builderSource);
 assert.ok(builderConfig.publish, "electron-builder must configure publish metadata for update manifests");
+assert.equal(
+  packageJson.repository?.url,
+  "https://github.com/27xk/TaskBridge.git",
+  "desktop package must declare the GitHub repository for release metadata",
+);
+assert.match(
+  packageJson.scripts?.dist ?? "",
+  /electron-builder --config electron-builder\.json --publish never/,
+  "desktop dist must disable electron-builder implicit publishing on git tags",
+);
+assert.equal(builderConfig.publish?.[0]?.provider, "github", "electron-builder publish config must use GitHub");
+assert.equal(builderConfig.publish?.[0]?.owner, "27xk", "electron-builder publish config must pin the GitHub owner");
+assert.equal(builderConfig.publish?.[0]?.repo, "TaskBridge", "electron-builder publish config must pin the GitHub repo");
 assert.equal(builderConfig.publish?.[0]?.channel, "latest", "electron-builder publish config must pin the stable update channel");
 assert.equal(builderConfig.nsis?.differentialPackage, true, "NSIS differentialPackage must be enabled");
 
