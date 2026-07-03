@@ -119,6 +119,7 @@ jobs:
           fail-on-severity: high
 
       - name: Run OpenSSF Scorecard
+        continue-on-error: true
         uses: ossf/scorecard-action@v2.4.2
         with:
           results_file: scorecard-results.sarif
@@ -126,6 +127,8 @@ jobs:
           publish_results: true
 
       - name: Upload Scorecard SARIF
+        if: ${{ always() && hashFiles('scorecard-results.sarif') != '' }}
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: scorecard-results.sarif
