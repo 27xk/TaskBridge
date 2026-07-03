@@ -1860,7 +1860,7 @@
   "info": {
     "description": "TaskBridge backend API for Android and Windows desktop clients.",
     "title": "TaskBridge API",
-    "version": "0.1.6"
+    "version": "0.1.7"
   },
   "openapi": "3.1.0",
   "paths": {
