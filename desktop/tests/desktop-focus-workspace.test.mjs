@@ -47,10 +47,52 @@ test("desktop account menu closes through its own interaction boundary", async (
   assert.match(sidebar, /<div ref="accountMenuRoot" class="sidebar-footer account-menu">/);
   assert.match(sidebar, /!accountMenuRoot\.value\?\.contains\(event\.target\)/);
   assert.doesNotMatch(sidebar, /sidebarRoot/);
+  assert.match(sidebar, /document\.addEventListener\("pointerdown", closeOnOutsidePointer\)/);
+  assert.match(sidebar, /document\.removeEventListener\("pointerdown", closeOnOutsidePointer\)/);
+  assert.match(sidebar, /document\.addEventListener\("keydown", closeOnEscape\)/);
+  assert.match(sidebar, /document\.removeEventListener\("keydown", closeOnEscape\)/);
   assert.match(sidebar, /function syncNow\(\): void \{\s*closeMenu\(\);\s*emit\("syncNow"\)/);
   assert.match(sidebar, /function openSyncDetails\(\): void \{\s*closeMenu\(\);\s*emit\("openSyncDetails"\)/);
   assert.match(sidebar, /function logout\(\): void \{\s*closeMenu\(\);\s*emit\("logout"\)/);
-  assert.match(sidebar, /event\.key !== "Escape"[\s\S]{0,120}closeMenu\(\);\s*accountTrigger\.value\?\.focus\(\)/);
+});
+
+test("desktop account menu implements the ARIA menu button keyboard model", async () => {
+  const sidebar = await source("desktop/src/components/AppSidebar.vue");
+
+  assert.match(sidebar, /nextTick/);
+  assert.match(sidebar, /id="account-menu-trigger"/);
+  assert.match(sidebar, /@click="toggleMenu"/);
+  assert.match(sidebar, /@keydown="handleTriggerKeydown"/);
+  assert.match(sidebar, /aria-labelledby="account-menu-trigger"/);
+  assert.match(sidebar, /role="menu"[\s\S]{0,160}@keydown="handleMenuKeydown"/);
+  assert.match(sidebar, /querySelectorAll<HTMLElement>\('\[role="menuitem"\]'\)/);
+  assert.match(sidebar, /async function openMenu[\s\S]{0,180}await nextTick\(\)/);
+  assert.match(sidebar, /items\[0\]\?\.focus\(\)/);
+  assert.match(sidebar, /items\[items\.length - 1\]\?\.focus\(\)/);
+  assert.match(sidebar, /event\.key === "ArrowDown"[\s\S]{0,160}openMenu\("first"\)/);
+  assert.match(sidebar, /event\.key === "ArrowUp"[\s\S]{0,160}openMenu\("last"\)/);
+  assert.match(sidebar, /case "ArrowDown":/);
+  assert.match(sidebar, /case "ArrowUp":/);
+  assert.match(sidebar, /case "Home":/);
+  assert.match(sidebar, /case "End":/);
+  assert.match(sidebar, /event\.key === "Tab"\) return/);
+  assert.match(sidebar, /event\.key === "Escape"[\s\S]{0,120}closeMenu\(\);\s*accountTrigger\.value\?\.focus\(\)/);
+  assert.match(sidebar, /@focusout="closeOnMenuFocusOut"/);
+});
+
+test("desktop account trigger announces sync state once and shows attention count visually", async () => {
+  const sidebar = await source("desktop/src/components/AppSidebar.vue");
+
+  assert.match(sidebar, /const attentionBadge = computed/);
+  assert.match(sidebar, /props\.status\.indicator !== "attention" \|\| props\.status\.issueCount <= 0/);
+  assert.match(sidebar, /Math\.min\(props\.status\.issueCount, 99\)/);
+  assert.match(sidebar, /"99\+"/);
+  assert.match(sidebar, /sync\.attentionWorkspaceCount[\s\S]{0,120}replace\("\{count\}", String\(props\.status\.issueCount\)\)/);
+  assert.match(sidebar, /const accountMenuAriaLabel = computed[\s\S]{0,180}nav\.accountMenu[\s\S]{0,180}props\.username/);
+  assert.match(sidebar, /:aria-label="accountMenuAriaLabel"/);
+  assert.match(sidebar, /v-if="attentionBadge"[\s\S]{0,120}aria-hidden="true"[\s\S]{0,120}\{\{ attentionBadge \}\}/);
+  assert.match(sidebar, /class="account-status-indicator"[\s\S]{0,180}aria-hidden="true"/);
+  assert.doesNotMatch(sidebar, /class="account-status-indicator"[\s\S]{0,180}role="img"/);
 });
 
 test("desktop workspace banner exposes polite retry and details actions", async () => {
@@ -61,6 +103,8 @@ test("desktop workspace banner exposes polite retry and details actions", async 
   assert.match(banner, /retry: \[\]/);
   assert.match(banner, /openDetails: \[\]/);
   assert.match(banner, /status\.issueCount > 0/);
+  assert.match(banner, /@click="emit\('retry'\)"/);
+  assert.match(banner, /@click="emit\('openDetails'\)"/);
 });
 
 test("desktop toast teleports an accessible status message", async () => {
