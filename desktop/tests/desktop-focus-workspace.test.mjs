@@ -54,6 +54,9 @@ test("desktop account menu closes through its own interaction boundary", async (
   assert.match(sidebar, /function syncNow\(\): void \{\s*closeMenu\(\);\s*emit\("syncNow"\)/);
   assert.match(sidebar, /function openSyncDetails\(\): void \{\s*closeMenu\(\);\s*emit\("openSyncDetails"\)/);
   assert.match(sidebar, /function logout\(\): void \{\s*closeMenu\(\);\s*emit\("logout"\)/);
+  assert.match(sidebar, /@click="syncNow"/);
+  assert.match(sidebar, /@click="openSyncDetails"/);
+  assert.match(sidebar, /@click="logout"/);
 });
 
 test("desktop account menu implements the ARIA menu button keyboard model", async () => {
