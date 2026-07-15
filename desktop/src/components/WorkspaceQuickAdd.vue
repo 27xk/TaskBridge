@@ -45,7 +45,12 @@ defineExpose({ clear, focus });
       :aria-label="settingsStore.t('task.quickAdd')"
       :placeholder="settingsStore.t('task.quickAdd')"
     />
-    <button type="submit" :disabled="disabled" :aria-label="settingsStore.t('task.quickAdd')">
+    <button
+      type="submit"
+      :disabled="disabled"
+      :title="settingsStore.t('task.quickAdd')"
+      :aria-label="settingsStore.t('task.quickAdd')"
+    >
       <Plus aria-hidden="true" />
     </button>
     <button
