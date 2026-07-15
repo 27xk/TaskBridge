@@ -141,6 +141,41 @@ test("desktop focus workspace copy is complete in Chinese and English", async ()
   }
 });
 
+test("today view integrates reliable quick add and save error feedback", async () => {
+  const today = await source("desktop/src/views/TodayView.vue");
+  const quickAddMatch = today.match(/async function quickAddTask\(title: string\): Promise<void> \{([\s\S]*?)\n\}/);
+  const saveMatch = today.match(/async function save\(draft: TaskDraft\): Promise<void> \{([\s\S]*?)\n\}/);
+
+  assert.match(today, /import AppToast from "\.\.\/components\/AppToast\.vue"/);
+  assert.match(today, /import WorkspaceQuickAdd from "\.\.\/components\/WorkspaceQuickAdd\.vue"/);
+  assert.match(today, /import \{ todayLocalDate \} from "\.\.\/\.\.\/shared\/quick-add-parser"/);
+  assert.match(today, /interface WorkspaceQuickAddHandle \{\s*clear\(submittedTitle: string\): boolean;\s*focus\(\): void;\s*\}/);
+  assert.match(today, /const quickAddRef = useTemplateRef<WorkspaceQuickAddHandle>\("quickAdd"\)/);
+  assert.ok(today.indexOf("<WorkspaceQuickAdd") < today.indexOf('class="task-list today-task-list"'));
+  assert.doesNotMatch(today, /TaskSyncHealthBar|taskSyncHealth|showTaskSyncHealth|diagnosticSyncIssueCount|taskRecordSyncIssueCount|useSyncStore|action-feedback|eyebrow/);
+
+  assert.ok(quickAddMatch, "quickAddTask must be declared");
+  assert.match(quickAddMatch[1], /if \(isQuickAdding\.value\) return;\s*isQuickAdding\.value = true;\s*quickAddError\.value = "";/);
+  assert.match(quickAddMatch[1], /await taskStore\.addTask\(\{[\s\S]*?title,[\s\S]*?listType: "today",[\s\S]*?plannedDate: todayLocalDate\(taskStore\.timelineNow, settingsStore\.displayTimeZone\),?[\s\S]*?\}\)/);
+  assert.match(quickAddMatch[1], /quickAddRef\.value\?\.clear\(title\);[\s\S]*?showNotice\(settingsStore\.t\("task\.feedbackSaved"\)\);[\s\S]*?quickAddRef\.value\?\.focus\(\)/);
+  assert.match(quickAddMatch[1], /catch \{\s*quickAddError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
+  assert.match(quickAddMatch[1], /finally \{\s*isQuickAdding\.value = false;\s*\}/);
+  assert.doesNotMatch(quickAddMatch[1].match(/catch \{([\s\S]*?)\n\s*\}/)?.[1] ?? "", /clear\(/);
+
+  assert.match(today, /<WorkspaceQuickAdd[\s\S]{0,320}:disabled="isQuickAdding"[\s\S]{0,320}@submit="quickAddTask"[\s\S]{0,320}@open-editor="openCreate"/);
+  assert.match(today, /quickAddError[\s\S]{0,180}class="inline-error quick-add-error"[\s\S]{0,120}role="alert"[\s\S]{0,120}aria-live="assertive"/);
+  assert.match(today, /editorSaveError[\s\S]{0,180}class="inline-error"[\s\S]{0,120}role="alert"[\s\S]{0,120}aria-live="assertive"/);
+  assert.match(today, /<AppToast :message="notice" \/>/);
+
+  assert.ok(saveMatch, "save must be declared");
+  assert.match(saveMatch[1], /editorSaveError\.value = "";/);
+  assert.match(saveMatch[1], /try \{[\s\S]*?editorOpen\.value = false;[\s\S]*?editingTask\.value = null;[\s\S]*?setEditorDirty\(false\);/);
+  assert.match(saveMatch[1], /catch \{\s*editorSaveError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
+  assert.doesNotMatch(saveMatch[1].match(/catch \{([\s\S]*?)\n\s*\}/)?.[1] ?? "", /editorOpen\.value = false|editingTask\.value = null|setEditorDirty\(false\)/);
+  assert.match(today, /function openCreate\(\): void \{\s*editorSaveError\.value = "";/);
+  assert.match(today, /function openEdit\(task: TaskRecord\): void \{\s*editorSaveError\.value = "";/);
+});
+
 test("workspace quick add preserves input until parent confirms success", async () => {
   const quickAdd = await source("desktop/src/components/WorkspaceQuickAdd.vue");
   const submitMatch = quickAdd.match(
