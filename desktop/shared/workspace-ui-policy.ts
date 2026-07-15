@@ -25,22 +25,27 @@ export function deriveWorkspaceStatus(
     return { indicator: "ready", banner: "none", issueCount: 0 };
   }
 
-  const issueCount = diagnostics.pendingQueueCount
-    + diagnostics.exhaustedQueueCount
+  const actionableIssueCount = diagnostics.exhaustedQueueCount
     + diagnostics.failedCount
     + diagnostics.conflictCount;
-  const hasDiagnosticIssue = diagnostics.exhaustedQueueCount > 0
-    || diagnostics.failedCount > 0
-    || diagnostics.conflictCount > 0;
+  const hasDiagnosticIssue = actionableIssueCount > 0;
 
   if (status === "error" || hasDiagnosticIssue) {
-    return { indicator: "attention", banner: "attention", issueCount };
+    return {
+      indicator: "attention",
+      banner: "attention",
+      issueCount: actionableIssueCount,
+    };
   }
   if (status === "offline") {
-    return { indicator: "offline", banner: "offline", issueCount };
+    return {
+      indicator: "offline",
+      banner: "offline",
+      issueCount: diagnostics.pendingQueueCount,
+    };
   }
   if (status === "syncing") {
-    return { indicator: "working", banner: "none", issueCount };
+    return { indicator: "working", banner: "none", issueCount: 0 };
   }
-  return { indicator: "ready", banner: "none", issueCount };
+  return { indicator: "ready", banner: "none", issueCount: 0 };
 }

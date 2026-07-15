@@ -76,6 +76,35 @@ describe("workspace status presentation", () => {
     });
   });
 
+  for (const diagnostic of [
+    "exhaustedQueueCount",
+    "failedCount",
+    "conflictCount",
+  ]) {
+    test(`treats ${diagnostic} as an actionable sync issue`, () => {
+      assert.deepEqual(deriveWorkspaceStatus("synced", {
+        ...zeroDiagnostics,
+        [diagnostic]: 1,
+      }), {
+        indicator: "attention",
+        banner: "attention",
+        issueCount: 1,
+      });
+    });
+  }
+
+  test("excludes pending work from the attention issue count", () => {
+    assert.deepEqual(deriveWorkspaceStatus("synced", {
+      ...zeroDiagnostics,
+      pendingQueueCount: 5,
+      failedCount: 1,
+    }), {
+      indicator: "attention",
+      banner: "attention",
+      issueCount: 1,
+    });
+  });
+
   test("does not escalate a synced pending queue to an alert banner", () => {
     assert.deepEqual(deriveWorkspaceStatus("synced", {
       ...zeroDiagnostics,
@@ -83,7 +112,7 @@ describe("workspace status presentation", () => {
     }), {
       indicator: "ready",
       banner: "none",
-      issueCount: 2,
+      issueCount: 0,
     });
   });
 });
