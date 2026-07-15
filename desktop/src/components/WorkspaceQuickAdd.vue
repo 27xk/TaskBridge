@@ -23,8 +23,10 @@ function submit(): void {
   emit("submit", trimmedTitle);
 }
 
-function clear(): void {
+function clear(submittedTitle: string): boolean {
+  if (title.value.trim() !== submittedTitle.trim()) return false;
   title.value = "";
+  return true;
 }
 
 function focus(): void {

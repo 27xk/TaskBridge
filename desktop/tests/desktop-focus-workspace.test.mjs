@@ -144,7 +144,7 @@ test("desktop focus workspace copy is complete in Chinese and English", async ()
 test("workspace quick add preserves input until parent confirms success", async () => {
   const quickAdd = await source("desktop/src/components/WorkspaceQuickAdd.vue");
   const submitMatch = quickAdd.match(
-    /function submit\(\): void \{([\s\S]*?)\n\}(?=\n\nfunction clear\(\): void \{)/,
+    /function submit\(\): void \{([\s\S]*?)\n\}(?=\n\nfunction clear\()/,
   );
 
   assert.match(quickAdd, /<form class="workspace-quick-add" @submit\.prevent="submit">/);
@@ -155,20 +155,30 @@ test("workspace quick add preserves input until parent confirms success", async 
   assert.doesNotMatch(submitMatch[1], /title\.value\s*=\s*["']{2}/);
   assert.doesNotMatch(submitMatch[1], /\bclear\s*\(/);
 
-  assert.match(quickAdd, /function clear\(\): void \{\s*title\.value = ""/);
+  const clearMatch = quickAdd.match(
+    /function clear\(submittedTitle: string\): boolean \{([\s\S]*?)\n\}(?=\n\nfunction focus\(\): void \{)/,
+  );
+  assert.ok(clearMatch, "clear must accept the submitted title and report whether it cleared");
+  assert.match(
+    clearMatch[1],
+    /if \(title\.value\.trim\(\) !== submittedTitle\.trim\(\)\) return false/,
+  );
+  assert.match(clearMatch[1], /title\.value = "";\s*return true;/);
   assert.match(quickAdd, /function focus\(\): void \{\s*input\.value\?\.focus\(\)/);
   assert.match(quickAdd, /defineExpose\(\{ clear, focus \}\)/);
 
   assert.match(quickAdd, /maxlength="120"/);
-  assert.match(quickAdd, /:disabled="disabled"/);
+  assert.match(quickAdd, /<input[\s\S]{0,240}:disabled="disabled"/);
   assert.match(quickAdd, /:aria-label="settingsStore\.t\('task\.quickAdd'\)"/);
   assert.match(quickAdd, /:placeholder="settingsStore\.t\('task\.quickAdd'\)"/);
 
   assert.match(quickAdd, /import \{ Plus, SlidersHorizontal \} from "lucide-vue-next"/);
   assert.match(quickAdd, /<Plus aria-hidden="true" \/>/);
   assert.match(quickAdd, /<SlidersHorizontal aria-hidden="true" \/>/);
+  assert.match(quickAdd, /<button[\s\S]{0,160}type="submit"[\s\S]{0,160}:disabled="disabled"/);
   assert.match(quickAdd, /<button[\s\S]{0,160}type="submit"[\s\S]{0,160}:aria-label="settingsStore\.t\('task\.quickAdd'\)"/);
   assert.match(quickAdd, /<button[\s\S]{0,160}type="submit"[\s\S]{0,160}:title="settingsStore\.t\('task\.quickAdd'\)"/);
+  assert.match(quickAdd, /<button[\s\S]{0,160}type="button"[\s\S]{0,160}:disabled="disabled"/);
   assert.match(quickAdd, /:aria-label="settingsStore\.t\('task\.quickAddMore'\)"/);
   assert.match(quickAdd, /:title="settingsStore\.t\('task\.quickAddMore'\)"/);
   assert.match(quickAdd, /@click="emit\('openEditor'\)"/);
