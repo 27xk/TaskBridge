@@ -74,6 +74,13 @@ export const useTaskStore = defineStore("task", () => {
     }
   }
 
+  function resetWorkspace(): void {
+    tasks.value = [];
+    todayTasks.value = [];
+    loading.value = false;
+    timelineNow.value = new Date();
+  }
+
   async function addTask(draft: TaskDraft): Promise<TaskRecord> {
     const parsed = parseQuickTask(draft.title, new Date(), settingsStore.displayTimeZone);
     const dueTime = draft.dueTime || parsed.dueTime;
@@ -435,6 +442,7 @@ export const useTaskStore = defineStore("task", () => {
     projects,
     tags,
     timelineNow,
+    resetWorkspace,
     load,
     addTask,
     updateTask,
