@@ -32,7 +32,7 @@ const emit = defineEmits<{
 
 const settingsStore = useSettingsStore();
 const menuOpen = shallowRef(false);
-const sidebarRoot = useTemplateRef<HTMLElement>("sidebarRoot");
+const accountMenuRoot = useTemplateRef<HTMLElement>("accountMenuRoot");
 const accountTrigger = useTemplateRef<HTMLButtonElement>("accountTrigger");
 const statusTitle = computed(() => {
   const key = {
@@ -90,7 +90,7 @@ function logout(): void {
 
 function closeOnOutsidePointer(event: PointerEvent): void {
   if (!menuOpen.value) return;
-  if (event.target instanceof Node && !sidebarRoot.value?.contains(event.target)) {
+  if (event.target instanceof Node && !accountMenuRoot.value?.contains(event.target)) {
     closeMenu();
   }
 }
@@ -108,7 +108,7 @@ function closeMenu(): void {
 </script>
 
 <template>
-  <aside ref="sidebarRoot" class="sidebar app-sidebar" :aria-label="settingsStore.t('nav.label')">
+  <aside class="sidebar app-sidebar" :aria-label="settingsStore.t('nav.label')">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">TB</span>
       <span class="brand-name">TaskBridge</span>
@@ -150,7 +150,7 @@ function closeMenu(): void {
       </button>
     </nav>
 
-    <div class="sidebar-footer account-menu">
+    <div ref="accountMenuRoot" class="sidebar-footer account-menu">
       <button
         ref="accountTrigger"
         type="button"

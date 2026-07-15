@@ -40,6 +40,19 @@ test("desktop sidebar exposes three accessible navigation entries and one accoun
   assert.match(sidebar, /emit\("navigate", "settings"\)/);
 });
 
+test("desktop account menu closes through its own interaction boundary", async () => {
+  const sidebar = await source("desktop/src/components/AppSidebar.vue");
+
+  assert.match(sidebar, /const accountMenuRoot = useTemplateRef<HTMLElement>\("accountMenuRoot"\)/);
+  assert.match(sidebar, /<div ref="accountMenuRoot" class="sidebar-footer account-menu">/);
+  assert.match(sidebar, /!accountMenuRoot\.value\?\.contains\(event\.target\)/);
+  assert.doesNotMatch(sidebar, /sidebarRoot/);
+  assert.match(sidebar, /function syncNow\(\): void \{\s*closeMenu\(\);\s*emit\("syncNow"\)/);
+  assert.match(sidebar, /function openSyncDetails\(\): void \{\s*closeMenu\(\);\s*emit\("openSyncDetails"\)/);
+  assert.match(sidebar, /function logout\(\): void \{\s*closeMenu\(\);\s*emit\("logout"\)/);
+  assert.match(sidebar, /event\.key !== "Escape"[\s\S]{0,120}closeMenu\(\);\s*accountTrigger\.value\?\.focus\(\)/);
+});
+
 test("desktop workspace banner exposes polite retry and details actions", async () => {
   const banner = await source("desktop/src/components/WorkspaceStatusBanner.vue");
 
