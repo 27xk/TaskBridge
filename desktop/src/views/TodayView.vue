@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useTemplateRef } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef } from "vue";
 
 import AppToast from "../components/AppToast.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
@@ -115,7 +115,6 @@ async function quickAddTask(title: string): Promise<void> {
   if (isQuickAdding.value) return;
   isQuickAdding.value = true;
   quickAddError.value = "";
-  let shouldFocusQuickAdd = false;
   try {
     await taskStore.addTask({
       title,
@@ -124,13 +123,10 @@ async function quickAddTask(title: string): Promise<void> {
     });
     quickAddRef.value?.clear(title);
     showNotice(settingsStore.t("task.feedbackSaved"));
-    shouldFocusQuickAdd = true;
   } catch {
     quickAddError.value = settingsStore.t("task.saveFailed");
   } finally {
     isQuickAdding.value = false;
-  }
-  if (shouldFocusQuickAdd) {
     await nextTick();
     quickAddRef.value?.focus();
   }
@@ -171,6 +167,10 @@ function showNotice(message: string): void {
   }, 1800);
 }
 
+onBeforeUnmount(() => {
+  if (noticeTimer !== undefined) window.clearTimeout(noticeTimer);
+});
+
 </script>
 
 <template>
@@ -186,10 +186,12 @@ function showNotice(message: string): void {
     <WorkspaceQuickAdd
       ref="quickAdd"
       :disabled="isQuickAdding"
+      :invalid="Boolean(quickAddError)"
+      :error-id="'today-quick-add-error'"
       @submit="quickAddTask"
       @open-editor="openCreate"
     />
-    <p v-if="quickAddError" class="inline-error quick-add-error" role="alert" aria-live="assertive">
+    <p id="today-quick-add-error" v-if="quickAddError" class="inline-error quick-add-error" role="alert" aria-live="assertive">
       {{ quickAddError }}
     </p>
 
@@ -203,13 +205,12 @@ function showNotice(message: string): void {
           :title="settingsStore.t('task.todayTitle')"
           :create-preset="editingTask ? 'default' : 'today'"
           :is-saving="isSaving"
+          :error-message="editorSaveError"
+          error-id="today-editor-save-error"
           @save="save"
           @cancel="closeEditor"
           @dirty-change="setEditorDirty"
         />
-        <p v-if="editorSaveError" class="inline-error" role="alert" aria-live="assertive">
-          {{ editorSaveError }}
-        </p>
     </EditorDrawer>
 
     <div class="today-workspace">

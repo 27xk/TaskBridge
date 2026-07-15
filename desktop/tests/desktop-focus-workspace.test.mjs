@@ -159,13 +159,20 @@ test("today view integrates reliable quick add and save error feedback", async (
   assert.match(quickAddMatch[1], /await taskStore\.addTask\(\{[\s\S]*?title,[\s\S]*?listType: "today",[\s\S]*?plannedDate: todayLocalDate\(taskStore\.timelineNow, settingsStore\.displayTimeZone\),?[\s\S]*?\}\)/);
   assert.match(quickAddMatch[1], /quickAddRef\.value\?\.clear\(title\);[\s\S]*?showNotice\(settingsStore\.t\("task\.feedbackSaved"\)\);[\s\S]*?quickAddRef\.value\?\.focus\(\)/);
   assert.match(quickAddMatch[1], /catch \{\s*quickAddError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
-  assert.match(quickAddMatch[1], /finally \{\s*isQuickAdding\.value = false;\s*\}/);
-  assert.doesNotMatch(quickAddMatch[1].match(/catch \{([\s\S]*?)\n\s*\}/)?.[1] ?? "", /clear\(/);
+  const quickAddFinally = quickAddMatch[1].match(/finally \{([\s\S]*?)\n  \}/);
+  assert.ok(quickAddFinally, "quick add must release busy state in finally");
+  assert.match(quickAddFinally[1], /isQuickAdding\.value = false;\s*await nextTick\(\);\s*quickAddRef\.value\?\.focus\(\);/);
+  assert.doesNotMatch(quickAddMatch[1], /shouldFocusQuickAdd/);
+  assert.doesNotMatch(quickAddMatch[1].match(/catch \{([\s\S]*?)\n  \}/)?.[1] ?? "", /clear\(/);
+  assert.doesNotMatch(quickAddFinally[1], /clear\(/);
 
-  assert.match(today, /<WorkspaceQuickAdd[\s\S]{0,320}:disabled="isQuickAdding"[\s\S]{0,320}@submit="quickAddTask"[\s\S]{0,320}@open-editor="openCreate"/);
-  assert.match(today, /quickAddError[\s\S]{0,180}class="inline-error quick-add-error"[\s\S]{0,120}role="alert"[\s\S]{0,120}aria-live="assertive"/);
-  assert.match(today, /editorSaveError[\s\S]{0,180}class="inline-error"[\s\S]{0,120}role="alert"[\s\S]{0,120}aria-live="assertive"/);
+  assert.match(today, /<WorkspaceQuickAdd[\s\S]{0,320}:disabled="isQuickAdding"[\s\S]{0,320}:invalid="Boolean\(quickAddError\)"[\s\S]{0,320}:error-id="'today-quick-add-error'"[\s\S]{0,320}@submit="quickAddTask"[\s\S]{0,320}@open-editor="openCreate"/);
+  assert.match(today, /id="today-quick-add-error"[\s\S]{0,180}class="inline-error quick-add-error"[\s\S]{0,120}role="alert"[\s\S]{0,120}aria-live="assertive"/);
+  assert.match(today, /<TaskEditor[\s\S]{0,320}:error-message="editorSaveError"[\s\S]{0,160}error-id="today-editor-save-error"/);
+  assert.doesNotMatch(today, /<p v-if="editorSaveError"/);
   assert.match(today, /<AppToast :message="notice" \/>/);
+  assert.match(today, /import \{ computed, nextTick, onBeforeUnmount, ref, useTemplateRef \} from "vue"/);
+  assert.match(today, /onBeforeUnmount\(\(\) => \{\s*if \(noticeTimer !== undefined\) window\.clearTimeout\(noticeTimer\);\s*\}\)/);
 
   assert.ok(saveMatch, "save must be declared");
   assert.match(saveMatch[1], /editorSaveError\.value = "";/);
@@ -176,6 +183,18 @@ test("today view integrates reliable quick add and save error feedback", async (
   assert.match(today, /function openEdit\(task: TaskRecord\): void \{\s*editorSaveError\.value = "";/);
 });
 
+test("task editor associates save errors with its form and submit action", async () => {
+  const editor = await source("desktop/src/components/TaskEditor.vue");
+  const formActions = editor.match(/<div class="form-actions">([\s\S]*?)<\/div>/);
+
+  assert.match(editor, /errorMessage\?: string;\s*errorId\?: string;/);
+  assert.match(editor, /<form class="task-editor" :aria-describedby="errorMessage \? errorId : undefined" @submit\.prevent="submit">/);
+  assert.ok(formActions, "TaskEditor must render its form actions");
+  assert.match(formActions[1], /v-if="errorMessage"[\s\S]{0,160}:id="errorId"[\s\S]{0,160}class="form-message form-message-error task-editor-save-error"[\s\S]{0,120}role="alert"[\s\S]{0,120}aria-live="assertive"/);
+  assert.ok(formActions[1].indexOf('v-if="errorMessage"') < formActions[1].indexOf('type="button"'));
+  assert.match(formActions[1], /<button type="submit"[\s\S]{0,160}:aria-describedby="errorMessage \? errorId : undefined"/);
+});
+
 test("workspace quick add preserves input until parent confirms success", async () => {
   const quickAdd = await source("desktop/src/components/WorkspaceQuickAdd.vue");
   const submitMatch = quickAdd.match(
@@ -183,6 +202,7 @@ test("workspace quick add preserves input until parent confirms success", async 
   );
 
   assert.match(quickAdd, /<form class="workspace-quick-add" @submit\.prevent="submit">/);
+  assert.match(quickAdd, /invalid\?: boolean;\s*errorId\?: string;/);
   assert.ok(submitMatch, "submit function must be declared");
   assert.match(submitMatch[1], /const trimmedTitle = title\.value\.trim\(\)/);
   assert.match(submitMatch[1], /if \(!trimmedTitle\) return/);
@@ -204,6 +224,8 @@ test("workspace quick add preserves input until parent confirms success", async 
 
   assert.match(quickAdd, /maxlength="120"/);
   assert.match(quickAdd, /<input[\s\S]{0,240}:disabled="disabled"/);
+  assert.match(quickAdd, /:aria-invalid="invalid \|\| undefined"/);
+  assert.match(quickAdd, /:aria-errormessage="invalid \? errorId : undefined"/);
   assert.match(quickAdd, /:aria-label="settingsStore\.t\('task\.quickAdd'\)"/);
   assert.match(quickAdd, /:placeholder="settingsStore\.t\('task\.quickAdd'\)"/);
 

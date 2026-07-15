@@ -6,6 +6,8 @@ import { useSettingsStore } from "../stores/settings";
 
 defineProps<{
   disabled?: boolean;
+  invalid?: boolean;
+  errorId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -44,6 +46,8 @@ defineExpose({ clear, focus });
       type="text"
       maxlength="120"
       :disabled="disabled"
+      :aria-invalid="invalid || undefined"
+      :aria-errormessage="invalid ? errorId : undefined"
       :aria-label="settingsStore.t('task.quickAdd')"
       :placeholder="settingsStore.t('task.quickAdd')"
     />
