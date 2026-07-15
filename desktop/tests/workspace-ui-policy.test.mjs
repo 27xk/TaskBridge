@@ -23,6 +23,19 @@ describe("workspace status presentation", () => {
     });
   });
 
+  test("keeps an idle workspace quiet while diagnostics initialize", () => {
+    assert.deepEqual(deriveWorkspaceStatus("idle", {
+      pendingQueueCount: 2,
+      exhaustedQueueCount: 1,
+      failedCount: 1,
+      conflictCount: 1,
+    }), {
+      indicator: "ready",
+      banner: "none",
+      issueCount: 0,
+    });
+  });
+
   test("shows syncing as working without a main-area banner", () => {
     assert.deepEqual(deriveWorkspaceStatus("syncing", zeroDiagnostics), {
       indicator: "working",

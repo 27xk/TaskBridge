@@ -21,6 +21,10 @@ export function deriveWorkspaceStatus(
   status: WorkspaceSyncStatus,
   diagnostics: WorkspaceDiagnosticsSummary,
 ): WorkspaceStatusPresentation {
+  if (status === "idle") {
+    return { indicator: "ready", banner: "none", issueCount: 0 };
+  }
+
   const issueCount = diagnostics.pendingQueueCount
     + diagnostics.exhaustedQueueCount
     + diagnostics.failedCount
