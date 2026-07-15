@@ -140,3 +140,35 @@ test("desktop focus workspace copy is complete in Chinese and English", async ()
     assert.match(i18n, entry, `${key} must provide zh-CN and en-US copy`);
   }
 });
+
+test("workspace quick add preserves input until parent confirms success", async () => {
+  const quickAdd = await source("desktop/src/components/WorkspaceQuickAdd.vue");
+  const submitMatch = quickAdd.match(/function submit\(\): void \{([\s\S]*?)\n\}/);
+
+  assert.match(quickAdd, /<form class="workspace-quick-add" @submit\.prevent="submit">/);
+  assert.ok(submitMatch, "submit function must be declared");
+  assert.match(submitMatch[1], /const trimmedTitle = title\.value\.trim\(\)/);
+  assert.match(submitMatch[1], /if \(!trimmedTitle\) return/);
+  assert.match(submitMatch[1], /emit\("submit", trimmedTitle\)/);
+  assert.doesNotMatch(submitMatch[1], /title\.value\s*=\s*["']{2}/);
+
+  assert.match(quickAdd, /function clear\(\): void \{\s*title\.value = ""/);
+  assert.match(quickAdd, /function focus\(\): void \{\s*input\.value\?\.focus\(\)/);
+  assert.match(quickAdd, /defineExpose\(\{ clear, focus \}\)/);
+
+  assert.match(quickAdd, /maxlength="120"/);
+  assert.match(quickAdd, /:disabled="disabled"/);
+  assert.match(quickAdd, /:aria-label="settingsStore\.t\('task\.quickAdd'\)"/);
+  assert.match(quickAdd, /:placeholder="settingsStore\.t\('task\.quickAdd'\)"/);
+
+  assert.match(quickAdd, /import \{ Plus, SlidersHorizontal \} from "lucide-vue-next"/);
+  assert.match(quickAdd, /<Plus aria-hidden="true" \/>/);
+  assert.match(quickAdd, /<SlidersHorizontal aria-hidden="true" \/>/);
+  assert.match(quickAdd, /<button[\s\S]{0,160}type="submit"[\s\S]{0,160}:aria-label="settingsStore\.t\('task\.quickAdd'\)"/);
+  assert.match(quickAdd, /:aria-label="settingsStore\.t\('task\.quickAddMore'\)"/);
+  assert.match(quickAdd, /:title="settingsStore\.t\('task\.quickAddMore'\)"/);
+  assert.match(quickAdd, /@click="emit\('openEditor'\)"/);
+  assert.doesNotMatch(quickAdd, /<svg\b/i);
+  assert.doesNotMatch(quickAdd, />\s*\+\s*</);
+  assert.doesNotMatch(quickAdd, /(?:Press|按下|Enter|回车)/i);
+});
