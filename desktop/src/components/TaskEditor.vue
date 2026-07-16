@@ -308,12 +308,13 @@ function hasAdvancedMetadataFields(task: TaskRecord): boolean {
 </script>
 
 <template>
-  <form class="task-editor" :aria-describedby="errorMessage ? errorId : undefined" @submit.prevent="submit">
+  <form class="task-editor" :aria-busy="isSaving || undefined" :aria-describedby="errorMessage ? errorId : undefined" @submit.prevent="submit">
     <header class="panel-header">
       <h2>{{ title ?? (task ? settingsStore.t("task.edit") : settingsStore.t("task.add")) }}</h2>
       <button type="button" class="ghost-button" :disabled="isSaving" @click="$emit('cancel')">{{ settingsStore.t("task.close") }}</button>
     </header>
 
+    <fieldset class="task-editor-fields" :disabled="isSaving">
     <label>
       <span>{{ settingsStore.t("task.title") }}</span>
       <input
@@ -446,6 +447,7 @@ function hasAdvancedMetadataFields(task: TaskRecord): boolean {
         <input v-model="form.templateName" type="text" maxlength="128" />
       </label>
     </section>
+    </fieldset>
 
     <div class="form-actions">
       <p
@@ -462,3 +464,14 @@ function hasAdvancedMetadataFields(task: TaskRecord): boolean {
     </div>
   </form>
 </template>
+
+<style scoped>
+fieldset.task-editor-fields {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+</style>

@@ -157,7 +157,7 @@ test("today view integrates reliable quick add and save error feedback", async (
   assert.ok(quickAddMatch, "quickAddTask must be declared");
   assert.match(quickAddMatch[1], /if \(isQuickAdding\.value\) return;\s*isQuickAdding\.value = true;\s*quickAddError\.value = "";/);
   assert.match(quickAddMatch[1], /await taskStore\.addTask\(\{[\s\S]*?title,[\s\S]*?listType: "today",[\s\S]*?plannedDate: todayLocalDate\(taskStore\.timelineNow, settingsStore\.displayTimeZone\),?[\s\S]*?\}\)/);
-  assert.match(quickAddMatch[1], /quickAddRef\.value\?\.clear\(title\);[\s\S]*?showNotice\(settingsStore\.t\("task\.feedbackSaved"\)\);[\s\S]*?quickAddRef\.value\?\.focus\(\)/);
+  assert.match(quickAddMatch[1], /await taskStore\.addTask\([\s\S]*?quickAddRef\.value\?\.clear\(title\);[\s\S]*?showNotice\(settingsStore\.t\("task\.feedbackSaved"\)\);/);
   assert.match(quickAddMatch[1], /catch \{\s*quickAddError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
   const quickAddFinally = quickAddMatch[1].match(/finally \{([\s\S]*?)\n  \}/);
   assert.ok(quickAddFinally, "quick add must release busy state in finally");
@@ -185,14 +185,27 @@ test("today view integrates reliable quick add and save error feedback", async (
 
 test("task editor associates save errors with its form and submit action", async () => {
   const editor = await source("desktop/src/components/TaskEditor.vue");
+  const formMatch = editor.match(/<form class="task-editor"[\s\S]*?<\/form>/);
+  const headerMatch = editor.match(/<header class="panel-header">([\s\S]*?)<\/header>/);
+  const fieldsetMatch = editor.match(/<fieldset class="task-editor-fields" :disabled="isSaving">([\s\S]*?)<\/fieldset>/);
   const formActions = editor.match(/<div class="form-actions">([\s\S]*?)<\/div>/);
 
   assert.match(editor, /errorMessage\?: string;\s*errorId\?: string;/);
-  assert.match(editor, /<form class="task-editor" :aria-describedby="errorMessage \? errorId : undefined" @submit\.prevent="submit">/);
+  assert.match(editor, /<form class="task-editor" :aria-busy="isSaving \|\| undefined" :aria-describedby="errorMessage \? errorId : undefined" @submit\.prevent="submit">/);
+  assert.ok(formMatch, "TaskEditor must render a form");
+  assert.ok(headerMatch, "TaskEditor must render its header");
+  assert.ok(fieldsetMatch, "TaskEditor must group editable controls in a disabled fieldset");
+  assert.ok(headerMatch.index < fieldsetMatch.index, "TaskEditor header must stay outside the disabled fieldset");
+  assert.ok(fieldsetMatch.index < formActions.index, "TaskEditor actions must stay outside the disabled fieldset");
+  assert.doesNotMatch(headerMatch[1], /<fieldset/);
+  assert.match(fieldsetMatch[1], /v-model="form\.title"/);
+  assert.match(fieldsetMatch[1], /id="task-editor-more-fields"/);
+  assert.doesNotMatch(formActions[1], /<fieldset/);
   assert.ok(formActions, "TaskEditor must render its form actions");
   assert.match(formActions[1], /v-if="errorMessage"[\s\S]{0,160}:id="errorId"[\s\S]{0,160}class="form-message form-message-error task-editor-save-error"[\s\S]{0,120}role="alert"[\s\S]{0,120}aria-live="assertive"/);
   assert.ok(formActions[1].indexOf('v-if="errorMessage"') < formActions[1].indexOf('type="button"'));
   assert.match(formActions[1], /<button type="submit"[\s\S]{0,160}:aria-describedby="errorMessage \? errorId : undefined"/);
+  assert.match(editor, /fieldset\.task-editor-fields \{\s*display: grid;\s*gap: 14px;\s*min-width: 0;\s*margin: 0;\s*padding: 0;\s*border: 0;\s*\}/);
 });
 
 test("workspace quick add preserves input until parent confirms success", async () => {
