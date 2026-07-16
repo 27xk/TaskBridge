@@ -366,12 +366,10 @@ function saveNotifiedReminderIds(): void {
         v-if="activeView === 'tasks'"
         :quick-add-signal="quickAddSignal"
         :open-task-request="openTaskRequest"
-        @open-settings="openSettingsSection('sync-recovery')"
         @editor-dirty-change="updateEditorDirty"
       />
       <TodayView
         v-else-if="activeView === 'today'"
-        @open-settings="openSettingsSection('sync-recovery')"
         @editor-dirty-change="updateEditorDirty"
       />
       <SettingsView

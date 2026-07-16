@@ -19,7 +19,6 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  openSettings: [];
   editorDirtyChange: [dirty: boolean];
 }>();
 
@@ -388,7 +387,10 @@ function showNotice(message: string, duration = SHORT_NOTICE_MS): void {
 }
 
 onBeforeUnmount(() => {
-  if (noticeTimer !== undefined) window.clearTimeout(noticeTimer);
+  if (noticeTimer !== undefined) {
+    window.clearTimeout(noticeTimer);
+    noticeTimer = undefined;
+  }
 });
 
 function matchesFilter(task: TaskRecord, mode: TaskFilter): boolean {

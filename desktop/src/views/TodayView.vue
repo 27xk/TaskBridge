@@ -22,7 +22,6 @@ interface WorkspaceQuickAddHandle {
 const taskStore = useTaskStore();
 const settingsStore = useSettingsStore();
 const emit = defineEmits<{
-  openSettings: [];
   editorDirtyChange: [dirty: boolean];
 }>();
 const editorOpen = ref(false);

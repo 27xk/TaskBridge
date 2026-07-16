@@ -12,6 +12,7 @@ const [
   desktopAppSource,
   desktopWorkspaceStatusBannerSource,
   desktopTodayViewSource,
+  desktopTaskViewSource,
   desktopLoginSource,
   desktopI18nSource,
   androidLoginSource,
@@ -29,6 +30,7 @@ const [
   readFile(resolve(desktopRoot, "src/App.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/WorkspaceStatusBanner.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/views/TodayView.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "src/views/TaskView.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/views/LoginView.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/i18n.ts"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/login/LoginScreen.kt"), "utf8"),
@@ -91,7 +93,12 @@ assert.match(webAppSource, /nodes\.testConnectionButton\.className = "secondary-
 assert.doesNotMatch(webAppSource, /nodes\.authSubmitButton\.className = isConnectionReadyForAuth/, "Web auth submit priority must not depend on a prior manual connection check");
 
 assert.match(webAppSource, /nodes\.taskSyncHealthBar\.hidden = tone === "ready"/, "Web task-list sync health must stay out of the way when sync is healthy");
-assert.doesNotMatch(desktopTodayViewSource, /TaskSyncHealthBar/, "Desktop Today view must not duplicate the app-level sync status banner");
+for (const [name, source] of [
+  ["Desktop all-tasks view", desktopTaskViewSource],
+  ["Desktop Today view", desktopTodayViewSource],
+]) {
+  assert.doesNotMatch(source, /TaskSyncHealthBar|showTaskSyncHealth/, `${name} must not duplicate the app-level sync status banner`);
+}
 assert.match(desktopAppSource, /v-if="workspaceStatus\.banner !== 'none'"/, "Desktop app must only show sync status when workspace attention is needed");
 assert.match(desktopWorkspaceStatusBannerSource, /aria-live="polite"/, "Desktop workspace status banner must announce sync status changes politely");
 

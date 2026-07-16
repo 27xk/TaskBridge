@@ -184,8 +184,15 @@ test("today view integrates reliable quick add and save error feedback", async (
 });
 
 test("all-tasks view centralizes save feedback and drops inline sync diagnostics", async () => {
-  const tasks = await source("desktop/src/views/TaskView.vue");
+  const [app, today, tasks] = await Promise.all([
+    source("desktop/src/App.vue"),
+    source("desktop/src/views/TodayView.vue"),
+    source("desktop/src/views/TaskView.vue"),
+  ]);
   const saveMatch = tasks.match(/async function save\(draft: TaskDraft\): Promise<void> \{([\s\S]*?)\n\}/);
+  const taskViewMount = app.match(/<TaskView[\s\S]*?\/>/);
+  const todayViewMount = app.match(/<TodayView[\s\S]*?\/>/);
+  const workspaceBannerMount = app.match(/<WorkspaceStatusBanner[\s\S]*?\/>/);
 
   assert.match(tasks, /import \{ computed, onBeforeUnmount, ref, watch \} from "vue"/);
   assert.match(tasks, /import AppToast from "\.\.\/components\/AppToast\.vue"/);
@@ -194,15 +201,29 @@ test("all-tasks view centralizes save feedback and drops inline sync diagnostics
   assert.match(tasks, /const editorSaveError = ref\(""\)/);
   assert.match(tasks, /<TaskEditor[\s\S]{0,320}:error-message="editorSaveError"[\s\S]{0,160}error-id="task-editor-save-error"/);
   assert.match(tasks, /<AppToast :message="notice" \/>/);
-  assert.match(tasks, /onBeforeUnmount\(\(\) => \{\s*if \(noticeTimer !== undefined\) window\.clearTimeout\(noticeTimer\);\s*\}\)/);
+  assert.doesNotMatch(tasks, /openSettings:\s*\[\]/);
+  assert.doesNotMatch(today, /openSettings:\s*\[\]/);
+  assert.ok(taskViewMount, "TaskView must be mounted by the app shell");
+  assert.ok(todayViewMount, "TodayView must be mounted by the app shell");
+  assert.ok(workspaceBannerMount, "WorkspaceStatusBanner must be mounted by the app shell");
+  assert.doesNotMatch(taskViewMount[0], /@open-settings/);
+  assert.doesNotMatch(todayViewMount[0], /@open-settings/);
+  assert.match(workspaceBannerMount[0], /@open-details="openSettingsSection\('sync-recovery'\)"/);
 
   assert.ok(saveMatch, "save must be declared");
   assert.match(saveMatch[1], /editorSaveError\.value = "";/);
-  assert.match(saveMatch[1], /try \{[\s\S]*?editorOpen\.value = false;[\s\S]*?editingTask\.value = null;[\s\S]*?(?:setEditorDirty\(false\)|editorDirty\.value = false);[\s\S]*?showNotice\(settingsStore\.t\("task\.feedbackSaved"\)\);/);
-  assert.match(saveMatch[1], /catch \{\s*editorSaveError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
-  const saveCatch = saveMatch[1].match(/catch \{([\s\S]*?)\n  \}/);
-  assert.ok(saveCatch, "save must handle persistence failures");
-  assert.doesNotMatch(saveCatch[1], /editorOpen\.value = false|editingTask\.value = null|setEditorDirty\(false\)|showNotice\(/);
+  const saveSections = saveMatch[1].match(/try \{([\s\S]*?)\n  \} catch \{([\s\S]*?)\n  \} finally \{([\s\S]*?)\n  \}/);
+  assert.ok(saveSections, "save must keep success, failure, and cleanup branches separate");
+  const [, saveTry, saveCatch, saveFinally] = saveSections;
+  assert.match(saveTry, /editorOpen\.value = false;\s*editingTask\.value = null;\s*setEditorDirty\(false\);\s*showNotice\(settingsStore\.t\("task\.feedbackSaved"\)\);/);
+  assert.match(saveCatch, /^\s*editorSaveError\.value = settingsStore\.t\("task\.saveFailed"\);\s*$/);
+  assert.match(saveFinally, /^\s*isSaving\.value = false;\s*$/);
+  for (const section of [saveCatch, saveFinally]) {
+    assert.doesNotMatch(section, /editorOpen\.value = false|editingTask\.value = null|setEditorDirty\(false\)|showNotice\(/);
+  }
+  const taskUnmount = tasks.match(/onBeforeUnmount\(\(\) => \{([\s\S]*?)\n\}\);/);
+  assert.ok(taskUnmount, "TaskView must clean up its notice timer when unmounted");
+  assert.match(taskUnmount[1], /^\s*if \(noticeTimer !== undefined\) \{\s*window\.clearTimeout\(noticeTimer\);\s*noticeTimer = undefined;\s*\}\s*$/);
   assert.match(tasks, /function openCreate\(\): void \{\s*editorSaveError\.value = "";/);
   assert.match(tasks, /function openEdit\(task: TaskRecord\): void \{\s*editorSaveError\.value = "";/);
 });
