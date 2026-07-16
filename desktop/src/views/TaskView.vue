@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 
+import AppToast from "../components/AppToast.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
+import EditorDrawer from "../components/EditorDrawer.vue";
 import TaskEditor from "../components/TaskEditor.vue";
 import TaskListSection from "../components/TaskListSection.vue";
-import TaskSyncHealthBar from "../components/TaskSyncHealthBar.vue";
 import { useConfirmDialog } from "../composables/useConfirmDialog";
 import { useSettingsStore } from "../stores/settings";
-import { useSyncStore } from "../stores/sync";
 import { useTaskStore, type TaskDraft } from "../stores/task";
 import { isCompletedStatus, isTaskOverdue, sortCompletedTasksByRecency } from "../utils/task-order";
 import { parseTaskBridgeDate, todayLocalDate } from "../../shared/quick-add-parser";
@@ -20,13 +20,15 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   openSettings: [];
+  editorDirtyChange: [dirty: boolean];
 }>();
 
 const taskStore = useTaskStore();
 const settingsStore = useSettingsStore();
-const syncStore = useSyncStore();
 const editorOpen = ref(false);
 const editorDirty = ref(false);
+const isSaving = ref(false);
+const editorSaveError = ref("");
 const editingTask = ref<TaskRecord | null>(null);
 const search = ref("");
 type TaskFilter = "all" | "inbox" | "today" | "overdue" | "week" | "high" | "completed" | "pending" | "conflict" | "templates" | "trash";
@@ -131,29 +133,12 @@ const emptyTaskStateText = computed(() => {
   if (filter.value === "today") return settingsStore.t("task.emptyToday");
   return settingsStore.t("task.empty");
 });
-const diagnosticSyncIssueCount = computed(
-  () =>
-    syncStore.diagnostics.pendingQueueCount +
-    syncStore.diagnostics.exhaustedQueueCount +
-    syncStore.diagnostics.failedCount +
-    syncStore.diagnostics.conflictCount,
-);
-const taskRecordSyncIssueCount = computed(() => taskStore.tasks.filter((task) => task.syncStatus !== "synced").length);
-const taskSyncIssueCount = computed(() => Math.max(diagnosticSyncIssueCount.value, taskRecordSyncIssueCount.value));
-const taskSyncHealthTone = computed<"ready" | "attention" | "unknown">(() => {
-  if (taskSyncIssueCount.value > 0 || syncStore.status === "error") return "attention";
-  if (syncStore.status === "offline" || syncStore.status === "idle") return "unknown";
-  return "ready";
-});
-const taskSyncHealthText = computed(() => {
-  if (taskSyncIssueCount.value > 0) {
-    return settingsStore.t("task.syncHealthNeedsReview").replace("{count}", String(taskSyncIssueCount.value));
-  }
-  if (syncStore.status === "offline" || syncStore.status === "idle") return settingsStore.t("task.syncHealthUnknown");
-  if (syncStore.status === "error") return settingsStore.t("task.syncHealthDegraded");
-  return settingsStore.t("task.syncHealthReady");
-});
 const editorCreatePreset = computed<"default" | "today">(() => (filter.value === "today" ? "today" : "default"));
+
+function setEditorDirty(dirty: boolean): void {
+  editorDirty.value = dirty;
+  emit("editorDirtyChange", dirty);
+}
 
 watch(
   () => props.quickAddSignal,
@@ -186,8 +171,9 @@ watch(
 );
 
 function openCreate(): void {
+  editorSaveError.value = "";
   editingTask.value = null;
-  editorDirty.value = false;
+  setEditorDirty(false);
   editorOpen.value = true;
 }
 
@@ -207,17 +193,15 @@ function handleEmptyStateAction(): void {
   resetTaskFilters();
 }
 
-function openSyncRecovery(): void {
-  emit("openSettings");
-}
-
 function openEdit(task: TaskRecord): void {
+  editorSaveError.value = "";
   editingTask.value = task;
-  editorDirty.value = false;
+  setEditorDirty(false);
   editorOpen.value = true;
 }
 
 async function closeEditor(): Promise<void> {
+  if (isSaving.value) return;
   if (
     editorDirty.value &&
     !(await requestConfirmation({
@@ -229,19 +213,28 @@ async function closeEditor(): Promise<void> {
   }
   editorOpen.value = false;
   editingTask.value = null;
-  editorDirty.value = false;
+  setEditorDirty(false);
 }
 
 async function save(draft: TaskDraft): Promise<void> {
-  if (editingTask.value) {
-    await taskStore.updateTask(editingTask.value, draft);
-  } else {
-    await taskStore.addTask(draft);
+  if (isSaving.value) return;
+  editorSaveError.value = "";
+  isSaving.value = true;
+  try {
+    if (editingTask.value) {
+      await taskStore.updateTask(editingTask.value, draft);
+    } else {
+      await taskStore.addTask(draft);
+    }
+    editorOpen.value = false;
+    editingTask.value = null;
+    setEditorDirty(false);
+    showNotice(settingsStore.t("task.feedbackSaved"));
+  } catch {
+    editorSaveError.value = settingsStore.t("task.saveFailed");
+  } finally {
+    isSaving.value = false;
   }
-  editorOpen.value = false;
-  editingTask.value = null;
-  editorDirty.value = false;
-  showNotice(settingsStore.t("task.feedbackSaved"));
 }
 
 async function completeTask(task: TaskRecord): Promise<void> {
@@ -394,6 +387,10 @@ function showNotice(message: string, duration = SHORT_NOTICE_MS): void {
   }, duration);
 }
 
+onBeforeUnmount(() => {
+  if (noticeTimer !== undefined) window.clearTimeout(noticeTimer);
+});
+
 function matchesFilter(task: TaskRecord, mode: TaskFilter): boolean {
   const today = todayLocalDate(taskStore.timelineNow, settingsStore.displayTimeZone);
   const taskDate = task.plannedDate ?? isoDate(task.dueTime);
@@ -492,14 +489,6 @@ function isoDate(value: string | null): string | null {
       </details>
     </div>
 
-    <TaskSyncHealthBar
-      :title="settingsStore.t('task.syncHealthTitle')"
-      :text="taskSyncHealthText"
-      :action-label="settingsStore.t('task.syncHealthAction')"
-      :tone="taskSyncHealthTone"
-      @open-details="openSyncRecovery"
-    />
-
     <div v-if="hasActiveFilters" class="active-filter-bar" aria-live="polite">
       <span class="active-filter-label">{{ settingsStore.t("task.currentFilters") }}</span>
       <div class="active-filter-chips">
@@ -533,20 +522,24 @@ function isoDate(value: string | null): string | null {
       </button>
     </div>
 
-    <div v-if="editorOpen" class="drawer-layer">
-      <button class="drawer-scrim" type="button" :aria-label="settingsStore.t('task.close')" @click="closeEditor"></button>
-      <aside class="side-panel">
+    <EditorDrawer
+      v-if="editorOpen"
+      :label="settingsStore.t(editingTask ? 'task.edit' : 'task.add')"
+      @close="closeEditor"
+    >
         <TaskEditor
           :task="editingTask"
           :create-preset="editorCreatePreset"
+          :is-saving="isSaving"
+          :error-message="editorSaveError"
+          error-id="task-editor-save-error"
           @save="save"
           @cancel="closeEditor"
-          @dirty-change="editorDirty = $event"
+          @dirty-change="setEditorDirty"
         />
-      </aside>
-    </div>
+    </EditorDrawer>
 
-    <p v-if="notice" class="action-feedback">{{ notice }}</p>
+    <AppToast :message="notice" />
 
     <div class="task-list">
       <template v-if="filter === 'trash'">

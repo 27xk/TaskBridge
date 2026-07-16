@@ -183,6 +183,30 @@ test("today view integrates reliable quick add and save error feedback", async (
   assert.match(today, /function openEdit\(task: TaskRecord\): void \{\s*editorSaveError\.value = "";/);
 });
 
+test("all-tasks view centralizes save feedback and drops inline sync diagnostics", async () => {
+  const tasks = await source("desktop/src/views/TaskView.vue");
+  const saveMatch = tasks.match(/async function save\(draft: TaskDraft\): Promise<void> \{([\s\S]*?)\n\}/);
+
+  assert.match(tasks, /import \{ computed, onBeforeUnmount, ref, watch \} from "vue"/);
+  assert.match(tasks, /import AppToast from "\.\.\/components\/AppToast\.vue"/);
+  assert.doesNotMatch(tasks, /TaskSyncHealthBar|showTaskSyncHealth|useSyncStore|action-feedback/);
+  assert.doesNotMatch(tasks, /diagnosticSyncIssueCount|taskRecordSyncIssueCount|taskSyncIssueCount|taskSyncHealthTone|taskSyncHealthText/);
+  assert.match(tasks, /const editorSaveError = ref\(""\)/);
+  assert.match(tasks, /<TaskEditor[\s\S]{0,320}:error-message="editorSaveError"[\s\S]{0,160}error-id="task-editor-save-error"/);
+  assert.match(tasks, /<AppToast :message="notice" \/>/);
+  assert.match(tasks, /onBeforeUnmount\(\(\) => \{\s*if \(noticeTimer !== undefined\) window\.clearTimeout\(noticeTimer\);\s*\}\)/);
+
+  assert.ok(saveMatch, "save must be declared");
+  assert.match(saveMatch[1], /editorSaveError\.value = "";/);
+  assert.match(saveMatch[1], /try \{[\s\S]*?editorOpen\.value = false;[\s\S]*?editingTask\.value = null;[\s\S]*?(?:setEditorDirty\(false\)|editorDirty\.value = false);[\s\S]*?showNotice\(settingsStore\.t\("task\.feedbackSaved"\)\);/);
+  assert.match(saveMatch[1], /catch \{\s*editorSaveError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
+  const saveCatch = saveMatch[1].match(/catch \{([\s\S]*?)\n  \}/);
+  assert.ok(saveCatch, "save must handle persistence failures");
+  assert.doesNotMatch(saveCatch[1], /editorOpen\.value = false|editingTask\.value = null|setEditorDirty\(false\)|showNotice\(/);
+  assert.match(tasks, /function openCreate\(\): void \{\s*editorSaveError\.value = "";/);
+  assert.match(tasks, /function openEdit\(task: TaskRecord\): void \{\s*editorSaveError\.value = "";/);
+});
+
 test("task editor associates save errors with its form and submit action", async () => {
   const editor = await source("desktop/src/components/TaskEditor.vue");
   const formMatch = editor.match(/<form class="task-editor"[\s\S]*?<\/form>/);
