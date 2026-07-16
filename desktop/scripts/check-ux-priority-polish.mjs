@@ -9,7 +9,9 @@ const [
   webHtmlSource,
   webAppSource,
   webStylesSource,
-  desktopSyncHealthBarSource,
+  desktopAppSource,
+  desktopWorkspaceStatusBannerSource,
+  desktopTodayViewSource,
   desktopLoginSource,
   desktopI18nSource,
   androidLoginSource,
@@ -24,7 +26,9 @@ const [
   readFile(resolve(repoRoot, "web/index.html"), "utf8"),
   readFile(resolve(repoRoot, "web/app.js"), "utf8"),
   readFile(resolve(repoRoot, "web/styles.css"), "utf8"),
-  readFile(resolve(desktopRoot, "src/components/TaskSyncHealthBar.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "src/App.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "src/components/WorkspaceStatusBanner.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "src/views/TodayView.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/views/LoginView.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/i18n.ts"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/login/LoginScreen.kt"), "utf8"),
@@ -86,9 +90,10 @@ assert.match(webAppSource, /nodes\.authSubmitButton\.className = "primary-button
 assert.match(webAppSource, /nodes\.testConnectionButton\.className = "secondary-button"/, "Web auth render logic must keep connection testing secondary");
 assert.doesNotMatch(webAppSource, /nodes\.authSubmitButton\.className = isConnectionReadyForAuth/, "Web auth submit priority must not depend on a prior manual connection check");
 
-assert.match(webAppSource, /nodes\.taskSyncHealthBar\.hidden = false/, "Web task-list sync health must stay visible with a short healthy-state summary");
-assert.doesNotMatch(webAppSource, /nodes\.taskSyncHealthBar\.hidden = tone === "ready"/, "Web task-list sync health must not disappear when sync is healthy");
-assert.doesNotMatch(desktopSyncHealthBarSource, /v-if="tone !== 'ready'"/, "Desktop task sync health bar must stay visible with a short healthy-state summary");
+assert.match(webAppSource, /nodes\.taskSyncHealthBar\.hidden = tone === "ready"/, "Web task-list sync health must stay out of the way when sync is healthy");
+assert.doesNotMatch(desktopTodayViewSource, /TaskSyncHealthBar/, "Desktop Today view must not duplicate the app-level sync status banner");
+assert.match(desktopAppSource, /v-if="workspaceStatus\.banner !== 'none'"/, "Desktop app must only show sync status when workspace attention is needed");
+assert.match(desktopWorkspaceStatusBannerSource, /aria-live="polite"/, "Desktop workspace status banner must announce sync status changes politely");
 
 assert.doesNotMatch(desktopLoginSource, /authPrimaryActionReady/, "Desktop login priority must not depend on a prior manual connection check");
 assert.match(desktopLoginSource, /class="secondary-button"[\s\S]{0,360}settingsStore\.t\("settings\.checkAndSaveConnection"\)/, "Desktop connection check must be secondary");
@@ -98,9 +103,9 @@ assert.doesNotMatch(desktopLoginSource, /TaskBridge Docker 本机试用/, "Deskt
 assert.doesNotMatch(desktopI18nSource, /同步异常恢复/, "Desktop sync recovery wording should be consolidated through sync-issues settings labels");
 
 assert.match(androidTaskListSource, /listToolsOpen/, "Android task list must let search and filters collapse behind a list tools control");
-assert.doesNotMatch(androidTaskListSource, /if \(syncHealth\.needsAttention\) \{[\s\S]{0,260}TaskListSyncHealthBar/, "Android task-list sync health must stay visible with a short healthy-state summary");
+assert.match(androidTaskListSource, /if \(syncHealth\.needsAttention\) \{[\s\S]{0,180}TaskListSyncHealthBar/, "Android task-list sync health must only appear when action is needed");
 assert.doesNotMatch(androidLoginSource, /connectionReadyForAuth/, "Android login priority must not depend on a prior manual connection check");
-assert.match(androidTaskListSource, /TaskListSyncHealthBar\([\s\S]{0,140}syncHealth = syncHealth/, "Android task list must render sync health near the list in every state");
+assert.match(androidTaskListSource, /TaskListSyncHealthBar\([\s\S]{0,140}syncHealth = syncHealth/, "Android task list must render actionable sync health near the list");
 assert.match(androidEditorSource, /bottomBar = \{[\s\S]{0,260}EditorBottomActions/, "Android editor must keep save and cancel actions available at the bottom");
 assert.doesNotMatch(androidSettingsSource, /"Troubleshooting" else "问题排查"/, "Android settings navigation must use the shared sync-issues wording");
 assert.match(androidSettingsSource, /"Sync issues" else "同步问题"/, "Android settings navigation must use consistent sync-issues wording");
