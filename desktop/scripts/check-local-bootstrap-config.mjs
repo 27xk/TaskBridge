@@ -5,12 +5,12 @@ import { workspacePaths, escapeRegExp } from "./script-helpers.mjs";
 
 const { desktopRoot, repoRoot } = workspacePaths(import.meta.url);
 
-const [bootstrapSource, localCheckSource, scriptsReadmeSource, rootReadmeSource, packageSource] =
+const [bootstrapSource, localCheckSource, scriptsReadmeSource, developmentReadmeSource, packageSource] =
   await Promise.all([
     readFile(resolve(repoRoot, "scripts/bootstrap-local.ps1"), "utf8"),
     readFile(resolve(repoRoot, "scripts/check-local.ps1"), "utf8"),
     readFile(resolve(repoRoot, "scripts/README.md"), "utf8"),
-    readFile(resolve(repoRoot, "README.md"), "utf8"),
+    readFile(resolve(repoRoot, "docs/development.md"), "utf8"),
     readFile(resolve(desktopRoot, "package.json"), "utf8"),
   ]);
 
@@ -65,9 +65,9 @@ assert.match(
   /-BootstrapMissing/,
   "scripts README must document bootstrap-and-verify local verification",
 );
-assert.match(rootReadmeSource, /bootstrap-local\.ps1/, "root README must mention local bootstrap");
-assert.match(rootReadmeSource, /-ReportOnly/, "root README must document report-only local verification");
-assert.match(rootReadmeSource, /-BootstrapMissing/, "root README must document bootstrap-and-verify local verification");
+assert.match(developmentReadmeSource, /bootstrap-local\.ps1/, "development docs must mention local bootstrap");
+assert.match(developmentReadmeSource, /-ReportOnly/, "development docs must document report-only local verification");
+assert.match(developmentReadmeSource, /-BootstrapMissing/, "development docs must document bootstrap-and-verify local verification");
 assert.match(packageSource, /check:local-bootstrap/, "package scripts must expose the local bootstrap check");
 
 console.log("local bootstrap config check passed");

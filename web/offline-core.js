@@ -20,6 +20,149 @@ const TASK_PRIORITY_LABELS = {
   5: "最高优先级",
 };
 
+export function normalizeOfflineApiBaseUrl(value) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) {
+    throw new Error("Offline API address is required");
+  }
+  const url = new URL(trimmed);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Offline API address must use HTTP or HTTPS");
+  }
+  url.username = "";
+  url.password = "";
+  url.search = "";
+  url.hash = "";
+  const path = url.pathname.replace(/\/+$/, "");
+  url.pathname = path.endsWith("/api/v1") ? path : `${path}/api/v1`;
+  return url.toString().replace(/\/+$/, "");
+}
+
+export function buildOfflineWorkspaceKey(apiBaseUrl, userIdInput) {
+  const userId = Number(userIdInput);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    throw new Error("Offline workspace requires a positive user id");
+  }
+  const serverNamespace = encodeURIComponent(normalizeOfflineApiBaseUrl(apiBaseUrl));
+  return `server.${serverNamespace}.user.${Math.trunc(userId)}`;
+}
+
+export function buildOfflineDatabaseName(storagePrefix, apiBaseUrl, userId) {
+  return `${storagePrefix}.offline.${buildOfflineWorkspaceKey(apiBaseUrl, userId)}`;
+}
+
+export function buildTaskDraftStorageKey(storagePrefix, apiBaseUrl, userIdInput) {
+  const userId = Number(userIdInput);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    throw new Error("Task draft storage requires a positive user id");
+  }
+  const origin = new URL(normalizeOfflineApiBaseUrl(apiBaseUrl)).origin;
+  return `${storagePrefix}.taskDraft.origin.${encodeURIComponent(origin)}.user.${Math.trunc(userId)}`;
+}
+
+export function clearAccountScopedInputs(inputs) {
+  for (const input of inputs || []) {
+    if (input && "value" in input) input.value = "";
+  }
+}
+
+export function withClientRequestId(payload, idFactory = () => crypto.randomUUID()) {
+  const existing = String(payload?.client_request_id || "").trim();
+  if (existing) return { ...payload, client_request_id: existing };
+  const generated = String(idFactory()).trim();
+  if (!generated) throw new Error("Client request id is required");
+  return { ...payload, client_request_id: generated };
+}
+
+export async function processIndependentMutationQueue({
+  listRecords,
+  processRecord,
+  markFailed,
+}) {
+  const processedQueueIds = new Set();
+  const blockedTaskIds = new Set();
+  const failedQueueIds = [];
+
+  const initialRecords = [...await listRecords()].sort(
+    (left, right) => Number(left.offline_queue_id) - Number(right.offline_queue_id),
+  );
+  for (const record of initialRecords) {
+    if (!isPersistedMutationFailure(record)) continue;
+    processedQueueIds.add(String(record.offline_queue_id));
+    blockedTaskIds.add(mutationTaskKey(record));
+  }
+
+  while (true) {
+    const records = [...await listRecords()].sort(
+      (left, right) => Number(left.offline_queue_id) - Number(right.offline_queue_id),
+    );
+    const record = records.find((candidate) => {
+      const queueId = String(candidate.offline_queue_id);
+      return !processedQueueIds.has(queueId) && !blockedTaskIds.has(mutationTaskKey(candidate));
+    });
+    if (!record) break;
+
+    const queueId = String(record.offline_queue_id);
+    const taskKey = mutationTaskKey(record);
+    processedQueueIds.add(queueId);
+    try {
+      await processRecord(record);
+    } catch (error) {
+      await markFailed(record, error);
+      blockedTaskIds.add(taskKey);
+      failedQueueIds.push(queueId);
+    }
+  }
+
+  return {
+    blockedTaskIds: [...blockedTaskIds],
+    failedQueueIds,
+  };
+}
+
+function isPersistedMutationFailure(record) {
+  return record?.offline_status === "sync_failed" || record?.offline_status === "conflict";
+}
+
+function mutationTaskKey(record) {
+  const taskId = record?.task_id;
+  return taskId === null || taskId === undefined
+    ? `queue:${record?.offline_queue_id}`
+    : String(taskId);
+}
+
+export function normalizeOfflineProfile(value, fallbackApiBaseUrl = "") {
+  if (!value || typeof value !== "object") return null;
+  const id = Number(value.id);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const username = String(value.username ?? "").trim();
+  const email = String(value.email ?? "").trim();
+  let apiBaseUrl;
+  try {
+    apiBaseUrl = normalizeOfflineApiBaseUrl(
+      value.api_base_url ?? value.apiBaseUrl ?? fallbackApiBaseUrl,
+    );
+  } catch {
+    return null;
+  }
+  return {
+    id: Math.trunc(id),
+    username,
+    email,
+    api_base_url: apiBaseUrl,
+  };
+}
+
+export function isOfflineProfileForApi(profile, apiBaseUrl) {
+  const normalizedProfile = normalizeOfflineProfile(profile);
+  if (!normalizedProfile) return false;
+  try {
+    return normalizedProfile.api_base_url === normalizeOfflineApiBaseUrl(apiBaseUrl);
+  } catch {
+    return false;
+  }
+}
+
 export function makeOfflineTask(payload, options = {}) {
   const nowDate = normalizeNow(options.now);
   const now = nowDate.toISOString();
@@ -126,6 +269,10 @@ export function normalizeRemoteTaskForOffline(task) {
   };
 }
 
+export function hasOfflineQueueId(value) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 export function canResolveTaskConflict(task) {
   const id = Number(task?.id);
   return task?.offline_status === "conflict" && Number.isFinite(id) && id > 0;
@@ -166,7 +313,7 @@ export function matchesTaskView(task, options = {}) {
     return false;
   }
   if (view === "pending") {
-    return Boolean(task.offline_status || Number.isFinite(task.offline_queue_id));
+    return Boolean(task.offline_status || hasOfflineQueueId(task.offline_queue_id));
   }
   if (view === "conflict") {
     return task.offline_status === "conflict";
@@ -184,9 +331,44 @@ export function matchesTaskView(task, options = {}) {
     return isOverdueTask(task, options.now, options);
   }
   if (view === "high") {
-    return Number(task.priority || 0) >= 3;
+    return !isCompletedTask(task) && Number(task.priority || 0) >= 3;
   }
-  return task.status !== "completed";
+  return !isCompletedTask(task);
+}
+
+export function mapTaskViewForServer(view) {
+  if (view === "pending" || view === "conflict") return null;
+  return view === "high" ? "high_priority" : view;
+}
+
+export function reconcileCachedTaskSnapshot(cachedTasks, remoteTasks, viewContext = {}) {
+  const remoteById = new Map(
+    remoteTasks.map((task) => [String(task.id), task]),
+  );
+  const reconciled = [];
+
+  for (const cachedTask of cachedTasks) {
+    const taskId = String(cachedTask.id);
+    const remoteTask = remoteById.get(taskId);
+    if (cachedTask.offline_status || hasOfflineQueueId(cachedTask.offline_queue_id)) {
+      reconciled.push(cachedTask);
+      remoteById.delete(taskId);
+      continue;
+    }
+    if (remoteTask) {
+      reconciled.push(normalizeRemoteTaskForOffline(remoteTask));
+      remoteById.delete(taskId);
+      continue;
+    }
+    if (!matchesTaskView(cachedTask, viewContext)) {
+      reconciled.push(cachedTask);
+    }
+  }
+
+  for (const remoteTask of remoteById.values()) {
+    reconciled.push(normalizeRemoteTaskForOffline(remoteTask));
+  }
+  return reconciled;
 }
 
 export function compareCachedTasks(left, right, options = {}) {
@@ -220,18 +402,18 @@ export function buildLocalMeta(tasks, nowInput = new Date(), options = {}) {
       counts.trash += 1;
       continue;
     }
-    if (task.offline_status || Number.isFinite(task.offline_queue_id)) {
+    if (task.offline_status || hasOfflineQueueId(task.offline_queue_id)) {
       counts.pending += 1;
     }
     if (task.offline_status === "conflict") {
       counts.conflict += 1;
     }
-    if (Number(task.priority || 0) >= 3) {
-      counts.high += 1;
-    }
-    if (task.status === "completed") {
+    if (isCompletedTask(task)) {
       counts.completed += 1;
       continue;
+    }
+    if (Number(task.priority || 0) >= 3) {
+      counts.high += 1;
     }
     counts.open += 1;
     if ((task.list_type || "inbox") === "inbox") {
@@ -254,7 +436,7 @@ export function getTaskViewLabel(view) {
 export function getTaskStatusLabel(task) {
   if (task.offline_status === "conflict") return "同步冲突";
   if (task.offline_error) return "同步失败";
-  if (task.offline_status || Number.isFinite(task.offline_queue_id)) return "待同步";
+  if (task.offline_status || hasOfflineQueueId(task.offline_queue_id)) return "待同步";
   if (task.is_deleted) return "已删除";
   if (task.status === "completed" || task.status === "done") return "已完成";
   return "进行中";
@@ -319,19 +501,31 @@ function getTaskSortBucket(task, nowInput = new Date(), options = {}) {
 }
 
 function isTodayTask(task, nowInput = new Date(), options = {}) {
+  if (isCompletedTask(task)) return false;
+  const now = normalizeNow(nowInput);
   if ((task.list_type || "inbox") === "today") {
     return true;
   }
-  const today = formatLocalDateKey(normalizeNow(nowInput), options);
-  const dueDate = task.due_time ? formatLocalDateKey(task.due_time, options) : "";
-  return task.planned_date === today || dueDate === today;
+  const today = formatLocalDateKey(now, options);
+  const dueTime = task.due_at ?? task.due_time;
+  const reminderTime = task.reminder_at ?? task.remind_time;
+  const due = parseDate(dueTime);
+  const dueDate = due ? formatLocalDateKey(due, options) : "";
+  const reminderDate = reminderTime ? formatLocalDateKey(reminderTime, options) : "";
+  return (
+    task.planned_date === today ||
+    dueDate === today ||
+    reminderDate === today ||
+    Boolean(due && due.getTime() < now.getTime())
+  );
 }
 
 function isOverdueTask(task, nowInput = new Date(), options = {}) {
-  if (task.status === "completed") return false;
+  if (isCompletedTask(task)) return false;
   const now = normalizeNow(nowInput);
-  if (task.due_time) {
-    const due = new Date(task.due_time);
+  const dueTime = task.due_at ?? task.due_time;
+  if (dueTime) {
+    const due = new Date(dueTime);
     return !Number.isNaN(due.getTime()) && due.getTime() < now.getTime();
   }
   if (task.planned_date) {
@@ -341,10 +535,101 @@ function isOverdueTask(task, nowInput = new Date(), options = {}) {
 }
 
 function isSnoozedTask(task, nowInput = new Date()) {
-  if (task.status === "completed" || !task.snoozed_until) return false;
+  if (isCompletedTask(task) || !task.snoozed_until) return false;
   const now = normalizeNow(nowInput);
   const snoozedUntil = new Date(task.snoozed_until);
   return !Number.isNaN(snoozedUntil.getTime()) && snoozedUntil.getTime() > now.getTime();
+}
+
+function isCompletedTask(task) {
+  return task?.status === "completed" || task?.status === "done";
+}
+
+export function createLatestRequestGate() {
+  let sequence = 0;
+  return {
+    begin() {
+      sequence += 1;
+      return sequence;
+    },
+    isCurrent(requestSequence) {
+      return requestSequence === sequence;
+    },
+  };
+}
+
+export function isMixedContentApiUrl(pageProtocol, apiBaseUrl) {
+  if (pageProtocol !== "https:") return false;
+  try {
+    return new URL(apiBaseUrl).protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+export function isAuthHealthUsable(syncStatus) {
+  return syncStatus?.status === "ready" || syncStatus?.status === "degraded";
+}
+
+export function shouldShowConnectionBadge(hasLocalWorkspace, syncStatus) {
+  return Boolean(hasLocalWorkspace || syncStatus);
+}
+
+export function resetEndpointScopedConnectionState(
+  state,
+  nextServerBaseUrl,
+  nextApiBaseUrl,
+) {
+  const endpointChanged =
+    String(nextServerBaseUrl ?? "") !== String(state.serverBaseUrl ?? "") ||
+    String(nextApiBaseUrl ?? "") !== String(state.apiBaseUrl ?? "");
+  if (!endpointChanged) return false;
+
+  state.registrationStatusKnown = false;
+  state.registrationEnabled = false;
+  state.syncStatus = null;
+  return true;
+}
+
+export function isTerminalRefreshStatus(status) {
+  return status === 401 || status === 403;
+}
+
+export function getTaskReminderAt(task) {
+  if (!task || task.is_deleted || isCompletedTask(task)) return null;
+  for (const value of [task.reminder_at, task.remind_time, task.due_at, task.due_time]) {
+    if (value && parseDate(value)) return value;
+  }
+  return null;
+}
+
+export function buildTaskNotificationUrl(taskId, pageUrl) {
+  const target = new URL("./", pageUrl);
+  target.searchParams.set("task", String(taskId));
+  return target.toString();
+}
+
+export function normalizeBrowserTimeZone(value) {
+  const timeZone = String(value || "").trim();
+  if (!timeZone) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en", { timeZone }).format();
+    return timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+
+export function buildPasswordChangePayload(currentPassword, newPassword, confirmation) {
+  if (!currentPassword) throw new Error("Current password is required");
+  if (String(newPassword || "").length < 8) {
+    throw new Error("New password must be at least 8 characters");
+  }
+  if (newPassword !== confirmation) throw new Error("Password confirmation does not match");
+  return {
+    current_password: currentPassword,
+    new_password: newPassword,
+  };
 }
 
 function formatTaskDateTime(value) {

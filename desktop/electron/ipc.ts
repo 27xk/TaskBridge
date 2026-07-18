@@ -12,6 +12,7 @@ import {
   enqueueTaskChange,
   getTask,
   getSyncQueueCounts,
+  getTodayFloatingTaskSummary,
   incrementAttempt,
   listQueue,
   listTasks,
@@ -46,6 +47,7 @@ import { performApiRequest, type ApiRequestPayload } from "./http";
 import { showTaskNotification } from "./notification";
 import {
   clearLastBackupImportUndoItems,
+  broadcastSessionExpired,
   clearTokens,
   getLastBackupImportUndoItems,
   getLastBackupImportUndoSummary,
@@ -60,6 +62,10 @@ import { getTraySyncStatus, refreshTrayMenu, setTraySyncStatus } from "./tray";
 import { checkForUpdates, getUpdateStatus } from "./updater";
 import { normalizeDesktopTheme } from "../shared/desktop-theme";
 import { normalizeTimeZone } from "../shared/quick-add-parser";
+import {
+  isMutableAppSettingKey,
+  type MutableAppSettingKey,
+} from "../shared/settings-policy";
 
 const BACKUP_FORMAT = "taskbridge.desktop.backup.v1";
 const DIAGNOSTIC_FORMAT = "taskbridge.desktop.diagnostics.v1";
@@ -115,12 +121,19 @@ let pendingBackupImport: PendingBackupImport | null = null;
 export function registerIpcHandlers(): void {
   handle("app:get-settings", () => getSettings());
   handle("app:set-setting", (_, key: string, value: unknown) => setAppSetting(key, value));
+  handle("app:set-connection", (_, baseUrl: unknown, wsUrl: unknown) => {
+    return setConnectionSettings(baseUrl, wsUrl);
+  });
   handle("app:set-sync-status", (_, status: unknown) => {
     setTraySyncStatus(validateTraySyncStatus(status));
     notifyFloatingSyncStatusChanged();
   });
-  handle("app:notify", (_, title: unknown, body: unknown) => {
-    showTaskNotification(validateNotificationText(title, "title"), validateNotificationText(body, "body", 320));
+  handle("app:notify", (_, title: unknown, body: unknown, localId?: unknown) => {
+    showTaskNotification(
+      validateNotificationText(title, "title"),
+      validateNotificationText(body, "body", 320),
+      validateOptionalLocalId(localId),
+    );
   });
   handle("app:toggle-floating", () => toggleFloatingWindow());
   handle("app:show-floating", () => showFloatingWindow());
@@ -135,7 +148,10 @@ export function registerIpcHandlers(): void {
   handle("app:check-for-updates", () => checkForUpdates());
 
   handle("auth:has-tokens", () => hasTokens());
-  handle("auth:clear-tokens", () => clearTokens());
+  handle("auth:clear-tokens", () => {
+    clearTokens();
+    setTraySyncStatus("signed-out");
+  });
   handle("api:request", (_, payload: unknown) => performApiRequest(validateApiRequestPayload(payload)));
 
   handle("db:tasks:list", (_, limit?: unknown, offset?: unknown, includeDeleted?: unknown) => {
@@ -217,6 +233,7 @@ export function registerIpcHandlers(): void {
   });
 
   handle("task:list-today", (_, limit?: unknown) => listTodayFloatingTasks(optionalBoundedInteger(limit, "limit", 1, 100)));
+  handle("task:today-summary", (_, limit?: unknown) => getTodayFloatingTaskSummary(optionalBoundedInteger(limit, "limit", 1, 100)));
   handle("task:quick-add", (_, title: unknown) => quickAddTask(validateNotificationText(title, "title", 255)));
   handle("task:complete", (_, localId: unknown) => completeTaskFromFloating(validateLocalId(localId)));
   handle("task:open-detail", (_, localId: unknown) => openTaskDetail(validateLocalId(localId)));
@@ -259,14 +276,14 @@ function validateExternalUrl(value: unknown): string {
   return url.toString();
 }
 
+function validateOptionalLocalId(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return validateLocalId(value);
+}
+
 function setAppSetting(key: string, value: unknown): AppSettings {
+  if (!isMutableAppSettingKey(key)) return getSettings();
   if (isStringSetting(key) && typeof value === "string") {
-    if (key === "baseUrl" && !isAllowedBaseUrl(value)) {
-      return getSettings();
-    }
-    if (key === "wsUrl" && !isAllowedWebSocketUrl(value)) {
-      return getSettings();
-    }
     if (key === "language" && value !== "zh-CN" && value !== "en-US") {
       return getSettings();
     }
@@ -293,12 +310,37 @@ function setAppSetting(key: string, value: unknown): AppSettings {
   return getSettings();
 }
 
+function setConnectionSettings(baseUrl: unknown, wsUrl: unknown): AppSettings {
+  if (typeof baseUrl !== "string" || !isAllowedBaseUrl(baseUrl)) {
+    throw new Error("Invalid API base URL");
+  }
+  if (typeof wsUrl !== "string" || !isAllowedWebSocketUrl(wsUrl)) {
+    throw new Error("Invalid WebSocket URL");
+  }
+  const previousSettings = getSettings();
+  const serverChanged = normalizedOrigin(previousSettings.baseUrl) !== normalizedOrigin(baseUrl);
+  setSetting("baseUrl", baseUrl.trim());
+  setSetting("wsUrl", wsUrl.trim());
+  if (serverChanged && (hasTokens() || previousSettings.currentUserId !== null)) {
+    clearTokens();
+    setTraySyncStatus("signed-out");
+    broadcastSessionExpired("server-changed");
+  }
+  return getSettings();
+}
+
+function normalizedOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "";
+  }
+}
+
 function isStringSetting(
   key: string,
-): key is "baseUrl" | "wsUrl" | "lastSyncTime" | "language" | "desktopTheme" | "displayTimeZone" {
+): key is Extract<MutableAppSettingKey, "lastSyncTime" | "language" | "desktopTheme" | "displayTimeZone"> {
   return (
-    key === "baseUrl" ||
-    key === "wsUrl" ||
     key === "lastSyncTime" ||
     key === "language" ||
     key === "desktopTheme" ||

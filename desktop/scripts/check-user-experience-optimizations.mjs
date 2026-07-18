@@ -1,7 +1,7 @@
 ﻿import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { workspacePaths } from "./script-helpers.mjs";
+import { extractBalancedBlock, normalizeLineEndings, workspacePaths } from "./script-helpers.mjs";
 
 const { desktopRoot, repoRoot } = workspacePaths(import.meta.url);
 
@@ -28,6 +28,8 @@ const [
   webStylesSource,
   webLocalTrialGuideSource,
   webSelfHostingGuideSource,
+  webGuideLanguageSource,
+  webStartupSource,
   webSwSource,
   desktopDbSource,
   desktopLoginSource,
@@ -35,23 +37,27 @@ const [
   desktopSettingsAccountPanelSource,
   desktopSettingsConnectionPanelSource,
   desktopSettingsDataPanelSource,
+  desktopSettingsSyncRecoveryPanelSource,
   desktopSettingsMetadataPanelSource,
   desktopSettingsWindowPanelSource,
   desktopUserFacingErrorsSource,
+  desktopConnectionEndpointsSource,
   desktopAppSource,
+  desktopAppSidebarSource,
   desktopTaskViewSource,
   desktopTodayViewSource,
   desktopTaskStoreSource,
   desktopTaskEditorSource,
   desktopTaskItemSource,
   desktopTaskListSectionSource,
-  desktopTaskSyncHealthBarSource,
+  desktopWorkspaceStatusBannerSource,
   desktopConfirmDialogSource,
   desktopFloatingHeaderSource,
   desktopMainSource,
   desktopIpcSource,
   desktopInstallerSource,
   desktopCssSource,
+  desktopWorkspaceCssSource,
   desktopI18nSource,
   desktopAuthStoreSource,
   desktopFloatingStoreSource,
@@ -71,6 +77,7 @@ const [
   androidLoginSource,
   androidLoginViewModelSource,
   androidRegisterSource,
+  androidRegistrationAvailabilitySource,
   androidRegisterViewModelSource,
   androidSettingsSource,
   androidSettingsUiPolicySource,
@@ -91,15 +98,20 @@ const [
   desktopReadmeSource,
   androidReadmeSource,
   userQuickStartDocSource,
+  developmentDocSource,
+  troubleshootingDocSource,
   securityDocSource,
   syncDesignDocSource,
   versionSource,
-] = await Promise.all([
+  rootPackageSource,
+] = (await Promise.all([
   readFile(resolve(repoRoot, "web/app.js"), "utf8"),
   readFile(resolve(repoRoot, "web/index.html"), "utf8"),
   readFile(resolve(repoRoot, "web/styles.css"), "utf8"),
   readFile(resolve(repoRoot, "web/local-trial.html"), "utf8"),
   readFile(resolve(repoRoot, "web/self-hosting.html"), "utf8"),
+  readFile(resolve(repoRoot, "web/guide-language.js"), "utf8"),
+  readFile(resolve(repoRoot, "web/startup.js"), "utf8"),
   readFile(resolve(repoRoot, "web/sw.js"), "utf8"),
   readFile(resolve(desktopRoot, "electron/db.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/views/LoginView.vue"), "utf8"),
@@ -107,23 +119,27 @@ const [
   readFile(resolve(desktopRoot, "src/components/settings/SettingsAccountDisplayPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/settings/SettingsConnectionPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/settings/SettingsDataSessionPanel.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "src/components/settings/SettingsSyncRecoveryPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/settings/SettingsMetadataPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/settings/SettingsWindowPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "shared/user-facing-errors.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "shared/connection-endpoints.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/App.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "src/components/AppSidebar.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/views/TaskView.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/views/TodayView.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/stores/task.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/TaskEditor.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/TaskItem.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/TaskListSection.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "src/components/TaskSyncHealthBar.vue"), "utf8").catch(() => ""),
+  readFile(resolve(desktopRoot, "src/components/WorkspaceStatusBanner.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/ConfirmDialog.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/FloatingHeader.vue"), "utf8"),
   readFile(resolve(desktopRoot, "electron/main.ts"), "utf8"),
   readFile(resolve(desktopRoot, "electron/ipc.ts"), "utf8"),
   readFile(resolve(desktopRoot, "build/installer.nsh"), "utf8"),
   readFile(resolve(desktopRoot, "src/assets/base.css"), "utf8"),
+  readFile(resolve(desktopRoot, "src/assets/workspace.css"), "utf8"),
   readFile(resolve(desktopRoot, "src/i18n.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/stores/auth.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/stores/floating.ts"), "utf8"),
@@ -143,6 +159,7 @@ const [
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/login/LoginScreen.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/login/LoginViewModel.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/login/RegisterScreen.kt"), "utf8"),
+  readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/login/RegistrationAvailability.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/login/RegisterViewModel.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/settings/SettingsScreen.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/settings/SettingsUiPolicy.kt"), "utf8"),
@@ -163,23 +180,28 @@ const [
   readFile(resolve(repoRoot, "desktop/README.md"), "utf8"),
   readFile(resolve(repoRoot, "android/README.md"), "utf8"),
   readFile(resolve(repoRoot, "docs/user-quick-start.md"), "utf8").catch(() => ""),
+  readFile(resolve(repoRoot, "docs/development.md"), "utf8"),
+  readFile(resolve(repoRoot, "docs/troubleshooting.md"), "utf8"),
   readFile(resolve(repoRoot, "docs/security.md"), "utf8"),
   readFile(resolve(repoRoot, "docs/sync-design.md"), "utf8"),
   readFile(resolve(repoRoot, "VERSION"), "utf8"),
-]);
+  readFile(resolve(repoRoot, "package.json"), "utf8"),
+])).map(normalizeLineEndings);
 
 const desktopSettingsSurfaceSource = [
   desktopSettingsSource,
   desktopSettingsAccountPanelSource,
   desktopSettingsConnectionPanelSource,
   desktopSettingsDataPanelSource,
+  desktopSettingsSyncRecoveryPanelSource,
   desktopSettingsMetadataPanelSource,
   desktopSettingsWindowPanelSource,
 ].join("\n");
 
 assert.match(webAppSource, /function getCurrentUserId\(/, "Web offline cache must resolve the current user before opening storage");
-assert.match(webAppSource, /function offlineDbName\(/, "Web offline cache must use a per-user IndexedDB name");
-assert.match(webAppSource, /indexedDB\.open\(offlineDbName\(\)/, "Web IndexedDB must be opened from the per-user name helper");
+assert.match(webAppSource, /function offlineDbName\(/, "Web offline cache must use a scoped IndexedDB name");
+assert.match(webAppSource, /buildOfflineDatabaseName\(STORAGE_PREFIX, state\.apiBaseUrl, userId\)/, "Web IndexedDB names must isolate both server and user");
+assert.match(webAppSource, /indexedDB\.open\(dbName, WEB_OFFLINE_DB_VERSION\)/, "Web IndexedDB must open the scoped database name");
 assert.match(webAppSource, /user_id:\s*getCurrentUserId\(\)/, "Web offline mutations must store the owning user id");
 assert.match(webAppSource, /closeOfflineDb\(\)/, "Web logout/account switch must close the previous offline database handle");
 assert.doesNotMatch(webAppSource, /indexedDB\.open\(WEB_OFFLINE_DB_NAME,/, "Web must not open one global offline database for every account");
@@ -268,9 +290,9 @@ assert.match(
 );
 assert.match(webHtmlSource, /id="startupFallback"/, "Web must show a recovery panel when JavaScript modules fail to boot");
 assert.match(webHtmlSource, /id="clearStartupCacheButton"/, "Web startup recovery must let users clear stale offline cache");
-assert.match(webHtmlSource, /window\.taskBridgeWebReady/, "Web startup recovery must depend on an explicit ready marker");
+assert.match(webStartupSource, /window\.taskBridgeWebReady/, "Web startup recovery must depend on an explicit ready marker");
 assert.doesNotMatch(
-  webHtmlSource,
+  webStartupSource,
   /window\.taskBridgeWebReady\s*=\s*false;/,
   "Web startup recovery must not overwrite the app-ready marker after the module has already booted",
 );
@@ -330,15 +352,12 @@ const webFirstScreenI18nKeys = [
   "auth.register",
   "auth.firstUseTitle",
   "auth.firstUseExistingServer",
-  "auth.firstUseSimpleStart",
-  "auth.localTrial",
-  "auth.localTrialDocs",
+  "auth.serverSetupHelp",
+  "auth.serverSetupHelpHint",
   "auth.openLocalTrialGuide",
-  "auth.localTrialSameDevice",
-  "auth.localTrialStartBackend",
-  "auth.selfHost",
-  "auth.selfHostHint",
-  "auth.selfHostFirstAccount",
+  "auth.openSelfHostGuide",
+  "auth.resumeOffline",
+  "auth.resumeOfflineHint",
   "auth.serverUrl",
   "auth.serverUrlHint",
   "auth.advancedConnection",
@@ -365,15 +384,24 @@ assert.match(webAppSource, /function togglePasswordVisibility\(/, "Web auth pass
 assert.match(webAppSource, /nodes\.password\.type = state\.passwordVisible \? "text" : "password"/, "Web auth password toggle must switch the input type");
 assert.match(webAppSource, /"auth\.showPassword"/, "Web i18n must define show-password copy");
 assert.match(webAppSource, /"auth\.hidePassword"/, "Web i18n must define hide-password copy");
-const webFirstRunGuideSource = sourceBetween(webHtmlSource, '<div class="first-run-guide"', '<form id="authForm"');
+const webFirstRunGuideSource = sourceBetween(webHtmlSource, '<details id="serverSetupHelp"', '</details>');
 assert.doesNotMatch(webFirstRunGuideSource, /API|WebSocket/, "Web first-use guidance must avoid developer endpoint terms");
 assert.doesNotMatch(webAppSource, /"auth\.selfHostHint":[^\n]*(API|WebSocket)/, "Web self-host hint must avoid developer endpoint terms in ordinary copy");
-assert.match(webFirstRunGuideSource, /id="serverSetupHelp"/, "Web first-use screen must keep Docker and self-hosting help behind one optional server-help disclosure");
-assertOrder(
+assert.match(webHtmlSource, /<details id="serverSetupHelp"/, "Web first-use screen must keep no-server help behind one optional disclosure");
+assert.match(
   webFirstRunGuideSource,
-  'id="serverSetupHelp"',
-  'id="localTrialGuide"',
-  "Web Docker local-trial details should be nested after the optional server-help disclosure starts",
+  /联系管理员或部署者|ask your administrator or deployer/i,
+  "Web first-use guidance must give non-technical users a clear path to get a server address",
+);
+assert.doesNotMatch(
+  webFirstRunGuideSource,
+  /<details id="localTrialGuide"|<details id="selfHostGuide"/,
+  "Web first-use screen must not nest local-trial and self-hosting as a second decision tree",
+);
+assert.doesNotMatch(
+  webFirstRunGuideSource,
+  /Docker|生产环境|公开注册|首个账号/,
+  "Web first-use guidance must avoid deployment-specific wording on the login screen",
 );
 assert.match(webAppSource, /async function ensureRegistrationModeAvailable\(/, "Web registration tab should test the connection automatically when registration status is unknown");
 assert.match(webAppSource, /await ensureRegistrationModeAvailable\(\)/, "Web registration tab click should run the automatic registration availability check");
@@ -508,12 +536,7 @@ assert.match(webAppSource, /previousActiveElement/, "Web confirmation dialog mus
 assert.match(webAppSource, /event\.key === "Tab"/, "Web confirmation dialog must trap Tab focus while open");
 assert.match(webAppSource, /previousActiveElement\?\.focus\(\)/, "Web confirmation dialog must restore focus when it closes");
 assert.doesNotMatch(webAppSource, /window\.confirm\(/, "Web must not rely on native confirm dialogs for core task flows");
-assert.match(
-  webHtmlSource,
-  /<details id="localTrialGuide"[\s\S]*?<summary[^>]*data-i18n="auth\.localTrial"[^>]*>Docker 本机试用<\/summary>/,
-  "Web first-use local trial instructions must be clearly labeled as a Docker-backed path",
-);
-const webAuthGuide = sourceBetween(webHtmlSource, '<div class="first-run-guide"', '<form id="authForm"');
+const webAuthGuide = sourceBetween(webHtmlSource, '<details id="serverSetupHelp"', '</details>');
 assert.doesNotMatch(
   webAuthGuide,
   /git clone|docker compose|command-snippet|Windows PowerShell|macOS \/ Linux/,
@@ -523,21 +546,17 @@ assert.match(webHtmlSource, /data-i18n="startup\.clearAndReload"/, "Web startup 
 assert.doesNotMatch(webHtmlSource, /offline cache|task data cache/i, "Web startup recovery must not imply that local task data will be cleared");
 assert.match(webAppSource, /"startup\.clearAndReload"[\s\S]{0,380}Clear page resource cache and refresh/, "Web Chinese startup recovery copy must use page resource cache wording");
 assert.match(webAppSource, /"startup\.clearAndReload": "Clear page resource cache and refresh"/, "Web English startup recovery copy must use page resource cache wording");
-assert.match(
-  webHtmlSource,
-  /<details id="selfHostGuide"[\s\S]*?<summary[^>]*data-i18n="auth\.selfHost"[^>]*>自托管部署<\/summary>/,
-  "Web self-hosting instructions must be collapsed behind a choice",
-);
 assert.doesNotMatch(
   webHtmlSource,
   /<span>[^<]*(127\.0\.0\.1|LAN IP)/i,
   "Web login first screen must not front-load local-network instructions",
 );
 
-assert.match(desktopDbSource, /currentUserDatabaseKey/, "Desktop SQLite must derive a database key from the current user");
-assert.match(desktopDbSource, /taskbridge-user-\$\{userId\}\.sqlite/, "Desktop SQLite must use a per-user database file");
-assert.match(desktopDbSource, /legacyGlobalDatabasePath/, "Desktop SQLite must handle migration from the legacy global database");
-assert.match(desktopDbSource, /dbUserKey !== nextUserKey/, "Desktop SQLite must reopen when the signed-in user changes");
+assert.match(desktopDbSource, /currentUserDatabaseKey/, "Desktop SQLite must derive an active workspace database key");
+assert.match(desktopDbSource, /workspaceDatabaseFileName\(settings\.baseUrl, userId\)/, "Desktop SQLite must isolate database files by server origin and user");
+assert.match(desktopDbSource, /migrateLegacyWorkspaceDatabase/, "Desktop SQLite must migrate legacy per-user and global databases into one claimed workspace");
+assert.match(desktopDbSource, /claimLegacyGlobalDatabaseWorkspace/, "Desktop global database migration must be claimed by only one workspace");
+assert.match(desktopDbSource, /dbUserKey !== nextUserKey/, "Desktop SQLite must reopen when the active server or user changes");
 assert.doesNotMatch(desktopDbSource, /join\(app\.getPath\("userData"\), "taskbridge\.sqlite"\)/, "Desktop must not keep using one global task database");
 
 assert.match(desktopLoginSource, /serverUrlDraft/, "Desktop login must allow changing the server address before sign-in");
@@ -564,10 +583,20 @@ assert.match(
 assert.doesNotMatch(desktopLoginSource, /class="first-use-cards"|auth\.firstUseNoServerTitle/, "Desktop first-use guide must not front-load multiple path cards before the server URL");
 assert.match(desktopI18nSource, /"auth\.firstUseNoServerTitle"/, "Desktop i18n must define the no-server first-use title");
 assert.match(desktopI18nSource, /"auth\.noServerHelpSummary"/, "Desktop i18n must define the no-server help summary");
+assert.doesNotMatch(
+  desktopI18nSource,
+  /"auth\.(firstUseLocalTrial|firstUseLocalTrialTitle|firstUseSelfHost|firstUseSelfHostTitle|setupChecklistTitle|setupStepServer|setupStepCheck|setupStepAccount)"/,
+  "Desktop i18n must not keep unused first-use path cards or setup checklist copy",
+);
+assert.doesNotMatch(
+  desktopCssSource,
+  /\.first-use-cards|\.first-use-card|\.setup-checklist/,
+  "Desktop CSS must not keep unused first-use card or setup checklist styles",
+);
 const desktopFirstUseGuideSource = sourceBetween(
   desktopLoginSource,
-  '<div class="first-use-guide"',
-  '<div class="auth-form login-connection">',
+  '<details class="first-use-guide first-use-guide-collapsed">',
+  '</details>',
 );
 assert.doesNotMatch(
   desktopFirstUseGuideSource,
@@ -579,7 +608,7 @@ assert.doesNotMatch(
   /class="first-use-cards"|class="setup-checklist"/,
   "Desktop first-use guide should keep the default path compact and put setup detail behind optional help",
 );
-assert.match(desktopLoginSource, /first-use-guide|首次使用怎么选|auth\.firstUseTitle/, "Desktop login must orient first-time users before asking for a server");
+assert.match(desktopLoginSource, /first-use-guide|首次使用怎么选|auth\.firstUseTitle/, "Desktop login must keep optional first-use guidance available after the primary sign-in flow");
 assert.match(desktopLoginSource, /serverLocalhostHint|localhostServerHint|localhostHint/, "Desktop login must warn when localhost is only valid for this computer");
 assert.match(desktopLoginSource, /serverLocalhostHint[\s\S]{0,260}form-message-info/, "Desktop login localhost guidance must be informational, not an error state");
 assert.doesNotMatch(desktopLoginSource, /serverLocalhostHint[\s\S]{0,260}form-message-error/, "Desktop login localhost guidance must not look like a failed connection");
@@ -626,14 +655,15 @@ assert.match(desktopSettingsSurfaceSource, /resetGeneratedConnectionEndpoints/, 
 assert.match(desktopI18nSource, /"settings\.resetGeneratedEndpoints"/, "Desktop i18n must include generated-endpoint reset copy");
 assert.match(desktopSettingsSurfaceSource, /<button class="primary-button" type="button"[\s\S]{0,180}checkAndSaveConnection/, "Desktop settings should make save-and-test connection the primary action in the connection section");
 assert.match(desktopI18nSource, /"settings\.checkAndSaveConnection"/, "Desktop i18n must include combined connection copy");
-assert.match(desktopI18nSource, /"settings\.advancedEndpoints": \{ "zh-CN": "高级连接设置"/, "Desktop i18n must name advanced endpoints as advanced connection settings, not developer-only internals");
-assert.match(desktopSettingsSource, /settingsNavGroups/, "Desktop settings must group navigation into user-oriented sections instead of one flat row");
-assert.match(desktopI18nSource, /"settings\.navCommon": \{ "zh-CN": "常用设置", "en-US": "Common settings" \}/, "Desktop settings must label common settings as a top-level group");
-assert.match(desktopI18nSource, /"settings\.navDataSafety": \{ "zh-CN": "数据安全", "en-US": "Data safety" \}/, "Desktop settings must label data safety as a top-level group");
-assert.match(desktopI18nSource, /"settings\.navSyncRecovery": \{ "zh-CN": "同步问题", "en-US": "Sync issues" \}/, "Desktop settings must label sync issues as a top-level group");
-assert.match(desktopI18nSource, /"settings\.navAdvancedMaintenance": \{ "zh-CN": "高级维护", "en-US": "Advanced maintenance" \}/, "Desktop settings must label advanced maintenance as a top-level group");
-assert.match(desktopI18nSource, /"settings\.baseUrl": \{ "zh-CN": "请求地址（高级）", "en-US": "Request URL \(advanced\)" \}/, "Desktop advanced request endpoint label must avoid API jargon");
-assert.match(desktopI18nSource, /"settings\.wsUrl": \{ "zh-CN": "同步连接地址（高级）", "en-US": "Sync connection URL \(advanced\)" \}/, "Desktop advanced sync endpoint label must avoid WebSocket jargon");
+assert.match(desktopI18nSource, /"settings\.advancedEndpoints": \{ "zh-CN": "排障：自定义连接地址"/, "Desktop i18n must frame custom connection settings as troubleshooting");
+assert.match(desktopSettingsSource, /const settingsNavItems = computed<SettingsNavItem\[\]>/, "Desktop settings must define one focused category list");
+for (const sectionId of ["account-display", "account-security", "connection", "window", "data", "sync-recovery", "metadata"]) {
+  assert.match(desktopSettingsSource, new RegExp(`sectionId: "${sectionId}"`), `Desktop settings must keep the ${sectionId} category reachable`);
+}
+assert.match(desktopSettingsSource, /class="settings-category-nav"/, "Desktop settings must render the focused category navigation");
+assert.doesNotMatch(desktopSettingsSource, /settingsNavGroups|settings\.navCommon|settings\.navDataSafety|settings\.navAdvancedMaintenance/, "Desktop settings must not restore the old grouped long-page navigation");
+assert.match(desktopI18nSource, /"settings\.baseUrl": \{ "zh-CN": "自定义请求地址", "en-US": "Request address for custom proxy" \}/, "Desktop advanced request endpoint label must avoid API jargon");
+assert.match(desktopI18nSource, /"settings\.wsUrl": \{ "zh-CN": "自定义同步地址", "en-US": "Sync address for custom proxy" \}/, "Desktop advanced sync endpoint label must avoid WebSocket jargon");
 assert.doesNotMatch(desktopI18nSource, /"settings\.baseUrl": \{[^\n]*(API 地址|API URL)/, "Desktop advanced request endpoint label must not be API-first copy");
 assert.doesNotMatch(desktopI18nSource, /"settings\.wsUrl": \{[^\n]*(WebSocket 地址|WebSocket URL)/, "Desktop advanced sync endpoint label must not be WebSocket-first copy");
 assert.match(desktopSettingsSurfaceSource, /settingsStore\.t\("settings\.advancedEndpoints"\)/, "Desktop settings must use the developer endpoint copy from i18n");
@@ -649,7 +679,7 @@ assert.match(desktopI18nSource, /"settings\.confirmMetadataRename"/, "Desktop i1
 const desktopSaveAndTestConnection = sourceBetween(
   desktopSettingsSurfaceSource,
   "async function checkAndSaveConnection(): Promise<void> {",
-  "function normalizeServerUrl",
+  "function markConnectionSaved",
 );
 assert.doesNotMatch(
   desktopSaveAndTestConnection,
@@ -659,12 +689,11 @@ assert.doesNotMatch(
 const desktopAutoSaveHelpers = sourceBetween(
   desktopSettingsSurfaceSource,
   "function showAutoSaveFeedback(): void {",
-  "function deriveConnectionEndpoints",
+  "function applyServerUrl",
 );
 assert.match(desktopI18nSource, /"settings\.autoSaved"/, "Desktop settings must name non-dangerous settings as auto-saved");
-assert.match(desktopI18nSource, /"settings\.autoSaveHint"/, "Desktop settings must explain that display and window preferences are saved immediately");
 assert.match(desktopSettingsSource, /settingsStore\.t\("settings\.autoSaved"\)/, "Desktop settings header must show the auto-save state instead of a manual global save");
-assert.match(desktopSettingsSource, /settingsStore\.t\("settings\.autoSaveHint"\)/, "Desktop settings header must explain the immediate-save model");
+assert.doesNotMatch(desktopSettingsSource, /settingsStore\.t\("settings\.(?:autoSaveHint|subtitle)"\)/, "Desktop settings header must not keep permanent explanatory copy");
 assert.doesNotMatch(desktopSettingsSource, /settingsStore\.t\("settings\.saveDisplayPreferences"\)/, "Desktop settings must not keep a mixed manual-save model for display and window settings");
 for (const key of ["setLanguage", "setDesktopTheme", "setDisplayTimeZone", "setAutoStart", "floatingVisibleOnStart", "floatingOpacity"]) {
   assert.match(desktopAutoSaveHelpers, new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `Desktop settings auto-save helper must persist ${key}`);
@@ -714,7 +743,7 @@ for (const [name, source] of [
 assert.match(desktopTaskViewSource, /TaskFilter = "all"[\s\S]*"trash"/, "Desktop task list must expose a trash/recycle-bin filter");
 assert.match(desktopTaskViewSource, /taskStore\.trashTasks/, "Desktop trash view must read deleted local tasks");
 assert.match(desktopTaskItemSource, /trash\?: boolean/, "Desktop task item must support a trash restore-only mode");
-assert.match(desktopTaskItemSource, /<button\s+v-if="!trash"[\s\S]{0,180}class="check-button"/, "Desktop trash rows must hide the completion checkbox-style button");
+assert.match(desktopTaskItemSource, /<button\s+v-if="!trash && !selectable"[\s\S]{0,180}class="check-button"/, "Desktop trash and selection rows must hide the completion checkbox-style button");
 assert.doesNotMatch(desktopTaskItemSource, /if \(props\.trash\)[\s\S]{0,120}emit\("restore"/, "Desktop trash rows must not use the completion button as restore");
 assert.match(desktopI18nSource, /"task\.trash"/, "Desktop i18n must name the trash view");
 assert.match(desktopTaskItemSource, /purge:\s*\[task: TaskRecord\]/, "Desktop trash rows must expose a permanent-delete event");
@@ -799,6 +828,21 @@ assertOrder(
 assert.match(desktopDbSource, /export function clearLocalDeviceData/, "Desktop DB must expose a local-device data clearing helper");
 assert.match(desktopIpcSource, /db:local:clear-device-data/, "Desktop IPC must expose local-device data clearing");
 assert.match(desktopI18nSource, /"settings\.clearLocalData"/, "Desktop i18n must include clear-this-device copy");
+assert.doesNotMatch(
+  desktopI18nSource,
+  /"settings\.clearLocalData": \{ "zh-CN": "退出并清除此设备数据"/,
+  "Desktop destructive clear-device button must not combine logout and clearing in the short label",
+);
+assert.doesNotMatch(
+  webAppSource,
+  /"app\.clearLocalData": "退出并清除此设备数据"/,
+  "Web destructive clear-device button must not combine logout and clearing in the short label",
+);
+assert.doesNotMatch(
+  androidSettingsSource,
+  /Text\(if \(isEnglish\) "Log out and clear this device" else "退出并清除此设备数据"\)/,
+  "Android destructive clear-device button must not combine logout and clearing in the short label",
+);
 assert.match(desktopDbSource, /undoImportedBackupTasks/, "Desktop backup import undo must use a dedicated DB helper");
 assert.match(desktopDbSource, /sync_status = 'pending_delete'[\s\S]{0,260}server_id IS NOT NULL/, "Desktop backup import undo must soft-delete imported tasks that already synced");
 assert.match(desktopDbSource, /BackupImportUndoItem/, "Desktop backup import undo must track each imported task's original update marker");
@@ -840,15 +884,14 @@ const desktopUpdateStatusSummary = sourceBetween(
   "const updateTechnicalDetail = computed(() => {",
 );
 assert.doesNotMatch(desktopUpdateStatusSummary, /updateStatus\.value\.(message|error)/, "Desktop update summary must not expose raw updater messages or errors");
-const desktopDataSession = sourceBetween(desktopSettingsSurfaceSource, '<section class="settings-section settings-data">', '<section class="settings-section settings-metadata">');
-const desktopDiagnosticsSection = sourceBetween(desktopDataSession, '<details class="settings-advanced-details"', '</details>');
-const desktopDefaultDataActions = sourceBetween(desktopDataSession, '<div class="settings-data-actions">', '</div>');
-assert.doesNotMatch(desktopDefaultDataActions, /settings\.exportDiagnostics/, "Desktop diagnostics export must not sit beside ordinary backup actions");
-assert.match(desktopSettingsSurfaceSource, /settings-section-nav/, "Desktop settings must provide quick navigation instead of one undifferentiated long page");
+const desktopDataSession = desktopSettingsDataPanelSource;
+const desktopDiagnosticsSection = desktopSettingsSyncRecoveryPanelSource;
+assert.doesNotMatch(desktopDataSession, /settings\.exportDiagnostics/, "Desktop diagnostics export must not sit beside ordinary backup actions");
+assert.match(desktopSettingsSource, /class="settings-category-nav"/, "Desktop settings must provide category navigation instead of one undifferentiated long page");
 assert.match(desktopI18nSource, /"settings\.clearLocalDataConfirmMessage"/, "Desktop clear-this-device confirmation must use a full risk explanation");
 assert.match(desktopSettingsSurfaceSource, /message:\s*settingsStore\.t\("settings\.clearLocalDataConfirmMessage"\)/, "Desktop clear-this-device dialog must not use the button label as the confirmation body");
 assert.doesNotMatch(
-  desktopDataSession.replace(desktopDiagnosticsSection, ""),
+  desktopDataSession,
   /settings\.deviceId/,
   "Desktop settings must not expose the raw device id in the default data section",
 );
@@ -858,23 +901,29 @@ assert.doesNotMatch(desktopTaskMenu, /sync\.useCloud|sync\.overwriteCloud/, "Des
 const desktopTaskPrimaryActions = sourceBetween(desktopTaskItemSource, '<div class="task-actions">', '<details v-if="!trash" class="task-menu">');
 assert.doesNotMatch(desktopTaskPrimaryActions, /task\.editAction|task\.edit"\)/, "Desktop task rows must keep edit out of the primary inline action path");
 assert.match(desktopTaskMenu, /task\.editAction/, "Desktop task rows must keep edit available inside the More menu");
-const desktopTaskEditorAdvancedFields = sourceBetween(desktopTaskEditorSource, '<section v-if="detailsOpen" class="advanced-fields">', '</section>');
-const desktopTaskEditorPrimaryFields = sourceBetween(desktopTaskEditorSource, 'settingsStore.t("task.content")', 'advanced-toggle');
-assert.doesNotMatch(desktopTaskEditorPrimaryFields, /task\.plan|task\.due|task\.reminder|task\.priority|task\.list/, "Desktop task editor default path should only ask for title and content before More settings");
-assert.match(desktopTaskEditorAdvancedFields, /task\.list[\s\S]*task\.plan[\s\S]*task\.due[\s\S]*task\.reminder[\s\S]*task\.priority/, "Desktop More settings must keep scheduling, list, and priority available after the quick-capture fields");
+const desktopTaskEditorBodyFields = sourceBetween(desktopTaskEditorSource, '<section v-if="bodyOpen" id="task-editor-body-fields" class="task-body-fields">', '</section>');
+const desktopTaskEditorArrangementFields = sourceBetween(desktopTaskEditorSource, '<section v-if="arrangeOpen" id="task-editor-arrangement-fields" class="advanced-fields task-arrangement-fields">', '</section>');
+const desktopTaskEditorAdvancedFields = sourceBetween(desktopTaskEditorSource, '<section v-if="detailsOpen" id="task-editor-more-fields" class="advanced-fields">', '</section>');
+const desktopTaskEditorPrimaryFields = sourceBetween(desktopTaskEditorSource, 'settingsStore.t("task.autoFillHint")', 'settingsStore.t("task.bodyDetails")');
+assert.doesNotMatch(desktopTaskEditorPrimaryFields, /task\.content|task\.checklist|task\.plan|task\.due|task\.reminder|task\.priority|task\.list/, "Desktop task editor default path should keep optional notes, checklist, scheduling, and priority behind disclosures");
+assert.match(desktopTaskEditorBodyFields, /task\.content[\s\S]*task\.checklist/, "Desktop optional body section must keep notes and checklist available");
+assert.match(desktopTaskEditorArrangementFields, /task\.list[\s\S]*task\.plan[\s\S]*task\.due[\s\S]*task\.reminder[\s\S]*task\.priority/, "Desktop arrangement section must keep scheduling, list, and priority available after the quick-capture fields");
+assert.doesNotMatch(desktopTaskEditorAdvancedFields, /task\.checklist|task\.list|task\.plan|task\.due|task\.reminder|task\.priority/, "Desktop More settings should not mix notes, checklist, or scheduling fields with secondary metadata");
 assertOrder(
   desktopTaskEditorSource,
-  'settingsStore.t("task.content")',
-  'settingsStore.t("task.moreSettings")',
-  "Desktop task editor must show title/content before optional scheduling settings",
+  'settingsStore.t("task.bodyDetails")',
+  'settingsStore.t("task.arrangementSettings")',
+  "Desktop task editor must offer notes/checklist before optional scheduling settings",
 );
 assert.match(desktopTaskViewSource, /primaryFilterOptions/, "Desktop task list must keep common filters in a short primary strip");
 assert.match(desktopTaskViewSource, /secondaryFilterOptions/, "Desktop task list must move uncommon filters into a secondary selector");
-assert.match(desktopTaskViewSource, /filter-advanced-details/, "Desktop project and tag filters must be hidden behind an advanced filter disclosure");
-const desktopFilterToolbar = sourceBetween(desktopTaskViewSource, '<div class="filter-toolbar">', '<div v-if="hasActiveFilters"');
-assert.doesNotMatch(desktopFilterToolbar.replace(/<details class="filter-advanced-details"[\s\S]*?<\/details>/, ""), /selectedProject|selectedTag/, "Desktop project and tag selectors must not sit in the default filter toolbar");
+assert.match(desktopTaskViewSource, /<details class="filter-menu">/, "Desktop secondary, project, and tag filters must be hidden behind one on-demand menu");
+const desktopFilterToolbar = sourceBetween(desktopTaskViewSource, '<div class="task-filter-toolbar">', '<div v-if="hasActiveFilters"');
+const desktopFilterMenu = sourceBetween(desktopFilterToolbar, '<details class="filter-menu">', '</details>');
+assert.match(desktopFilterMenu, /selectedProject[\s\S]*selectedTag/, "Desktop project and tag selectors must stay inside the filter menu");
+assert.doesNotMatch(desktopFilterToolbar.replace(/<details class="filter-menu">[\s\S]*?<\/details>/, ""), /selectedProject|selectedTag/, "Desktop project and tag selectors must not sit in the default filter toolbar");
 assert.match(desktopI18nSource, /"task\.projectTagFilters"/, "Desktop project/tag advanced filter must have a distinct label instead of repeating More filters");
-assert.match(desktopFilterToolbar, /settingsStore\.t\("task\.projectTagFilters"\)/, "Desktop project/tag advanced filter disclosure must avoid duplicating the secondary More filters label");
+assert.match(desktopFilterMenu, /settingsStore\.t\("task\.projectTagFilters"\)/, "Desktop project/tag filter section must remain clearly labelled inside the menu");
 assert.match(desktopTaskViewSource, /TaskListSection/, "Desktop task list sections must use one focused component instead of repeating TaskItem event wiring");
 assert.match(desktopTaskViewSource, /:aria-label="settingsStore\.t\('task\.search'\)"/, "Desktop task search input must have an accessible name");
 assert.match(desktopTaskViewSource, /:aria-pressed="filter === option\.value"/, "Desktop primary task filters must expose their pressed state");
@@ -891,15 +940,13 @@ assert.match(desktopTaskViewSource, /filter\.value === "today" \? "today" : "def
 assert.match(desktopTaskViewSource, /:create-preset="editorCreatePreset"/, "Desktop task editor must receive the current-view create preset");
 assert.match(desktopTaskViewSource, /bulkActionTargets/, "Desktop task list must expose current-view batch actions for dense lists");
 assert.match(desktopTaskViewSource, /async function completeVisibleTasks\(/, "Desktop task list must support completing visible open tasks in one action");
-assert.match(desktopTaskViewSource, /task\.completeVisibleConfirm/, "Desktop visible-task completion must ask for confirmation before batch changes");
-assert.match(desktopTaskViewSource, /async function completeVisibleTasks\([\s\S]{0,420}requestConfirmation/, "Desktop visible-task completion must confirm before completing any selected batch");
-assert.doesNotMatch(desktopTaskViewSource, /count > 5[\s\S]{0,320}requestConfirmation/, "Desktop visible-task completion must not skip confirmation for small selected batches");
+const desktopBatchComplete = sourceBetween(desktopTaskViewSource, "async function completeVisibleTasks", "async function deleteVisibleTasks");
+assert.doesNotMatch(desktopBatchComplete, /requestConfirmation|completeVisibleConfirm/, "Desktop selection mode must not ask for a second confirmation before a reversible batch completion");
 assert.match(desktopTaskViewSource, /taskStore\.batchComplete\(bulkActionTargets\.value\)/, "Desktop visible-task completion must use the existing batch completion store API");
 assert.match(desktopTaskViewSource, /async function deleteVisibleTasks\(/, "Desktop task list must support deleting visible open tasks in one action");
 assert.match(desktopTaskViewSource, /taskStore\.batchDelete\(bulkActionTargets\.value\)/, "Desktop visible-task deletion must use the existing batch delete store API");
 assert.match(desktopTaskViewSource, /settingsStore\.t\("task\.completeVisible"\)/, "Desktop visible-task completion must use localized button copy");
 assert.match(desktopTaskViewSource, /settingsStore\.t\("task\.deleteVisible"\)/, "Desktop visible-task deletion must use localized button copy");
-assert.match(desktopI18nSource, /"task\.completeVisibleConfirm"/, "Desktop i18n must include visible-task completion confirmation copy");
 assert.match(desktopTaskEditorSource, /createPreset\?: "default" \| "today"/, "Desktop task editor must accept contextual create presets");
 assert.match(desktopI18nSource, /"task\.list": \{ "zh-CN": "归类", "en-US": "Location" \}/, "Desktop task list-type field must be labeled as task location/category instead of checklist copy");
 assert.match(desktopTaskStoreSource, /listType:\s*draft\.listType \|\| "inbox"/, "Desktop quick add must not silently move every planned task into the Today list");
@@ -921,7 +968,7 @@ assert.doesNotMatch(
 );
 assert.match(desktopI18nSource, /"task\.showAllTasks"/, "Desktop i18n must include a clear-filter empty-state action label");
 assert.match(desktopTaskItemSource, /:aria-label="isCompletedStatus\(task\.status\) \? settingsStore\.t\('task\.restore'\) : settingsStore\.t\('task\.complete'\)"/, "Desktop completion checkbox button must expose a real accessible label");
-assert.match(desktopAppSource, /aria-current/, "Desktop side navigation must expose the current page to assistive technology");
+assert.match(desktopAppSidebarSource, /aria-current/, "Desktop side navigation must expose the current page to assistive technology");
 assert.match(desktopFloatingHeaderSource, /:aria-label="settingsStore\.t\('floating\.openMain'\)"/, "Desktop floating open-main control must not rely on title alone");
 assert.match(desktopFloatingHeaderSource, /:aria-label="settingsStore\.t\('floating\.hide'\)"/, "Desktop floating hide control must not rely on title alone");
 assert.match(desktopFloatingHeaderSource, /:aria-label="settingsStore\.t\('floating\.tools'\)"/, "Desktop floating tools control must not rely on title alone");
@@ -932,10 +979,13 @@ assert.match(desktopCssSource, /\.form-message-success/, "Desktop styles must in
 assert.match(desktopCssSource, /\.form-message-error/, "Desktop styles must include an error message state");
 assert.match(desktopCssSource, /\.form-message-info/, "Desktop styles must include a neutral information message state");
 assert.match(desktopMainSource, /minWidth:\s*760/, "Desktop native window minimum width must allow a narrower app window");
-assert.match(desktopCssSource, /\.app-shell[\s\S]{0,160}min-width:\s*720px/, "Desktop shell must allow a narrower app window");
-assert.doesNotMatch(desktopCssSource, /@media \(max-width: 960px\)[\s\S]{0,180}min-width:\s*760px/, "Desktop narrow layout must not force horizontal overflow at 760px");
-assert.match(desktopCssSource, /@media \(max-width: 820px\)[\s\S]*grid-template-columns:\s*1fr/, "Desktop narrow layout must collapse to one column before it overflows");
-assert.match(desktopCssSource, /prefers-reduced-motion:\s*reduce/, "Desktop styles must honor reduced-motion preferences");
+const desktopMediumWorkspaceCss = extractBalancedBlock(desktopWorkspaceCssSource, "@media (max-width: 1099px)");
+const desktopNarrowWorkspaceCss = extractBalancedBlock(desktopWorkspaceCssSource, "@media (max-width: 799px)");
+const desktopReducedMotionCss = extractBalancedBlock(desktopWorkspaceCssSource, "@media (prefers-reduced-motion: reduce)");
+assert.match(desktopWorkspaceCssSource, /\.focus-workspace\s*\{[^}]*grid-template-columns:\s*184px minmax\(0, 1fr\)/, "Desktop workspace must use the full 184px navigation at wide widths");
+assert.match(desktopMediumWorkspaceCss, /\.focus-workspace\s*\{[^}]*grid-template-columns:\s*72px minmax\(0, 1fr\)/, "Desktop workspace must collapse to icon navigation at medium widths");
+assert.match(desktopNarrowWorkspaceCss, /\.focus-workspace\s*\{[^}]*grid-template-columns:\s*64px minmax\(0, 1fr\)[^}]*overflow-x:\s*hidden/, "Desktop narrow workspace must keep its icon navigation without horizontal overflow");
+assert.match(desktopReducedMotionCss, /animation:\s*none !important/, "Desktop workspace must disable non-essential animation for reduced-motion users");
 assert.match(webStylesSource, /prefers-reduced-motion:\s*reduce/, "Web styles must honor reduced-motion preferences");
 const desktopThemedCss = sourceBetween(desktopCssSource, "\nbody,\n.login-shell", "\n@media (max-width: 960px)");
 assert.doesNotMatch(desktopThemedCss, /background:\s*#ffffff\b/, "Desktop tokenized theme layer must not fall back to hard-coded white backgrounds");
@@ -943,6 +993,7 @@ assert.match(desktopSettingsSource, /SettingsAccountDisplayPanel/, "Desktop sett
 assert.match(desktopSettingsSource, /SettingsConnectionPanel/, "Desktop settings connection section must be extracted into a focused component");
 assert.match(desktopSettingsSource, /SettingsDataSessionPanel/, "Desktop settings data/session section must be extracted into a focused component");
 assert.match(desktopSettingsSource, /SettingsMetadataPanel/, "Desktop settings metadata section must be extracted into a focused component");
+assert.match(desktopSettingsMetadataPanelSource, /<details class="settings-advanced-details settings-metadata-details"[^>]*>/, "Desktop project/tag maintenance must be collapsed by default as an advanced setting");
 const desktopFloatingOpacityBase = sourceBetween(desktopCssSource, "\n.floating-opacity {\n", "\n}\n\n.floating-opacity input");
 assert.doesNotMatch(desktopFloatingOpacityBase, /display:\s*grid/, "Desktop floating opacity slider must not take a permanent row in the compact window");
 assert.match(desktopCssSource, /\.floating-tools/, "Desktop floating opacity control must move behind a compact tools menu");
@@ -952,17 +1003,18 @@ assert.doesNotMatch(desktopFloatingHeaderSource, />\s*(?:↗|−)\s*</, "Desktop
 assert.match(androidTokenDataStoreSource, /val currentUserId: Flow<String\?>/, "Android must expose the current user id to repositories");
 assert.match(androidTaskEntitySource, /val ownerUserId: String/, "Android tasks must store the owning user id");
 assert.match(androidQueueEntitySource, /val ownerUserId: String/, "Android sync queue entries must store the owning user id");
-assert.match(androidDatabaseSource, /version = 6/, "Android Room schema version must bump for conflict snapshots");
+assert.match(androidDatabaseSource, /APP_DATABASE_VERSION = 7/, "Android Room schema version must include workspace isolation");
 assert.match(androidDatabaseSource, /MIGRATION_4_5/, "Android must migrate local tables to owner-aware storage");
 assert.match(androidDatabaseSource, /MIGRATION_5_6/, "Android must migrate local tasks to store conflict snapshots");
+assert.match(androidDatabaseSource, /MIGRATION_6_7/, "Android must migrate local tasks and queue entries into workspace-aware storage");
 assert.match(androidTaskEntitySource, /val conflictServerJson: String\?/, "Android tasks must store the cloud conflict snapshot");
 assert.match(androidTaskEntitySource, /val conflictLocalJson: String\?/, "Android tasks must store the local conflict snapshot");
-assert.match(androidDaoSource, /ownerUserId = :ownerUserId/, "Android DAO queries must filter by current owner");
+assert.match(androidDaoSource, /workspaceId = :workspaceId/, "Android DAO queries must filter by active server-and-user workspace");
 assert.ok((androidDaoSource.match(/OR listType = 'today'/g) || []).length >= 2, "Android today list and widget queries must include tasks explicitly placed in the today list");
 assert.match(androidTaskRepositorySource, /private val tokenDataStore: TokenDataStore/, "Android TaskRepository must receive TokenDataStore for owner lookup");
-assert.match(androidTaskRepositorySource, /ownerUserId\(\)/, "Android TaskRepository writes must stamp the owner id");
+assert.match(androidTaskRepositorySource, /activeWorkspace\(\)/, "Android TaskRepository writes must stamp the active workspace identity");
 assert.match(androidTaskRepositorySource, /parseConflictServerTask/, "Android cloud conflict resolution must restore the captured cloud snapshot");
-assert.match(androidSyncRepositorySource, /ownerUserId\(\)/, "Android SyncRepository must sync only the current owner");
+assert.match(androidSyncRepositorySource, /activeWorkspace\(\)/, "Android SyncRepository must sync only the active server-and-user workspace");
 assert.match(androidSyncRepositorySource, /conflictLocalJson/, "Android sync conflicts must preserve the local snapshot");
 assert.match(androidSyncRepositorySource, /conflictServerJson/, "Android sync conflicts must preserve the cloud snapshot");
 assert.match(androidAppContainerSource, /TaskRepository\([\s\S]*apiService[\s\S]*tokenDataStore/, "Android AppContainer must inject ApiService and TokenDataStore into TaskRepository");
@@ -1011,13 +1063,13 @@ assert.match(webAppSource, /deleteChecklistDraftItem/, "Web users must be able t
 assert.match(webHtmlSource, /id="taskIsTemplate"/, "Web task form must allow saving a task as a template");
 assert.match(webHtmlSource, /id="taskTemplateName"/, "Web task form must allow naming a template");
 assert.match(webHtmlSource, /id="serverLocalhostHint"/, "Web connection form must warn when localhost is likely the wrong address");
-assert.match(webHtmlSource, /id="localTrialGuide"/, "Web first-use flow must include a no-server local trial guide");
+assert.doesNotMatch(webHtmlSource, /id="localTrialGuide"/, "Web first-use flow must not add a nested local-trial disclosure to the login screen");
 assert.match(webHtmlSource, /href="\.\/local-trial\.html"/, "Web local trial guide must link to a same-origin startup guide inside the served web root");
 assert.match(webLocalTrialGuideSource, /docker compose -f docker-compose\.release\.yml up -d/, "Web local trial guide page must show the backend startup command");
 assert.match(webHtmlSource, /data-i18n="task\.list">归类<\/span>/, "Web list-type label fallback must match the current Location wording");
 assert.doesNotMatch(webHtmlSource, /data-i18n="task\.list">清单<\/span>/, "Web list-type label fallback must not show the old checklist wording before i18n hydrates");
-assert.match(webAppSource, /"confirm\.clearDraft": "清空当前任务草稿吗？标题、内容、时间和步骤都会被清除。"/, "Web clear-draft confirmation must avoid old list/checklist wording");
-assert.doesNotMatch(webAppSource, /"confirm\.clearDraft": "[^"]*清单/, "Web clear-draft confirmation must not use the old 清单 wording");
+assert.match(webAppSource, /"confirm\.clearDraft": "清空当前任务草稿吗？标题、备注、清单和时间都会被清除。"/, "Web clear-draft confirmation must use the current task editor terminology");
+assert.doesNotMatch(webAppSource, /"confirm\.clearDraft": "[^"]*步骤/, "Web clear-draft confirmation must not use the old steps wording");
 assert.match(
   webSelfHostingGuideSource,
   /docker compose -f docker-compose\.release\.yml exec api python -m tools\.create_user --username owner --email owner@example\.com/,
@@ -1051,7 +1103,7 @@ for (const token of [
   "cd TaskBridge\\deploy",
   "Copy-Item .env.local.example .env",
   "docker compose -f docker-compose.release.yml up -d",
-  "curl http://127.0.0.1:8000/ready",
+  "curl http://127.0.0.1:8080/ready",
 ]) {
   assert.match(webLocalTrialEnglishGuide, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `Web local trial English guide must include ${token}`);
 }
@@ -1083,7 +1135,12 @@ assert.match(
 );
 assert.match(
   webAppSource,
-  /resetTaskForm\(\)[\s\S]{0,320}applyTaskCreatePresetForCurrentView\(\)/,
+  /function resetTaskForm\(\)[\s\S]{0,180}resetAccountScopedTaskForm\(\)/,
+  "Web task form reset must delegate to the account-scoped form reset",
+);
+assert.match(
+  webAppSource,
+  /function resetAccountScopedTaskForm\(\)[\s\S]{0,420}applyTaskCreatePresetForCurrentView\(\)/,
   "Web task form reset must restore the current-view create preset",
 );
 assert.match(webAppSource, /"app\.localDataUnavailable"/, "Web local data failures must have a friendly localized storage error");
@@ -1104,10 +1161,16 @@ assert.match(deployReadmeSource, /METRICS_TOKEN/, "Deploy docs production requir
 const deployProductionRequiredSettings = sourceBetween(deployReadmeSource, "生产环境至少要修改：", "如果 `ENVIRONMENT=production`");
 assert.match(deployProductionRequiredSettings, /METRICS_TOKEN/, "Deploy production required settings list must explicitly include METRICS_TOKEN");
 assert.match(webHtmlSource, /<h1[^>]*data-i18n="auth\.title"[^>]*>登录 TaskBridge<\/h1>/, "Web first screen heading should lead with the product sign-in goal");
-assert.match(webHtmlSource, /id="connectionBadge"[^>]*>服务器未连接</, "Web initial connection badge must describe server state instead of browser network state");
+assert.match(webHtmlSource, /id="connectionBadge"[^>]*>等待登录</, "Web initial connection badge must not make the signed-out state look like a server failure");
+assert.doesNotMatch(webHtmlSource, /id="connectionBadge"[^>]*>服务器未连接</, "Web initial connection badge must avoid server-error wording before the user signs in");
+assert.match(webAppSource, /"connection\.awaitingLogin": "等待登录"/, "Web online unauthenticated state must not look like a server error");
 assert.match(webHtmlSource, /id="installAppButton"/, "Web must expose a PWA install action");
 assert.match(webHtmlSource, /id="installHelpPanel"/, "Web install guidance must have a persistent help panel");
-assert.doesNotMatch(webHtmlSource, /id="installAppButton"[^>]*hidden/, "Web install guidance should be controlled by app state instead of being hard-hidden in markup");
+assert.match(
+  webHtmlSource,
+  /id="installAppButton"[^>]*hidden/,
+  "Web install guidance must stay hidden on the sign-in screen so the first task remains server address and login",
+);
 assert.match(
   webHtmlSource,
   new RegExp(`<script type="module" src="\\.\\/app\\.js\\?v=${webVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"><\\/script>`),
@@ -1125,8 +1188,8 @@ assert.match(
 );
 assert.match(
   webAppSource,
-  /nodes\.syncStatusButton\.hidden\s*=\s*!authed/,
-  "Web sync status action must stay hidden until a signed-in session can make it useful",
+  /nodes\.syncStatusButton\.hidden\s*=\s*!hasSession\(\)/,
+  "Web sync status action must stay hidden until an authenticated session can make it useful",
 );
 assert.doesNotMatch(webHtmlSource, /id="syncStatusButton"[^>]*>检查连接/, "Web topbar action must not duplicate the login form's save-and-check connection action");
 assert.match(
@@ -1134,7 +1197,7 @@ assert.match(
   /const choice = await promptEvent\.userChoice[\s\S]{0,260}choice\?\.outcome !== "accepted"[\s\S]{0,120}showInstallHelp\(\)/,
   "Web PWA install flow must show browser-specific instructions when the native install prompt is dismissed or unavailable",
 );
-assert.match(webHtmlSource, /同一台电脑保持默认地址[\s\S]*局域网 IP/, "Web first-use local trial copy must explain when 127.0.0.1 is valid and when to use the backend computer LAN IP");
+assert.match(webLocalTrialGuideSource, /Web\/PWA[\s\S]*127\.0\.0\.1:8080[\s\S]*Android 真机[\s\S]*局域网 IP/, "Web local trial guide page must distinguish the Web gateway from direct client addresses");
 assertOrder(
   webHtmlSource,
   'id="authSubmitButton"',
@@ -1146,7 +1209,7 @@ assert.match(webHtmlSource, /id="testConnectionButton" type="button" class="seco
 assert.doesNotMatch(webHtmlSource, /id="savePreferencesButton"/, "Web login must not show a separate remember-server button");
 assert.match(webHtmlSource, /<title>TaskBridge<\/title>/, "Web browser title must use the product name, not a client module name");
 assert.doesNotMatch(webHtmlSource, /TaskBridge Web|浏览器端/, "Web top-level branding must not expose the client type as product copy");
-assert.match(webHtmlSource, /选择使用方式/, "Web sign-in must orient first-time users before asking for a server");
+assert.match(webHtmlSource, /选择使用方式/, "Web sign-in must keep optional first-use guidance available after the primary form");
 assert.match(webHtmlSource, /高级连接设置/, "Web API and device fields must be framed as advanced connection settings");
 assert.match(webHtmlSource, /id="developerDiagnostics"/, "Web account sidebar must hide API and device identifiers behind diagnostics");
 assert.match(webHtmlSource, /id="deviceId"[\s\S]{0,160}readonly/, "Web device id must be read-only by default");
@@ -1162,9 +1225,11 @@ assert.match(webAppSource, /registrationStatusRequiresConnectionCheck/, "Web fil
 assert.doesNotMatch(webAppSource, /catch\s*\{\s*state\.registrationEnabled = true;\s*\}/, "Web registration status failures must not optimistically enable registration");
 assert.doesNotMatch(webAppSource, /button\.hidden = !registerAvailable/, "Web registration tab must stay visible with a disabled state instead of disappearing");
 assert.match(webAppSource, /const registrationBlocked = state\.registrationStatusKnown && !state\.registrationEnabled/, "Web registration tab should only be disabled after the server confirms registration is closed");
-assert.match(webAppSource, /button\.disabled = registrationBlocked/, "Web registration tab must remain clickable while registration status is unknown");
+assert.match(webAppSource, /button\.disabled = registrationBlocked/, "Web registration tab must remain actionable while availability is unknown and only disable after the server closes registration");
+assert.match(webAppSource, /button\.setAttribute\("aria-disabled", String\(registrationBlocked\)\)/, "Web registration tab must expose the confirmed disabled state to assistive technology");
 assert.doesNotMatch(webAppSource, /return online \? "网络在线" : "离线可用"/, "Web connection badge must not equate browser connectivity with server connectivity");
 assert.match(webAppSource, /function getConnectionBadgeState\(/, "Web connection badge must derive a server-aware status");
+assert.match(webAppSource, /hasSession\(\) \? t\("connection\.unchecked"\) : t\("connection\.awaitingLogin"\)/, "Web connection badge must show a neutral waiting state before sign-in");
 assert.match(webAppSource, /服务器未连接|未连接服务器/, "Web connection badge must name the disconnected server state");
 assert.match(webAppSource, /"connection\.disconnected"/, "Web connection badge must localize disconnected server copy");
 assert.match(webAppSource, /"connection\.pendingSync"/, "Web connection badge must localize pending-sync copy");
@@ -1181,8 +1246,8 @@ assert.match(
 assert.match(webAppSource, /getInstallHelpMessage/, "Web install guidance must choose browser-specific instructions");
 assert.doesNotMatch(webAppSource, /toast\("可通过浏览器菜单安装到桌面或主屏幕。"\)/, "Web install fallback must not rely on a short generic toast");
 const webRenderInstallButtonSource = sourceBetween(webAppSource, "function renderInstallButton()", "async function installApp()");
-assert.doesNotMatch(webRenderInstallButtonSource, /hasSession\(\)/, "Web install guidance must stay available before sign-in");
-assert.match(webRenderInstallButtonSource, /nodes\.installAppButton\.hidden = false/, "Web install guidance should be visible on the first screen");
+assert.match(webRenderInstallButtonSource, /const workspaceActive = hasLocalWorkspace\(\)/, "Web install guidance visibility must depend on an active online or offline workspace");
+assert.match(webRenderInstallButtonSource, /nodes\.installAppButton\.hidden = !workspaceActive/, "Web install guidance must stay out of the unauthenticated first screen");
 assert.match(webHtmlSource, /id="clientErrorDiagnosticsNotice"/, "Web diagnostics must explain automatic client error reporting to users");
 assert.match(webAppSource, /function sanitizeClientErrorUrl\(/, "Web client error reporting must sanitize page URLs before upload");
 assert.doesNotMatch(webAppSource, /url:\s*location\.href/, "Web client error reporting must not upload the full URL with query or hash");
@@ -1205,6 +1270,26 @@ assert.match(webAppSource, /parseWebQuickTask\(nodes\.taskTitle\.value/, "Web ta
 assert.match(webAppSource, /getLocalizedPriorityLabel\(quickTask\.priority\)/, "Web quick-add preview must reuse selected-language priority labels");
 assert.doesNotMatch(webAppSource, /P\$\{quickTask\.priority\}/, "Web quick-add preview must not expose raw P-number priority copy");
 assert.match(webHtmlSource, /id="taskTitle"[\s\S]{0,180}data-i18n-placeholder="task\.quickPlaceholder"/, "Web task title must advertise natural-language quick add in the field itself");
+assert.doesNotMatch(
+  webHtmlSource,
+  /id="taskTitle"[\s\S]{0,220}placeholder="[^"]*(?:#|@|P3)/,
+  "Web task title placeholder must not make shortcut syntax look required",
+);
+assert.match(
+  webAppSource,
+  /"task\.quickPlaceholder": "例如：写周报"/,
+  "Web Chinese quick-add placeholder must start with a plain task title",
+);
+assert.match(
+  webAppSource,
+  /"task\.quickPlaceholder": "Example: write weekly report"/,
+  "Web English quick-add placeholder must start with a plain task title",
+);
+assert.doesNotMatch(
+  webAppSource,
+  /"task\.(quickPlaceholder|emptyViewHint|emptyFilteredHint)": "[^"]*(?:#|@|P3)/,
+  "Web ordinary task placeholders and empty-state hints must not lead with shortcut syntax",
+);
 assertOrder(
   webHtmlSource,
   'id="taskContent"',
@@ -1303,9 +1388,12 @@ assert.doesNotMatch(androidRegisterViewModelSource, /registrationEnabled: Boolea
 assert.match(androidLoginSource, /pendingRegisterNavigation/, "Android login should remember the user's create-account intent while checking registration availability");
 assert.match(androidLoginSource, /viewModel\.testConnection\(\)[\s\S]{0,260}pendingRegisterNavigation = true|pendingRegisterNavigation = true[\s\S]{0,260}viewModel\.testConnection\(\)/, "Android login create-account action should automatically test the connection when registration status is unknown");
 assert.doesNotMatch(androidLoginSource, /state\.registrationStatusKnown && state\.registrationEnabled && registrationAvailability\.showCreateAccountAction/, "Android login must not hide account creation until users manually test the connection");
-assert.match(androidRegisterSource, /state\.registrationStatusKnown && state\.registrationEnabled/, "Android registration must only enable submission when registration availability is known and enabled");
+assert.match(androidRegisterSource, /registrationAvailability\.actionText \?: strings\.createAccount/, "Android registration submit action must explain automatic checking when registration status is unknown");
+assert.match(androidRegisterSource, /enabled = registrationAvailability\.canSubmitRegistration/, "Android registration submit action must stay available while registration status can be checked automatically");
+assert.doesNotMatch(androidRegisterSource, /enabled = state\.registrationStatusKnown && state\.registrationEnabled && registrationAvailability\.canSubmitRegistration/, "Android registration must not force users to manually check the server before the create-account action can run");
 assert.match(androidLoginSource, /registrationAvailability\.actionText/, "Android login registration action must explain automatic checking when registration status is unknown");
-assert.match(androidRegisterSource, /registrationStatusPendingHelp/, "Android registration must tell users to check connection before registration is known");
+assert.match(androidRegistrationAvailabilitySource, /helperText = registrationStatusPendingHelp\(isEnglish\)/, "Android registration availability policy must explain how to check an unknown registration status");
+assert.match(androidRegisterSource, /registrationAvailability\.helperText/, "Android registration must render registration availability guidance");
 assert.match(androidLoginSource, /registrationDisabledHelp/, "Android login must tell users what to do when registration is closed");
 assert.match(androidRegisterSource, /registrationDisabledHelp/, "Android registration must tell users what to do when registration is closed");
 assert.match(androidLoginSource, /PasswordTextField\(/, "Android login password field must expose a show/hide control");
@@ -1314,6 +1402,26 @@ assert.match(androidI18nSource, /showPassword/, "Android i18n must define show-p
 assert.match(androidI18nSource, /hidePassword/, "Android i18n must define hide-password copy");
 assert.match(androidRegisterSource, /enabled = registrationAvailability\.canEditAccountFields/, "Android registration account fields must remain editable while registration status is being checked");
 assert.doesNotMatch(androidRegisterSource, /enabled = registrationAvailability\.canSubmitRegistration,[\s\S]{0,120}singleLine = true,[\s\S]{0,80}modifier = Modifier\.fillMaxWidth\(\)/, "Android registration account fields must not be locked by submit availability");
+const androidRegisterAccountPanelSource = sourceBetween(androidRegisterSource, "label = { Text(strings.username) }", "text = strings.connectionSettings");
+assert.match(
+  androidRegisterAccountPanelSource,
+  /RegistrationConnectionFeedbackNearSubmit\(/,
+  "Android registration must surface connection feedback near the create-account action",
+);
+assert.match(
+  androidRegisterSource,
+  /strings\.changeServerAddress/,
+  "Android registration connection feedback near submit must offer a direct change-server-address action",
+);
+assertOrder(
+  androidRegisterSource,
+  "label = { Text(strings.username) }",
+  "text = strings.connectionSettings",
+  "Android registration must ask for account details before showing connection settings",
+);
+assert.match(androidLoginSource, /strings\.advancedConnectionSecondaryHint/, "Android login advanced connection entry must mark custom URLs as usually unnecessary");
+assert.match(androidRegisterSource, /strings\.advancedConnectionSecondaryHint/, "Android registration advanced connection entry must mark custom URLs as usually unnecessary");
+assert.match(androidI18nSource, /advancedConnectionSecondaryHint/, "Android i18n must centralize advanced connection secondary guidance");
 assert.match(androidAppUiSource, /systemBarsPadding\(\)/, "Android page shell must apply system bar insets consistently");
 assert.match(androidManifestSource, /android:label="@string\/app_name"/, "Android app label must use the localized app_name resource instead of a manifest literal");
 assert.match(
@@ -1343,34 +1451,51 @@ assert.match(androidEditorViewModelSource, /EditorEntryPreset\.Today -> EditorUi
 assert.match(androidI18nSource, /10\.0\.2\.2|emulator/i, "Android local trial copy must explicitly explain emulator-to-computer backend addressing");
 assert.match(androidLoginSource, /strings\.advancedConnectionSettings/, "Android login must frame API/WebSocket fields as advanced connection settings");
 assert.match(androidRegisterSource, /strings\.advancedConnectionSettings/, "Android registration must frame API/WebSocket fields as advanced connection settings");
-assert.match(androidI18nSource, /advancedConnectionSettings = "Advanced connection settings"/, "Android i18n must include advanced connection settings copy");
+assert.match(androidI18nSource, /advancedConnectionSettings = "Troubleshooting: custom connection URLs"/, "Android i18n must include custom troubleshooting connection settings copy");
 assert.doesNotMatch(androidLoginSource, /Developer endpoints/, "Android login must not use developer-only wording for recoverable connection settings");
 assert.doesNotMatch(androidRegisterSource, /Developer endpoints/, "Android registration must not use developer-only wording for recoverable connection settings");
 assert.doesNotMatch(androidLoginSource, /showAdvancedConnectionEntry[\s\S]{0,220}connectionMessageIsError/, "Android login advanced connection entry must not depend on an error first");
 assert.doesNotMatch(androidRegisterSource, /showAdvancedConnectionEntry[\s\S]{0,220}connectionMessageIsError/, "Android registration advanced connection entry must not depend on an error first");
 assert.doesNotMatch(androidLoginSource, /if \(showAdvancedConnectionEntry\)/, "Android login should always render the collapsed advanced connection entry");
 assert.doesNotMatch(androidRegisterSource, /if \(showAdvancedConnectionEntry\)/, "Android registration should always render the collapsed advanced connection entry");
-assert.match(androidLoginSource, /FirstUseGuide/, "Android login must orient first-time users before asking for a server");
+assert.match(androidLoginSource, /FirstUseGuide/, "Android login must keep optional first-use guidance available after the primary form");
+const androidSignInPanelSource = sourceBetween(androidLoginSource, "private fun SignInPanel(", "private fun FirstUseGuide(");
 assertOrder(
-  androidLoginSource,
-  "FirstUseGuide(strings = strings)",
-  "strings.connectionSettings",
-  "Android login should orient first-time users before asking for connection settings",
+  androidSignInPanelSource,
+  "value = state.serverBaseUrl",
+  "value = state.usernameOrEmail",
+  "Android login should keep the server address before account controls in the primary sign-in flow",
 );
 assertOrder(
   androidLoginSource,
-  "strings.connectionSettings",
-  "strings.signIn",
-  "Android login should ask users to confirm the server connection before showing the sign-in form",
+  "SignInPanel(",
+  "FirstUseGuide(strings = strings)",
+  "Android login should place optional setup guidance after sign-in controls",
 );
 assert.match(androidRegisterSource, /FirstUseGuide/, "Android registration must orient first-time users before asking for a server");
 assert.match(androidLoginSource, /var detailsOpen by remember/, "Android login first-use guidance must collapse setup details by default");
 assert.match(androidRegisterSource, /var detailsOpen by remember/, "Android registration first-use guidance must collapse setup details by default");
 assert.doesNotMatch(androidLoginSource, /Web 客户端的本机试用\/自托管说明|Web client local-trial and self-hosting guides/, "Android login first-use guide must not send Android-only users to Web-client setup wording");
 assert.doesNotMatch(androidRegisterSource, /Web 客户端的本机试用\/自托管说明|Web client local-trial and self-hosting guides/, "Android registration first-use guide must not send Android-only users to Web-client setup wording");
-assert.match(androidI18nSource, /Use Docker local trial when you only want to test on your own computer/, "Android i18n must include an Android-friendly local trial path");
+assert.doesNotMatch(androidI18nSource, /Use Docker local trial|Docker 本机试用/, "Android first-use copy must not front-load Docker in the sign-in path");
+assert.match(androidI18nSource, /10\.0\.2\.2/, "Android local-trial help must still explain the emulator address when users need it");
 assert.match(androidLoginSource, /strings\.localTrialHelp/, "Android login first-use guide must use localized local-trial copy");
 assert.match(androidRegisterSource, /strings\.localTrialHelp/, "Android registration first-use guide must use localized local-trial copy");
+assert.match(androidI18nSource, /openLocalTrialGuide/, "Android first-use copy must include a direct local-trial guide action");
+assert.match(androidI18nSource, /openSelfHostGuide/, "Android first-use copy must include a direct self-hosting guide action");
+assert.match(androidLoginSource, /LocalUriHandler\.current/, "Android login first-use guide must be able to open documentation directly");
+assert.match(androidRegisterSource, /LocalUriHandler\.current/, "Android registration first-use guide must be able to open documentation directly");
+assert.match(androidLoginSource, /strings\.openLocalTrialGuide/, "Android login first-use guide must render a direct local-trial guide button");
+assert.match(androidRegisterSource, /strings\.openLocalTrialGuide/, "Android registration first-use guide must render a direct local-trial guide button");
+assert.match(androidLoginSource, /strings\.openSelfHostGuide/, "Android login first-use guide must render a direct self-hosting guide button");
+assert.match(androidRegisterSource, /strings\.openSelfHostGuide/, "Android registration first-use guide must render a direct self-hosting guide button");
+assert.doesNotMatch(androidLoginSource, /strings\.setupChecklist/, "Android login first-use help must not repeat a setup checklist in the ordinary sign-in path");
+assert.doesNotMatch(androidRegisterSource, /strings\.setupChecklist/, "Android registration first-use help must not repeat a setup checklist in the ordinary registration path");
+assert.doesNotMatch(androidI18nSource, /setupChecklist/, "Android i18n data model must not keep an unused setup checklist field");
+assert.match(androidI18nSource, /setupHelpSummary = "没有服务器地址？"/, "Android collapsed setup help label must be short and decision-oriented in Chinese");
+assert.match(androidI18nSource, /setupHelpSummary = "No server address\?"/, "Android collapsed setup help label must be short and decision-oriented in English");
+assert.match(androidI18nSource, /localTrialHelp = "本机试用：/, "Android local-trial help must label the trial path directly");
+assert.match(androidI18nSource, /selfHostGuide = "自托管：/, "Android self-host help must label the self-host path directly");
 for (const [name, source] of [
   ["Android login", androidLoginSource],
   ["Android register", androidRegisterSource],
@@ -1378,8 +1503,8 @@ for (const [name, source] of [
 ]) {
   assert.doesNotMatch(source, /label = \{ Text\(if \(isEnglish\) "API URL"/, `${name} advanced request endpoint must not be API-first copy`);
   assert.doesNotMatch(source, /label = \{ Text\(if \(isEnglish\) "WebSocket URL"/, `${name} advanced sync endpoint must not be WebSocket-first copy`);
-  assert.match(source, /strings\.requestUrlAdvanced|Request URL \(advanced\)/, `${name} advanced request endpoint must use user-facing copy`);
-  assert.match(source, /strings\.syncConnectionUrlAdvanced|Sync connection URL \(advanced\)/, `${name} advanced sync endpoint must use user-facing copy`);
+  assert.match(source, /strings\.requestUrlAdvanced|Request address for custom proxy/, `${name} advanced request endpoint must use user-facing copy`);
+  assert.match(source, /strings\.syncConnectionUrlAdvanced|Sync address for custom proxy/, `${name} advanced sync endpoint must use user-facing copy`);
 }
 assert.match(androidLoginSource, /localhostWarningText/, "Android login must warn when localhost is likely the wrong address");
 assert.match(androidRegisterSource, /localhostWarningText/, "Android registration must warn when localhost is likely the wrong address");
@@ -1397,15 +1522,34 @@ assert.match(androidReminderManagerSource, /tokenDataStore\.language\.first\(\)/
 assert.match(androidReminderManagerSource, /stringsFor\(AppLanguage\.fromCode/, "Android reminder actions and fallback text must come from localized strings");
 assert.doesNotMatch(androidReminderManagerSource, /"Task reminders"|"TaskBridge due task reminders"|"Task reminder"/, "Android reminders must not hard-code English notification copy");
 assert.doesNotMatch(androidReminderManagerSource, /\.addAction\(0, "完成"/, "Android reminder complete action must not be hard-coded Chinese");
-const desktopFirstUseGuide = sourceBetween(desktopLoginSource, '<div class="first-use-guide"', '<div class="auth-form login-connection">');
+const desktopFirstUseGuide = sourceBetween(
+  desktopLoginSource,
+  '<details class="first-use-guide first-use-guide-collapsed">',
+  '</details>',
+);
 assert.match(desktopFirstUseGuide, /:aria-label="settingsStore\.t\('auth\.firstUseTitle'\)"/, "Desktop first-use guide accessible name must follow the selected language");
 assert.doesNotMatch(desktopFirstUseGuide, /command-snippet|localTrialGuideText\(\)/, "Desktop first-use guide must not put deployment commands in the auth screen");
 assert.doesNotMatch(desktopFirstUseGuide, /git clone/, "Desktop local-trial guide must not require installed users to clone the repository before understanding the path");
 assert.match(desktopLoginSource, /源码\/部署包|source or deployment package/, "Desktop local-trial guide must explain that users need the TaskBridge source or deployment package before running deploy commands");
 assert.match(desktopFirstUseGuide, /copyDeployDocsReference/, "Desktop local-trial guide must keep an actionable reference without exposing command blocks");
 assert.match(desktopLoginSource, /TaskBridge 本机试用/, "Desktop local-trial guide title must avoid front-loading deployment tooling names");
-assert.match(desktopI18nSource, /No server\? Local trial guide/, "Desktop English local-trial summary must avoid front-loading deployment tooling names");
+assert.match(desktopI18nSource, /If you do not have one, ask your administrator or deployer first/, "Desktop English local-trial summary must avoid front-loading deployment tooling names");
 assert.doesNotMatch(desktopI18nSource, /Docker local trial|Docker 本机试用|Docker 本机试用说明/, "Desktop local-trial copy must not front-load Docker in ordinary login guidance");
+assert.doesNotMatch(
+  desktopLoginSource,
+  /registrationBlocked \|\| !auth\.registrationStatusKnown" class="form-error"/,
+  "Desktop login must not style an unknown registration status as an error",
+);
+assert.match(
+  desktopLoginSource,
+  /const registrationUnavailableText = computed\(\(\) =>[\s\S]{0,160}registrationBlocked\.value \? settingsStore\.t\("auth\.registrationClosed"\) : settingsStore\.t\("auth\.registrationUnknown"\)/,
+  "Desktop login must still derive separate closed-registration and unknown-status guidance",
+);
+assert.match(
+  desktopLoginSource,
+  /:title="registrationBlocked \|\| !auth\.registrationStatusKnown \? registrationUnavailableText : ''"/,
+  "Desktop login register tab must keep concise status guidance without repeating a second paragraph",
+);
 assert.match(androidLoginSource, /reducePendingRegistrationNavigation/, "Android login must reduce pending registration navigation through a tested policy helper");
 assert.match(androidLoginSource, /registrationStatusUnknownAfterCheckHelp/, "Android login must explain when registration status cannot be confirmed after a connection check");
 assert.match(androidRegisterSource, /registrationAvailability\.helperText/, "Android registration must show registration availability help before disabled form fields");
@@ -1415,7 +1559,10 @@ assertOrder(
   "value = state.username",
   "Android registration should explain unavailable registration before showing disabled account fields",
 );
-assert.match(androidTaskListSource, /taskListSubtitleOrNull/, "Android task rows must hide empty subtitles instead of repeating a no-due placeholder");
+assert.doesNotMatch(androidTaskListSource, /taskListSubtitleOrNull/, "Android task rows must not collapse metadata into one truncating subtitle line");
+assert.match(androidTaskListSource, /TaskMetaChips\(/, "Android task rows must render task metadata as wrapping chips");
+assert.match(androidTaskListSource, /private fun TaskMetaChips/, "Android task metadata chips must be a focused composable");
+assert.doesNotMatch(androidTaskListSource, /private fun Task\.subtitle\(/, "Android task rows must not keep slash-joined metadata subtitles");
 assert.match(androidTaskListSource, /val activeFilterLabels = activeTaskFilterLabels\(/, "Android task list must derive visible active filter labels");
 assert.match(androidTaskListSource, /TaskFilterSummaryBar\(/, "Android task list must show a current-filter summary below filter controls");
 assert.match(
@@ -1453,7 +1600,7 @@ assert.doesNotMatch(
   "Android permanent delete failure must not tell users the delete was queued",
 );
 assert.match(androidSyncStatusBarSource, /SyncStatusMessage\.PurgeFailed/, "Android sync status bar must localize permanent-delete failure feedback");
-assert.match(androidTaskListSource, /if \(uiState\.syncMessage != SyncStatusMessage\.LocalCacheReady\)/, "Android task list should not reserve the main status bar for the normal healthy state");
+assert.match(androidTaskListSource, /if \(!localWorkspaceMode && uiState\.syncMessage != SyncStatusMessage\.LocalCacheReady\)/, "Android task list should hide online sync status in local mode and avoid reserving the main status bar for the normal healthy state");
 assert.match(androidI18nSource, /purge = "永久删除"/, "Android i18n must include permanent-delete copy");
 assert.match(androidTaskListSource, /pendingConflictAction/, "Android conflict actions must require confirmation before resolving");
 assert.match(androidTaskListSource, /ConflictActionConfirmationDialog/, "Android conflict resolution must explain the consequence before applying");
@@ -1519,9 +1666,9 @@ assert.match(androidEditorViewModelSource, /preserveChecklistItemState/, "Androi
 assert.match(androidEditorSource, /state\.project/, "Android editor UI must render the project field");
 assert.match(androidEditorSource, /state\.plannedDate/, "Android editor UI must render the planned date field");
 assert.match(androidEditorSource, /state\.checklistText/, "Android editor UI must render the checklist field");
-assert.match(androidEditorSource, /QuickFieldsPanel/, "Android editor must keep common scheduling fields available in the optional arrangement section");
+assert.match(androidEditorSource, /ArrangementTaskFieldsPanel/, "Android editor must keep common scheduling fields available in the optional arrangement section");
 assert.match(androidEditorSource, /AdvancedTaskFieldsPanel/, "Android editor must keep secondary metadata behind the more-settings section");
-const androidQuickFieldsSection = sourceBetween(androidEditorSource, "private fun QuickFieldsPanel(", "private fun AdvancedTaskFieldsPanel(");
+const androidQuickFieldsSection = sourceBetween(androidEditorSource, "private fun ArrangementTaskFieldsPanel(", "private fun AdvancedTaskFieldsPanel(");
 for (const marker of ["strings.priority", "state.plannedDate", "state.dueTime", "state.remindTime"]) {
   assert.match(
     androidQuickFieldsSection,
@@ -1533,7 +1680,7 @@ const androidAdvancedFieldsSection = sourceBetween(androidEditorSource, "private
 assertOrder(
   androidEditorSource,
   "TextButton(onClick = { arrangeOpen = !arrangeOpen }",
-  "QuickFieldsPanel(",
+  "ArrangementTaskFieldsPanel(",
   "Android optional scheduling fields should appear only after the arrangement toggle",
 );
 assert.match(androidQuickAddParserSource, /projectRegex/, "Android quick-add parser must extract @project shorthand like desktop and Web");
@@ -1552,7 +1699,7 @@ assert.match(androidTaskRowSource, /dangerSectionLabel = if \(languageCode == "e
 assert.match(androidTaskRowSource, /DropdownMenuSectionLabel\(adjustPlanSectionLabel\)[\s\S]{0,520}strings\.today[\s\S]{0,520}strings\.tomorrow[\s\S]{0,520}strings\.snoozeOneHour/, "Android schedule actions must sit under the adjust-plan group");
 assert.match(androidTaskRowSource, /DropdownMenuSectionLabel\(resolveConflictSectionLabel\)[\s\S]{0,520}strings\.keepServerVersion[\s\S]{0,520}strings\.keepDeviceVersion/, "Android conflict decisions must sit under the conflict-resolution group");
 assert.match(androidTaskRowSource, /DropdownMenuSectionLabel\(dangerSectionLabel\)[\s\S]{0,260}strings\.delete/, "Android delete must sit under the danger group");
-const androidQuickFieldsPanel = sourceBetween(androidEditorSource, "private fun QuickFieldsPanel(", "private fun AdvancedTaskFieldsPanel(");
+const androidQuickFieldsPanel = sourceBetween(androidEditorSource, "private fun ArrangementTaskFieldsPanel(", "private fun AdvancedTaskFieldsPanel(");
 assert.match(androidQuickFieldsPanel, /DateTimeActionRow/, "Android optional date/time controls must use compact action rows");
 assert.doesNotMatch(androidQuickFieldsPanel, /OutlinedTextField[\s\S]{0,180}readOnly = true/, "Android optional date/time controls must not duplicate a read-only field and a pick button");
 assert.match(androidSettingsSource, /SettingsSectionButton/, "Android settings must expose a compact section navigation strip");
@@ -1568,9 +1715,11 @@ assert.match(androidSettingsSource, /showTechnicalDiagnostics/, "Android trouble
 assert.match(androidSettingsSource, /confirmExportBackup/, "Android backup export must require explicit confirmation before sharing task data");
 assert.match(androidSettingsSource, /confirmClearLocalData/, "Android settings must confirm before clearing this device's data");
 assert.match(androidSettingsSource, /taskRepository\.clearLocalDeviceData\(\)/, "Android clear-this-device flow must delete local task data before logout");
-assert.match(androidSettingsSource, /Log out and clear this device/, "Android settings must expose a clear-this-device action");
+assert.match(androidSettingsSource, /Clear this device/, "Android settings must expose a clear-this-device action");
 assert.match(androidTaskRepositorySource, /suspend fun clearLocalDeviceData/, "Android repository must implement clear-this-device data clearing");
-assert.match(androidDaoSource, /deleteAllForOwner/, "Android DAO must support clearing local data for the current owner");
+assert.match(androidDaoSource, /DELETE FROM tasks WHERE workspaceId = :workspaceId/, "Android DAO must scope local task clearing to the active workspace");
+assert.match(androidDaoSource, /suspend fun deleteAllForWorkspace\(workspaceId: String\)/, "Android DAO must expose workspace-scoped local data clearing");
+assert.doesNotMatch(androidDaoSource, /@Query\("DELETE FROM tasks"\)/, "Android DAO must not expose unscoped task clearing");
 assert.match(androidI18nSource, /importBackup/, "Android settings must include user-facing import backup copy");
 assert.match(androidSettingsSource, /rememberLauncherForActivityResult/, "Android settings must provide an explicit backup import picker");
 assert.match(androidSettingsSource, /ActivityResultContracts\.OpenDocument/, "Android backup import must use the platform document picker");
@@ -1616,8 +1765,9 @@ assert.match(androidSettingsSource, /saveAdvancedConnection/, "Android settings 
 assert.match(androidSettingsSource, /authRepository\.testConnection\(\)[\s\S]{0,480}"Connection is ready\."/, "Android advanced endpoint save must verify the API endpoint before showing a ready state");
 assert.match(androidTokenDataStoreSource, /fun validateApiBaseUrl/, "Android advanced API endpoint must have explicit user-input validation");
 assert.match(androidTokenDataStoreSource, /fun validateWebSocketUrl/, "Android advanced WebSocket endpoint must have explicit user-input validation");
-assert.match(androidTokenDataStoreSource, /preferences\[API_BASE_URL\] = validateApiBaseUrl\(apiBaseUrl\)/, "Android advanced endpoint save must not silently fall back for invalid API URLs");
-assert.match(androidTokenDataStoreSource, /preferences\[WEB_SOCKET_URL\] = validateWebSocketUrl\(webSocketUrl\)/, "Android advanced endpoint save must not silently fall back for invalid WebSocket URLs");
+assert.match(androidTokenDataStoreSource, /val normalizedApiBaseUrl = validateApiBaseUrl\(apiBaseUrl\)[\s\S]{0,240}apiBaseUrl = normalizedApiBaseUrl/, "Android advanced endpoint save must validate API URLs before persistence");
+assert.match(androidTokenDataStoreSource, /webSocketUrl = validateWebSocketUrl\(webSocketUrl\)/, "Android advanced endpoint save must validate WebSocket URLs before persistence");
+assert.match(androidTokenDataStoreSource, /preferences\[API_BASE_URL\] = endpoints\.apiBaseUrl[\s\S]{0,120}preferences\[WEB_SOCKET_URL\] = endpoints\.webSocketUrl/, "Android endpoint persistence must store only the validated endpoint object");
 assert.match(androidSettingsSource, /validateApiBaseUrl\(apiBaseUrlDraft\)/, "Android settings must validate the advanced API URL before saving and testing");
 assert.match(androidSettingsSource, /validateWebSocketUrl\(webSocketUrlDraft\)/, "Android settings must validate the advanced WebSocket URL before saving and testing");
 assert.match(androidSettingsSource, /ZoneId\.getAvailableZoneIds\(\)/, "Android time zone selection must use the platform time-zone list instead of a short fixed list");
@@ -1660,7 +1810,7 @@ assert.match(
   "Deploy docs must provide a concrete first-account command for self-hosted production deployments",
 );
 assert.match(deployReadmeSource, /## 生产运维/, "Deploy docs must move monitoring and proxy trust details into a production operations section");
-assert.match(deployReadmeSource, /客户端填写服务器根地址：`https:\/\/<域名>`/, "Deploy HTTPS docs must keep ordinary clients on the server root URL");
+assert.match(deployReadmeSource, /客户端填写服务器根地址[\s\S]{0,160}http:\/\/<服务器 IP 或域名>:8080[\s\S]{0,80}https:\/\/<域名>/, "Deploy connection docs must keep ordinary clients on the unified server root URL for HTTP or HTTPS");
 assert.doesNotMatch(deployReadmeSource, /客户端使用：[\s\S]{0,80}https:\/\/<域名>\/api\/v1\//, "Deploy HTTPS docs must not tell ordinary clients to use the API path as the server URL");
 assertOrder(
   deployReadmeSource,
@@ -1690,15 +1840,11 @@ assert.match(
 );
 assert.match(deployEnvExampleSource, /REGISTRATION_ENABLED=false/, "Production env example must keep open registration disabled by default");
 assert.match(deployEnvExampleSource, /TASKBRIDGE_API_BIND=127\.0\.0\.1:8000/, "Production env example must bind the API to loopback by default");
+assert.match(deployEnvExampleSource, /TASKBRIDGE_WEB_BIND=127\.0\.0\.1:8080/, "Production env example must bind the Web gateway to loopback by default");
 assert.match(deployLocalEnvExampleSource, /TASKBRIDGE_API_BIND=8000/, "Local env example must keep the API reachable from LAN devices");
-assert.match(readmeSource, /## 截图[\s\S]{0,160}当前客户端实际页面为准/, "README screenshots must tell users when screenshots are illustrative and current clients are authoritative");
+assert.match(deployLocalEnvExampleSource, /TASKBRIDGE_WEB_BIND=8080/, "Local env example must keep the Web gateway reachable from LAN devices");
+assert.doesNotMatch(readmeSource, /docs\/assets\/screenshots\/(?:PC|APP)/, "README must not present legacy screenshots as the current interface");
 assert.match(readmeSource, /### 已有服务器地址/, "README ordinary-user quick start must start with the existing-server path");
-assertOrder(
-  readmeSource,
-  "## 普通用户快速开始",
-  "## 截图",
-  "README must put the ordinary-user quick start before screenshots",
-);
 assertOrder(
   readmeSource,
   "## 普通用户快速开始",
@@ -1725,16 +1871,29 @@ assert.match(
   /## 本机试用时的地址[\s\S]{0,260}电脑上本机试用时[\s\S]{0,260}手机或另一台电脑访问时[\s\S]{0,260}运行后端那台设备的地址/,
   "Ordinary-user quick start must explain the local device vs phone/other-device address difference",
 );
-assert.match(userQuickStartDocSource, /离线[\s\S]{0,220}本机保存[\s\S]{0,220}网络恢复|网络恢复[\s\S]{0,220}本机保存[\s\S]{0,220}离线/, "Ordinary-user quick start must explain offline editing and later sync");
+assert.match(userQuickStartDocSource, /继续离线使用[\s\S]{0,500}登录并同步[\s\S]{0,260}待同步修改/, "Ordinary-user quick start must explain Web offline editing and the later sign-in required for sync");
 assert.match(userQuickStartDocSource, /清除[\s\S]{0,260}不会删除服务器[\s\S]{0,260}导出备份|导出备份[\s\S]{0,260}不会删除服务器[\s\S]{0,260}清除/, "Ordinary-user quick start must explain clear-this-device safety and backups");
+assert.match(
+  userQuickStartDocSource,
+  /标题是默认主输入[\s\S]{0,220}添加备注和清单[\s\S]{0,220}时间与安排[\s\S]{0,220}“更多”展开/,
+  "Ordinary-user quick start must explain the title-first task editor path and optional sections",
+);
+assert.match(userQuickStartDocSource, /项目 \/ 标签维护[\s\S]{0,220}默认收起/, "Ordinary-user quick start must explain low-frequency settings are collapsed");
 assert.doesNotMatch(
   userQuickStartDocSource,
   /^(?!## 维护者|## 开发者|## 自托管维护者).*(JWT|Redis|MySQL|CORS|WebSocket|docker compose|\.env)/m,
   "Ordinary-user quick start must keep implementation details out of the main user path",
 );
 assert.match(readmeSource, /开发者和自托管说明/, "README must separate implementation details from ordinary user onboarding");
-assert.match(readmeSource, /本机试用请使用 `\.env\.local\.example`/, "README developer setup must use the local-trial name");
-assert.match(readmeSource, /仅本机试用可以使用 `WEB_CORS_ORIGINS=\*`/, "README CORS guidance must use the local-trial name");
+assert.doesNotMatch(readmeSource, /## 开发启动|## 开发者技术栈|## 开发者常用验证命令/, "README must move developer commands into the development doc");
+assert.match(readmeSource, /\[开发说明\]\(\.\/docs\/development\.md\)/, "README developer section must link to the development doc");
+assert.match(developmentDocSource, /^# TaskBridge 开发说明/m, "Development doc must exist with a clear title");
+assert.match(developmentDocSource, /## 开发启动[\s\S]*### Web\/PWA/, "Development doc must contain local startup instructions including Web/PWA");
+assert.match(developmentDocSource, /## 开发者技术栈[\s\S]*轻量 JSON 配置/, "Development doc must keep the technical stack details");
+assert.match(developmentDocSource, /## 开发者常用验证命令[\s\S]*check:auth-session-config[\s\S]*check:contract-drift/, "Development doc must keep desktop verification commands");
+assert.match(developmentDocSource, /本机试用请使用 `\.env\.local\.example`/, "Development doc developer setup must use the local-trial name");
+assert.match(developmentDocSource, /仅本机试用可以使用 `WEB_CORS_ORIGINS=\*`/, "Development doc CORS guidance must use the local-trial name");
+assert.doesNotMatch(readmeSource, /WEB_CORS_ORIGINS|bootstrap-local\.ps1|-ReportOnly|-BootstrapMissing/, "README must keep implementation commands and CORS details out of the entry document");
 assert.doesNotMatch(readmeSource, /(^|\n)Docker 本机试用请使用|(^|\n)Docker 本机试用可以使用/, "README must not mix old Docker local-trial wording in developer setup");
 assert.match(readmeSource, /已有服务器/, "README must explain the existing-server path");
 const readmeOrdinaryQuickStart = sourceBetween(readmeSource, "## 普通用户快速开始", "## 开发者和自托管说明");
@@ -1758,6 +1917,23 @@ assert.match(desktopLoginSource, /copyDeployDocsReference/, "Desktop login local
 assert.match(desktopLoginSource, /copyDeployDocsReference[\s\S]{0,500}try[\s\S]{0,220}navigator\.clipboard\.writeText[\s\S]{0,220}catch/, "Desktop login local-trial copy action must show a fallback when clipboard access fails");
 assert.doesNotMatch(desktopLoginSource, /deploy\/README\.md#/, "Desktop login local-trial guide must not copy a repository-relative docs path for installed users");
 assert.match(desktopLoginSource, /openLocalTrialGuide/, "Desktop login local-trial action must open a usable guide instead of only copying text");
+assert.match(desktopLoginSource, /const selfHostGuideUrl\s*=/, "Desktop login must keep a dedicated self-hosting guide URL instead of overloading the local trial guide");
+assert.match(desktopLoginSource, /async function openSelfHostGuide\(\): Promise<void>/, "Desktop login must expose a direct self-hosting guide action");
+assert.match(
+  desktopFirstUseGuideSource,
+  /@click="openLocalTrialGuide"[\s\S]{0,220}auth\.openLocalTrialGuide[\s\S]{0,420}@click="openSelfHostGuide"[\s\S]{0,220}auth\.openSelfHostGuide/,
+  "Desktop first-use help must offer separate local-trial and self-hosting buttons",
+);
+assert.match(
+  desktopI18nSource,
+  /"auth\.openLocalTrialGuide": \{ "zh-CN": "打开本机试用说明", "en-US": "Open local trial guide" \}/,
+  "Desktop local-trial guide label must match Web and Android",
+);
+assert.match(
+  desktopI18nSource,
+  /"auth\.openSelfHostGuide": \{ "zh-CN": "打开自托管说明", "en-US": "Open self-hosting guide" \}/,
+  "Desktop self-hosting guide label must match Web and Android",
+);
 assert.match(desktopLoginSource, /bridge\(\)\.app\.openExternal/, "Desktop login local-trial action must use the desktop shell bridge to open the guide");
 assert.match(desktopIpcSource, /shell\.openExternal/, "Desktop IPC must expose a controlled external-guide open action");
 
@@ -1768,19 +1944,31 @@ assert.match(desktopFloatingStoreSource, /task\.plannedDate|task\.dueTime/, "Des
 
 assert.doesNotMatch(readmeSource, /### 先判断你是哪一种用户/, "README ordinary-user quick start must not repeat the same three entry choices twice");
 assert.doesNotMatch(desktopI18nSource, /"auth\.firstUseTitle": \{ "zh-CN": "先判断你是哪一种用户"/, "Desktop login first-use title should be action-oriented, not another persona checklist");
-assert.match(androidLoginSource, /AppDropdownField\([\s\S]{0,260}label = strings\.language[\s\S]{0,520}FirstUseGuide/, "Android login must expose language switching before first-use guidance");
+assertOrder(androidLoginSource, "label = strings.language", "SignInPanel(", "Android login must expose language switching before sign-in controls");
+assertOrder(androidLoginSource, "SignInPanel(", "FirstUseGuide(strings = strings)", "Android login must keep optional first-use guidance after sign-in controls");
 assert.doesNotMatch(androidLoginSource, /FirstUseGuide[\s\S]{0,1200}label = strings\.language/, "Android login must not bury language switching inside the sign-in panel");
 assert.match(androidRegisterSource, /AppDropdownField\([\s\S]{0,260}label = strings\.language[\s\S]{0,520}FirstUseGuide/, "Android registration must expose language switching before first-use guidance");
 assert.doesNotMatch(androidRegisterSource, /FirstUseGuide[\s\S]{0,1200}label = strings\.language/, "Android registration must not bury language switching inside the connection panel");
 assert.match(androidMainActivitySource, /val targetRoute = widgetLaunchTarget\?\.toRoute\(\) \?: Routes\.Today/, "Android authenticated startup should land on Today by default");
-assert.match(androidMainActivitySource, /onLoginSuccess = \{[\s\S]{0,120}navController\.navigate\(Routes\.Today\)/, "Android sign-in should land on Today, matching the desktop default");
-assert.match(androidMainActivitySource, /onRegisterSuccess = \{[\s\S]{0,120}navController\.navigate\(Routes\.Today\)/, "Android registration should land on Today, matching the sign-in path");
+assert.match(androidMainActivitySource, /val startDestination = remember\(navController\) \{[\s\S]{0,100}if \(token\.isNullOrBlank\(\)\) Routes\.Login else Routes\.Today/, "Android authenticated startup must build the navigation graph directly on Today without rebuilding it on later token changes");
+assert.match(androidMainActivitySource, /NavHost\(navController = navController, startDestination = startDestination\)/, "Android navigation host must use the resolved authentication start destination");
+assert.match(androidMainActivitySource, /val sharedTextHandled = savedInstanceState\?\.getBoolean\(SHARED_TEXT_HANDLED_STATE_KEY\) == true/, "Android activity recreation must restore whether shared text was already handled");
+assert.match(androidMainActivitySource, /if \(!sharedTextHandled\) loadSharedText\(intent\)/, "Android activity recreation must not replay a handled share intent over restored editor state");
+assert.match(androidMainActivitySource, /override fun onSaveInstanceState\(outState: Bundle\)[\s\S]{0,500}sharedTextState\?\.value == null/, "Android activity recreation must preserve whether shared text has already been consumed");
+assert.match(androidMainActivitySource, /viewModel\.updateContent\(draft\.content\)[\s\S]{0,120}sharedTextState\.value = null/, "Android shared text must be consumed after it is applied to the editor");
+assert.match(androidMainActivitySource, /onLoginSuccess = \{[\s\S]{0,120}navController\.navigateAfterAuthentication\(Routes\.Today\)/, "Android sign-in should land on Today, matching the desktop default");
+assert.match(androidMainActivitySource, /onRegisterSuccess = \{[\s\S]{0,120}navController\.navigateAfterAuthentication\(Routes\.Today\)/, "Android registration should land on Today, matching the sign-in path");
+assert.match(
+  androidMainActivitySource,
+  /fun NavHostController\.navigateAfterAuthentication[\s\S]{0,220}navigate\(Routes\.Today\)[\s\S]{0,160}popUpTo\(graph\.id\) \{ inclusive = true \}/,
+  "Android authenticated navigation must clear auth history and establish Today as the root destination",
+);
 assert.match(webAppSource, /view:\s*"today"/, "Web default task view should land on Today, matching desktop and Android");
-assert.match(webHtmlSource, /data-i18n="auth\.setupChecklistTitle"/, "Web first-use screen must show a short recommended setup order");
-assert.match(webAppSource, /"auth\.setupChecklistTitle": "推荐顺序"/, "Web setup checklist must have Chinese copy");
-assert.match(webAppSource, /"auth\.setupChecklistTitle": "Recommended order"/, "Web setup checklist must have English copy");
+assert.doesNotMatch(webHtmlSource, /data-i18n="auth\.setupChecklistTitle"|class="setup-checklist"/, "Web first-use screen must not render a setup checklist before sign-in");
+assert.match(webAppSource, /"auth\.setupChecklistTitle": "推荐顺序"/, "Web i18n may keep setup checklist copy for guide pages or fallback text");
+assert.match(webAppSource, /"auth\.setupChecklistTitle": "Recommended order"/, "Web i18n may keep setup checklist English copy for guide pages or fallback text");
 assert.match(webStylesSource, /\.first-run-details/, "Web first-use optional server help must have dedicated disclosure styling");
-assert.match(webStylesSource, /\.first-run-details\s+\.first-run-details/, "Web nested Docker and self-hosting help must render as subordinate choices");
+assert.doesNotMatch(webStylesSource, /\.first-run-details\s+\.first-run-details/, "Web first-use styling must not depend on nested Docker and self-hosting disclosures");
 assert.match(webHtmlSource, /data-i18n="task\.scheduleHelp"/, "Web task form must explain plan date, due time, and reminder together");
 assert.match(webAppSource, /"task\.scheduleHelp"/, "Web i18n must define task scheduling helper copy");
 assert.match(webHtmlSource, /data-i18n="app\.syncDecision"/, "Web workspace must translate sync diagnostics into a user decision summary");
@@ -1793,15 +1981,24 @@ assert.match(webAppSource, /"sync\.nextStepNeedsCheck"/, "Web i18n must define t
 assert.match(webAppSource, /function getSyncHealthNextStepText\(/, "Web sync status must derive next-step copy through a focused helper");
 assert.match(webAppSource, /nodes\.syncNextStep\.textContent = getSyncHealthNextStepText\(status\)/, "Web renderSyncStatus must update the visible next step");
 assert.match(webHtmlSource, /data-i18n="app\.localDataSafetyHint"/, "Web local-data tools must explain what to check before clearing this device");
-assert.match(webHtmlSource, /id="supportDataTools"[\s\S]*id="syncAdvancedDiagnostics"[\s\S]*id="developerDiagnostics"[\s\S]*id="localDataTools"/, "Web diagnostics, local data, and sync details must sit behind one support disclosure with sync details first");
-assert.match(webHtmlSource, /<details id="supportDataTools" class="sidebar-details support-tools-panel">/, "Web support, data, and diagnostics tools must be collapsed by default behind one disclosure");
+const webSupportToolsSourceForDataSplit = sourceBetween(webHtmlSource, '<details id="supportDataTools"', '</details><!-- supportDataTools -->');
+assert.match(webHtmlSource, /id="supportDataTools"[\s\S]*id="syncAdvancedDiagnostics"[\s\S]*id="developerDiagnostics"/, "Web sync support disclosure must keep sync details before technical diagnostics");
+assert.doesNotMatch(webSupportToolsSourceForDataSplit, /id="localDataTools"/, "Web local data and backups must not be buried inside the sync support disclosure");
+assertOrder(
+  webHtmlSource,
+  '</details><!-- supportDataTools -->',
+  'id="localDataTools"',
+  "Web local data and backups must be a separate ordinary-user section after sync support",
+);
+assert.match(webHtmlSource, /<details id="supportDataTools" class="sidebar-details support-tools-panel">/, "Web sync support and diagnostics tools must be collapsed by default behind one disclosure");
 assert.match(webAppSource, /nodes\.supportDataTools\.open = true/, "Web sync-support shortcut must open the collapsed support disclosure before scrolling");
-assert.match(desktopI18nSource, /"auth\.setupChecklistTitle"/, "Desktop i18n may keep setup-order copy for help surfaces and docs");
+assert.doesNotMatch(desktopI18nSource, /"auth\.setupChecklistTitle"/, "Desktop i18n must remove setup-order copy after moving setup guidance into dedicated help surfaces");
 assert.doesNotMatch(desktopLoginSource, /auth\.setupChecklistTitle|class="setup-checklist"/, "Desktop login must not render a setup checklist in the ordinary sign-in path");
 assert.match(desktopI18nSource, /"task\.scheduleHelp"/, "Desktop task editor must define plan/due/reminder helper copy");
 assert.match(desktopTaskEditorSource, /task\.scheduleHelp/, "Desktop task editor must show plan/due/reminder helper copy near scheduling fields");
-assert.match(desktopI18nSource, /"task\.moreSettings": \{ "zh-CN": "更多属性", "en-US": "More properties" \}/, "Desktop optional task details must be labeled as properties, not vague settings");
-assert.match(desktopI18nSource, /"task\.hideSettings": \{ "zh-CN": "收起属性", "en-US": "Hide properties" \}/, "Desktop optional task details collapse copy must match the properties label");
+assert.match(desktopI18nSource, /"task\.arrangementSettings": \{ "zh-CN": "时间与安排", "en-US": "Time and schedule" \}/, "Desktop optional scheduling details must match the Android arrangement label");
+assert.match(desktopI18nSource, /"task\.moreSettings": \{ "zh-CN": "更多：标签、重复、模板", "en-US": "More: tags, repeat, templates" \}/, "Desktop optional metadata details must name the secondary concepts");
+assert.match(desktopI18nSource, /"task\.hideSettings": \{ "zh-CN": "收起更多", "en-US": "Hide more" \}/, "Desktop optional task details collapse copy must match the shorter More label");
 assert.match(desktopI18nSource, /"settings\.syncAtAGlance"/, "Desktop settings must define a user-facing sync-at-a-glance label");
 assert.match(desktopSettingsDataPanelSource, /settings\.syncAtAGlance/, "Desktop data settings must show sync status before diagnostics");
 assert.match(desktopI18nSource, /"settings\.syncNextStep"/, "Desktop settings must define a user-facing sync next-step label");
@@ -1818,15 +2015,23 @@ assert.match(desktopI18nSource, /"settings\.diagnosticsSupportTools": \{ "zh-CN"
 assert.match(desktopSettingsDataPanelSource, /class="settings-advanced-details settings-data-advanced-tools"/, "Desktop backup, session, and update tools must sit behind one optional data-tools disclosure");
 assert.match(desktopI18nSource, /"settings\.clearLocalDataSafetyHint"/, "Desktop settings must define clear-this-device safety guidance");
 assert.match(desktopSettingsDataPanelSource, /settings\.clearLocalDataSafetyHint/, "Desktop data settings must show safety guidance near clear-this-device");
-assertOrder(androidLoginSource, "TextButton(onClick = { detailsOpen = !detailsOpen })", "strings.setupChecklist", "Android login must keep setup order behind optional help");
-assertOrder(androidRegisterSource, "TextButton(onClick = { detailsOpen = !detailsOpen })", "strings.setupChecklist", "Android register must keep setup order behind optional help");
-assert.match(androidEditorSource, /scheduleHelpText/, "Android task editor must explain plan date, due time, and reminder together");
-assert.match(androidEditorSource, /return if \(isEnglish\) "Time and schedule" else "时间与安排"/, "Android arrangement toggle must clearly describe scheduling and placement fields");
-assert.match(androidEditorSource, /return if \(isEnglish\) "Hide time and schedule" else "收起时间与安排"/, "Android arrangement collapse copy must match the scheduling label");
-assert.match(androidI18nSource, /moreSettings = "更多属性"/, "Android optional metadata must be labeled as properties in Chinese");
-assert.match(androidI18nSource, /moreSettings = "More properties"/, "Android optional metadata must be labeled as properties in English");
-assert.match(androidI18nSource, /hideSettings = "收起属性"/, "Android optional metadata collapse copy must match properties in Chinese");
-assert.match(androidI18nSource, /hideSettings = "Hide properties"/, "Android optional metadata collapse copy must match properties in English");
+assertOrder(androidLoginSource, "TextButton(onClick = { detailsOpen = !detailsOpen })", "strings.localTrialHelp", "Android login must keep no-server help behind one optional action");
+assertOrder(androidRegisterSource, "TextButton(onClick = { detailsOpen = !detailsOpen })", "strings.localTrialHelp", "Android register must keep no-server help behind one optional action");
+assertOrder(androidLoginSource, "strings.localTrialHelp", "strings.selfHostGuide", "Android login no-server help must explain local trial before self-hosting");
+assertOrder(androidRegisterSource, "strings.localTrialHelp", "strings.selfHostGuide", "Android register no-server help must explain local trial before self-hosting");
+assert.match(androidI18nSource, /taskScheduleHelp = "计划日期表示哪天要做；截止时间表示最晚完成时间；提醒时间只负责通知。"/, "Android task editor must explain plan date, due time, and reminder together");
+assert.match(androidEditorSource, /strings\.taskScheduleHelp/, "Android task editor must render schedule helper copy from i18n");
+assert.match(androidEditorSource, /strings\.taskArrangementSettings/, "Android arrangement toggle must clearly describe scheduling and placement fields");
+assert.match(androidEditorSource, /strings\.taskHideArrangementSettings/, "Android arrangement collapse copy must match the scheduling label");
+assert.match(androidEditorSource, /bodyOpen/, "Android task editor must keep notes and checklist in their own disclosure, matching Web and desktop");
+assert.match(androidEditorSource, /BodyTaskFieldsPanel\(/, "Android task editor must render notes and checklist through a focused body-details panel");
+assert.match(androidEditorSource, /strings\.taskBodyDetails/, "Android task editor must show the same notes/checklist disclosure label as Web and desktop");
+assert.match(androidEditorSource, /strings\.taskHideBodyDetails/, "Android task editor must show a matching collapse label for notes/checklist");
+assert.match(androidEditorSource, /ArrangementTaskFieldsPanel\(/, "Android task editor must keep scheduling and placement fields in the arrangement panel");
+assert.match(androidI18nSource, /moreSettings = "更多：标签、重复、模板"/, "Android optional metadata must name the secondary concepts in Chinese");
+assert.match(androidI18nSource, /moreSettings = "More: tags, repeat, templates"/, "Android optional metadata must name the secondary concepts in English");
+assert.match(androidI18nSource, /hideSettings = "收起更多"/, "Android optional metadata collapse copy must match the shorter More label in Chinese");
+assert.match(androidI18nSource, /hideSettings = "Hide more"/, "Android optional metadata collapse copy must match the shorter More label in English");
 assert.match(androidSettingsSource, /settingsSectionStatusText/, "Android settings section navigation must include a short status summary for the selected section");
 assert.match(androidSettingsSource, /text = if \(isEnglish\) "Data and backups" else "数据与备份"/, "Android settings data section must be labeled as data and backups");
 assert.match(androidSettingsUiPolicySource, /fun syncAtAGlanceText\(/, "Android settings policy must derive sync-at-a-glance copy in one testable helper");
@@ -1868,7 +2073,7 @@ assert.doesNotMatch(
   "README ordinary-user quick start must not front-load repository commands or environment-file details",
 );
 
-const webFirstUseLeadSource = sourceBetween(webHtmlSource, '<div class="first-run-guide"', '<details id="serverSetupHelp"');
+const webFirstUseLeadSource = sourceBetween(webHtmlSource, '<section id="authScreen"', '<details id="serverSetupHelp"');
 assert.doesNotMatch(
   webFirstUseLeadSource,
   /Docker|127\.0\.0\.1|10\.0\.2\.2|局域网 IP|LAN IP/,
@@ -1879,39 +2084,75 @@ assert.doesNotMatch(
   /setup-checklist|auth\.setupChecklistTitle|auth\.setupStep/,
   "Web login first-use lead must not front-load the setup checklist before the form",
 );
-assertOrder(
+assert.doesNotMatch(
   webFirstRunGuideSource,
-  'id="serverSetupHelp"',
-  'class="setup-checklist"',
-  "Web setup checklist should live inside the optional server-help disclosure",
-);
-assertOrder(
-  webFirstRunGuideSource,
-  'class="setup-checklist"',
-  'id="localTrialGuide"',
-  "Web setup checklist should appear before technical trial choices inside optional help",
+  /class="setup-checklist"|id="localTrialGuide"|id="selfHostGuide"/,
+  "Web first-use guide should collapse no-server help into one short disclosure without nested setup choices",
 );
 assert.match(
   webAppSource,
   /"auth\.firstUseTitle": "已有服务器地址就能登录"/,
   "Web first-use title must prioritize the ordinary existing-server path",
 );
+assert.match(
+  webAppSource,
+  /"auth\.serverSetupHelp": "没有服务器地址？先确认来源"/,
+  "Web no-server disclosure summary must tell users to confirm where the service address should come from",
+);
+assert.match(
+  webAppSource,
+  /"auth\.serverSetupHelp": "No server address\? Confirm where it should come from"/,
+  "Web English no-server disclosure summary must tell users to confirm where the service address should come from",
+);
+assert.match(webHtmlSource, /id="authModeSwitch"[^>]*role="group"/, "Web auth mode controls must expose button-group semantics");
+assert.match(webHtmlSource, /data-mode="login"[^>]*aria-pressed="true"/, "Web login mode button must expose its pressed state");
+assert.match(webHtmlSource, /data-mode="register"[^>]*aria-pressed="false"/, "Web register mode button must expose its pressed state");
 const webSupportToolsSource = sourceBetween(webHtmlSource, '<details id="supportDataTools"', '</details><!-- supportDataTools -->');
 assert.doesNotMatch(
   webSupportToolsSource,
   /<details/,
   "Web support, data, and sync area must not nest multiple disclosure controls inside one support panel",
 );
-assert.match(webAppSource, /"app\.supportDataTools": "同步问题与数据安全"/, "Web support disclosure must use sync-problem and data-safety wording in Chinese");
-assert.match(webAppSource, /"app\.supportDataTools": "Sync issues and data safety"/, "Web support disclosure must use sync-problem and data-safety wording in English");
+assert.doesNotMatch(webSupportToolsSource, /id="localDataTools"/, "Web support disclosure must contain only sync issue support and technical diagnostics");
+assert.match(webAppSource, /"app\.supportDataTools": "同步问题"/, "Web support disclosure must use sync-problem wording in Chinese after data tools are split out");
+assert.match(webAppSource, /"app\.supportDataTools": "Sync issues"/, "Web support disclosure must use sync-problem wording in English after data tools are split out");
 assert.match(webAppSource, /"app\.localData": "数据与备份"/, "Web local-data section must be labeled as data and backups in Chinese");
 assert.match(webAppSource, /"app\.localData": "Data and backups"/, "Web local-data section must be labeled as data and backups in English");
 assert.match(webAppSource, /"app\.diagnostics": "技术信息（排查时使用）"/, "Web diagnostics section must mark technical information as secondary in Chinese");
 assert.match(webAppSource, /"app\.diagnostics": "Technical information \(for troubleshooting\)"/, "Web diagnostics section must mark technical information as secondary in English");
-assert.match(webAppSource, /"task\.moreSettings": "更多属性"/, "Web optional task fields must be labeled as properties in Chinese");
-assert.match(webAppSource, /"task\.moreSettings": "More properties"/, "Web optional task fields must be labeled as properties in English");
-assert.match(webAppSource, /"task\.emptyViewHint": "可以直接输入：明天下午 3 点写周报 #工作 @项目 P3。"/, "Web empty task state must teach the quick-add input with a concrete Chinese example");
-assert.match(webAppSource, /"task\.emptyViewHint": "Try: write weekly report tomorrow 3pm #work @project P3\."/ , "Web empty task state must teach the quick-add input with a concrete English example");
+assert.match(webHtmlSource, /<details id="taskBodyFields" class="task-body-fields span-2">[\s\S]*id="taskContent"[\s\S]*id="taskChecklist"[\s\S]*<\/details>/, "Web notes and checklist must be available but collapsed behind one optional task-body disclosure");
+assertOrder(
+  webHtmlSource,
+  'id="taskQuickPreview"',
+  'id="taskBodyFields"',
+  "Web quick-capture form must keep the title and quick preview before optional notes and checklist",
+);
+assert.match(webHtmlSource, /<details id="taskArrangementFields" class="advanced-task-fields task-arrangement-fields span-2">[\s\S]*task\.arrangementSettings[\s\S]*task\.priority[\s\S]*task\.plannedDate[\s\S]*task\.remindTime[\s\S]*<\/details>/, "Web scheduling and priority fields must sit in a dedicated optional arrangement section");
+assert.match(webHtmlSource, /<details id="taskAdvancedFields" class="advanced-task-fields task-metadata-fields span-2">[\s\S]*task\.moreSettings[\s\S]*task\.project[\s\S]*task\.tag[\s\S]*task\.repeat[\s\S]*<\/details>/, "Web tags, project, repeat, and template fields must sit in a separate optional metadata section");
+assert.match(webAppSource, /"task\.bodyDetails": "添加备注和清单"/, "Web optional task body disclosure must have clear Chinese copy");
+assert.match(webAppSource, /"task\.bodyDetails": "Add notes and checklist"/, "Web optional task body disclosure must have clear English copy");
+assert.match(webAppSource, /"task\.arrangementSettings": "时间与安排"/, "Web arrangement section must match Android scheduling wording in Chinese");
+assert.match(webAppSource, /"task\.arrangementSettings": "Time and schedule"/, "Web arrangement section must match Android scheduling wording in English");
+assert.match(webAppSource, /"task\.moreSettings": "更多：标签、重复、模板"/, "Web optional metadata fields must name the secondary concepts in Chinese");
+assert.match(webAppSource, /"task\.moreSettings": "More: tags, repeat, templates"/, "Web optional metadata fields must name the secondary concepts in English");
+assert.match(
+  webStylesSource,
+  /\.task-body-fields:not\(\[open\]\),\s*\.advanced-task-fields:not\(\[open\]\)[\s\S]{0,160}border-color:\s*transparent/,
+  "Web collapsed optional task sections must stay visually lightweight until opened",
+);
+assert.match(
+  desktopCssSource,
+  /\.advanced-toggle\s*\{[\s\S]{0,180}border-color:\s*transparent/,
+  "Desktop collapsed optional task sections must use lightweight toggles instead of heavy form panels",
+);
+assert.match(webAppSource, /nodes\.taskBodyFields\.open = hasTaskBodyValues\(\)/, "Web editor must reveal notes and checklist automatically when editing an existing task body");
+assert.match(webAppSource, /nodes\.taskArrangementFields\.open = hasTaskArrangementValues\(\)/, "Web editor must reveal scheduling fields automatically only when they contain values");
+assert.match(webAppSource, /nodes\.taskAdvancedFields\.open = hasTaskMetadataValues\(\)/, "Web editor must reveal metadata fields automatically only when they contain values");
+assert.match(webAppSource, /nodes\.taskSyncHealthBar\.hidden = tone === "ready"/, "Web task-list sync health must disappear in the healthy state and only interrupt users when status is unknown or needs attention");
+assert.match(webHtmlSource, /class="[^"]*\blocal-data-action-group\b[^"]*\bbackup-action-group\b[^"]*"/, "Web backup actions must be grouped separately from destructive device-clearing actions");
+assert.match(webHtmlSource, /class="[^"]*\blocal-data-action-group\b[^"]*\bdanger-zone\b[^"]*\blocal-data-danger-zone\b[^"]*"/, "Web clear-this-device action must sit in a separate danger zone");
+assert.match(webAppSource, /"task\.emptyViewHint": "可以先输入一个标题，例如：写周报。需要时再加时间、标签或优先级。"/, "Web empty task state must teach task creation with a plain Chinese title first");
+assert.match(webAppSource, /"task\.emptyViewHint": "Start with a title, for example: write weekly report\. Add time, tags, or priority only when needed\."/ , "Web empty task state must teach task creation with a plain English title first");
 assert.match(webAppSource, /function hasLocalDataClearRisk\(/, "Web clear-this-device action must derive a risk state from sync diagnostics");
 assert.match(webAppSource, /"app\.clearLocalDataBlocked"/, "Web clear-this-device action must explain when sync risk blocks clearing");
 assert.match(
@@ -2007,15 +2248,35 @@ assert.match(
 );
 assert.match(webAppSource, /"validation\.apiUrlRequired"/, "Web i18n must explain that the advanced request URL is required when normalized directly");
 assert.match(webAppSource, /"validation\.serverUrlRequired"/, "Web i18n must explain that the server address is required");
-assert.match(
-  webHtmlSource,
-  /id="serverBaseUrl"[\s\S]{0,220}placeholder="https:\/\/taskbridge\.example\.com"/,
-  "Web server URL placeholder must show a real server-style address, not the local debug address",
-);
 assert.doesNotMatch(
   webHtmlSource,
   /id="serverBaseUrl"[\s\S]{0,220}placeholder="http:\/\/127\.0\.0\.1:8000"/,
-  "Web login must not present localhost as the ordinary server address placeholder",
+  "Web server URL placeholder must not steer ordinary users toward localhost",
+);
+assert.match(
+  webHtmlSource,
+  /id="serverBaseUrl"[\s\S]{0,220}placeholder="填写管理员给你的服务器地址"/,
+  "Web server URL placeholder must tell ordinary users what to enter",
+);
+assert.match(
+  webAppSource,
+  /"auth\.serverUrlPlaceholder": "填写管理员给你的服务器地址"/,
+  "Web i18n must define a user-facing server address placeholder",
+);
+assert.match(
+  webAppSource,
+  /const DEFAULT_SERVER_BASE_URL = supportsHttpOrigin\(\) \? location\.origin : LOCAL_FALLBACK_SERVER_BASE_URL/,
+  "Web first-run server address must use the current HTTP or HTTPS origin when same-origin proxying is available",
+);
+assert.match(
+  webAppSource,
+  /const INITIAL_SERVER_BASE_URL = readStoredString\([\s\S]{0,120}"serverBaseUrl",[\s\S]{0,120}deriveServerBaseUrlFromApi\(INITIAL_API_BASE_URL\)/,
+  "Web must prefer a previously saved server address over the first-run same-origin default",
+);
+assert.match(
+  webAppSource,
+  /"auth\.serverUrlHint": "填写 TaskBridge 服务器地址即可；本机或内网可以使用 http:\/\/，高级连接设置会自动生成。"/,
+  "Web server URL hint must tell users HTTP is valid for local or LAN setups",
 );
 assertOrder(
   webHtmlSource,
@@ -2056,32 +2317,52 @@ assert.match(
   /const connectionReady = await ensureConnectionReadyForAuth\(\);[\s\S]{0,120}if \(!connectionReady\) return;/,
   "Web login/register submit must automatically test the connection before authenticating",
 );
-assert.match(
+const webConnectionTestSource = sourceBetween(
   webAppSource,
-  /async function testConnection\(\)[\s\S]{0,900}return isConnectionReadyForAuth\(\);[\s\S]{0,700}catch \(error\)[\s\S]{0,700}return false;/,
+  "async function testConnection()",
+  "\nfunction persistTokens",
+);
+assert.match(
+  webConnectionTestSource,
+  /return isConnectionReadyForAuth\(\);/,
+  "Web connection test must return its successful readiness result for auth gating",
+);
+assert.match(
+  webConnectionTestSource,
+  /catch \(error\)[\s\S]*return false;/,
   "Web connection test must return a boolean result for auth gating",
 );
 assertOrder(
   webHtmlSource,
-  '<details id="taskAdvancedFields"',
+  '<details id="taskArrangementFields"',
   '<div class="task-quick-fields',
-  "Web task form must keep priority, plan date, due time, and reminder behind More settings",
+  "Web task form must keep priority, plan date, due time, and reminder behind the arrangement disclosure",
+);
+const webArrangementTaskFieldsSource = sourceBetween(
+  webHtmlSource,
+  '<details id="taskArrangementFields"',
+  "</details>",
+);
+assert.match(
+  webArrangementTaskFieldsSource,
+  /id="taskPriority"|id="taskPlannedDate"|id="taskDueTime"|id="taskRemindTime"/,
+  "Web arrangement section should contain optional scheduling and priority fields so quick capture stays light",
 );
 const webAdvancedTaskFieldsSource = sourceBetween(
   webHtmlSource,
   '<details id="taskAdvancedFields"',
   "</details>",
 );
-assert.match(
+assert.doesNotMatch(
   webAdvancedTaskFieldsSource,
   /id="taskPriority"|id="taskPlannedDate"|id="taskDueTime"|id="taskRemindTime"/,
-  "Web More settings should contain optional scheduling and priority fields so quick capture stays light",
+  "Web metadata section must not mix scheduling fields with tags, repeat, and templates",
 );
 
 const desktopLoginNormalizeServerUrlSource = sourceBetween(
-  desktopLoginSource,
+  desktopConnectionEndpointsSource,
   "function normalizeServerUrl(value: string): string",
-  "function inferServerUrlFromApi(apiUrl: string): string",
+  "export function deriveConnectionEndpoints",
 );
 assert.match(
   desktopLoginNormalizeServerUrlSource,
@@ -2094,9 +2375,9 @@ assert.doesNotMatch(
   "Desktop login blank server URL must not fall back to localhost",
 );
 const desktopSettingsNormalizeServerUrlSource = sourceBetween(
-  desktopSettingsSource,
+  desktopConnectionEndpointsSource,
   "function normalizeServerUrl(value: string): string",
-  "function inferServerUrlFromApi(apiUrl: string): string",
+  "export function deriveConnectionEndpoints",
 );
 assert.match(
   desktopSettingsNormalizeServerUrlSource,
@@ -2191,23 +2472,28 @@ assert.match(
 );
 const desktopAdvancedFieldsSource = sourceBetween(
   desktopTaskEditorSource,
-  '<section v-if="detailsOpen" class="advanced-fields">',
+  '<section v-if="detailsOpen" id="task-editor-more-fields" class="advanced-fields">',
   '<div class="form-actions">',
 );
 assert.match(
   desktopAdvancedFieldsSource,
-  /task\.list/,
-  "Desktop More settings should contain task location/category after the quick-capture fields",
+  /task\.tag/,
+  "Desktop More settings should contain secondary metadata after the quick-capture fields",
 );
-assert.match(
-  desktopAdvancedFieldsSource,
-  /class="task-editor-plan-fields"/,
-  "Desktop More settings should contain the common arrangement field group",
-);
+assert.doesNotMatch(desktopAdvancedFieldsSource, /task\.list|task\.plan|task\.due|task\.reminder|task\.priority/, "Desktop More settings should not mix scheduling fields with secondary metadata");
+assert.match(desktopTaskEditorSource, /const arrangeOpen = ref\(false\)/, "Desktop task editor must own a dedicated arrangement disclosure state");
+assert.match(desktopTaskEditorSource, /const bodyOpen = ref\(false\)/, "Desktop task editor must own a dedicated notes/checklist disclosure state");
+assert.match(desktopTaskEditorSource, /bodyOpen\.value = Boolean\(task && hasTaskBodyFields\(task\)\)/, "Desktop task editor must reveal notes and checklist automatically when editing tasks that use them");
+assert.match(desktopTaskEditorSource, /arrangeOpen\.value = Boolean\(task && hasArrangementFields\(task\)\)/, "Desktop task editor must reveal scheduling fields automatically when editing tasks that use them");
+assert.match(desktopTaskEditorSource, /settingsStore\.t\("task\.bodyDetails"\)/, "Desktop task editor must label optional notes and checklist through i18n");
+assert.match(desktopTaskEditorSource, /settingsStore\.t\("task\.arrangementSettings"\)/, "Desktop task editor must label the scheduling section consistently with Android");
+assert.match(desktopI18nSource, /"task\.bodyDetails": \{ "zh-CN": "添加备注和清单", "en-US": "Add notes and checklist" \}/, "Desktop i18n must define optional notes/checklist copy");
+assert.match(desktopI18nSource, /"task\.arrangementSettings": \{ "zh-CN": "时间与安排", "en-US": "Time and schedule" \}/, "Desktop i18n must define arrangement copy that matches Android");
+assert.match(desktopI18nSource, /"task\.moreSettings": \{ "zh-CN": "更多：标签、重复、模板", "en-US": "More: tags, repeat, templates" \}/, "Desktop optional task metadata must name the secondary concepts");
 assert.doesNotMatch(
-  desktopTaskEditorSource,
+  sourceBetween(desktopTaskEditorSource, "function hasAdvancedMetadataFields", "</script>"),
   /task\.listType !== "inbox"/,
-  "Desktop Today location must not force More settings open after location is promoted to the main editor",
+  "Desktop Today location must not force the metadata More settings open after location is moved to arrangement",
 );
 assert.doesNotMatch(
   desktopI18nSource,
@@ -2221,34 +2507,34 @@ assert.match(
 );
 assert.match(
   desktopSettingsSource,
-  /settings\.navSyncRecovery[\s\S]{0,260}sectionId: "sync-recovery"[\s\S]{0,160}settings\.syncRecoveryCenter/,
+  /sectionId: "sync-recovery"[\s\S]{0,160}settings\.syncRecoveryCenter/,
   "Desktop settings navigation must include a direct sync recovery/support entry",
 );
 assert.match(
   desktopSettingsSource,
   /id="settings-sync-recovery"/,
-  "Desktop settings must expose an anchor for sync recovery/support details",
+  "Desktop settings must expose a stable sync recovery panel id",
 );
-assert.match(desktopSettingsSource, /nextTick/, "Desktop settings sync recovery jump must wait for the opened details to render");
+assert.doesNotMatch(desktopSettingsSource, /nextTick|scrollIntoView/, "Desktop settings category changes must not scroll through a hidden long page");
 assert.match(desktopSettingsSource, /const syncDiagnosticsOpen = ref\(false\)/, "Desktop settings must own sync diagnostics disclosure state");
 assert.match(
   desktopSettingsSource,
-  /sectionId === "sync-recovery"[\s\S]{0,180}syncDiagnosticsOpen\.value = true/,
-  "Desktop sync recovery navigation must open the diagnostics disclosure before scrolling",
+  /request\.sectionId === "sync-recovery"[\s\S]{0,120}syncDiagnosticsOpen\.value = true/,
+  "Desktop external sync recovery requests must open the diagnostics disclosure",
 );
 assert.match(
   desktopSettingsSource,
-  /:open="syncDiagnosticsOpen"/,
+  /v-model:diagnostics-open="syncDiagnosticsOpen"/,
   "Desktop sync diagnostics details must bind to the navigation-controlled open state",
 );
 assert.match(
-  desktopSettingsSource,
-  /function handleSyncDiagnosticsToggle\(event: Event\)/,
-  "Desktop settings must keep sync diagnostics manual toggles in sync through a typed handler",
+  desktopSettingsSyncRecoveryPanelSource,
+  /const diagnosticsOpen = defineModel<boolean>\("diagnosticsOpen"/,
+  "Desktop sync recovery panel must expose a typed diagnostics disclosure model",
 );
 assert.match(
-  desktopSettingsSource,
-  /@toggle="handleSyncDiagnosticsToggle"/,
+  desktopSettingsSyncRecoveryPanelSource,
+  /@toggle="onDiagnosticsToggle"/,
   "Desktop sync diagnostics details must keep manual toggles in sync",
 );
 
@@ -2270,7 +2556,7 @@ assert.match(
 assertOrder(
   androidEditorSource,
   "TextButton(onClick = { arrangeOpen = !arrangeOpen }",
-  "QuickFieldsPanel(",
+  "ArrangementTaskFieldsPanel(",
   "Android task editor must keep priority and scheduling fields behind an optional arrangement toggle",
 );
 const androidAdvancedEditorSource = sourceBetween(
@@ -2285,14 +2571,23 @@ const androidArrangementEditorSource = sourceBetween(
 );
 assert.match(
   androidArrangementEditorSource,
-  /QuickFieldsPanel\(/,
+  /ArrangementTaskFieldsPanel\(/,
   "Android arrangement section should contain common scheduling fields after the quick-capture fields",
 );
 assert.match(androidEditorSource, /var listMenuOpen by remember/, "Android task editor must own a task-location dropdown state");
 assert.match(
   androidEditorSource,
-  /QuickFieldsPanel\([\s\S]{0,1400}selectedListLabel[\s\S]{0,1400}onListSelected = viewModel::updateListType/,
+  /ArrangementTaskFieldsPanel\([\s\S]{0,1400}selectedListLabel[\s\S]{0,1400}onListSelected = viewModel::updateListType/,
   "Android task editor must expose the task location/category in the quick fields panel",
+);
+assert.match(androidEditorSource, /var bodyOpen by remember\(state\.editingLocalId\)/, "Android editor must own a dedicated optional notes/checklist disclosure state");
+assert.match(androidEditorSource, /bodyOpen = !bodyOpen/, "Android editor must let users reveal notes and checklist only when needed");
+assert.match(androidEditorSource, /hasTaskBodyFields\(state\)/, "Android editor must reopen notes and checklist when editing a task that already uses them");
+assertOrder(
+  androidEditorSource,
+  "TextButton(onClick = { bodyOpen = !bodyOpen }",
+  "BodyTaskFieldsPanel(",
+  "Android notes and checklist should appear only after the optional body toggle",
 );
 assert.match(
   androidEditorSource,
@@ -2308,22 +2603,24 @@ assert.match(androidEditorViewModelSource, /fun updateListType\(value: String\)/
 assert.match(androidEditorViewModelSource, /editorDraftWithListType/, "Android list-type changes must be handled by a pure editor draft helper");
 assert.doesNotMatch(androidLoginSource, /connectionReadyForAuth|connectionReadyMessageKey/, "Android login screen priority must not depend on a prior manual connection check");
 assert.doesNotMatch(androidRegisterSource, /connectionReadyForAuth|connectionReadyMessageKey/, "Android registration screen priority must not depend on a prior manual connection check");
-assert.match(androidLoginSource, /Button\([\s\S]{0,260}viewModel\.login/, "Android login button must stay primary because submit automatically verifies the connection");
+assert.match(androidLoginSource, /onSignIn = \{ viewModel\.login\(onLoginSuccess\) \}/, "Android login screen must connect the primary sign-in panel to the login action");
+assert.match(androidLoginSource, /Button\([\s\S]{0,180}onClick = onSignIn/, "Android sign-in panel must render login as the primary button");
 assert.match(androidRegisterSource, /Button\([\s\S]{0,320}viewModel\.register/, "Android create-account button must stay primary because submit automatically verifies the connection");
 assert.match(androidLoginSource, /OutlinedButton\([\s\S]{0,260}viewModel\.testConnection/, "Android connection test must stay secondary on login");
 assert.match(androidRegisterSource, /OutlinedButton\([\s\S]{0,320}viewModel\.testConnection/, "Android connection test must stay secondary on registration");
 const androidLoginActionSource = sourceBetween(
   androidLoginViewModelSource,
   "fun login(onSuccess: () -> Unit) {",
-  "private fun applyServerBaseUrlOrReport",
+  "private suspend fun ensureConnectionReadyForAuth",
 );
-assert.match(androidLoginViewModelSource, /private suspend fun ensureConnectionReadyForAuth\(\): Boolean[\s\S]{0,900}authRepository\.testConnection\(\)/, "Android login view model must verify the server before auth");
+assert.match(androidLoginViewModelSource, /fun testConnection\(\)[\s\S]{0,520}ensureConnectionReadyForAuth\(\)/, "Android explicit connection troubleshooting must still probe the configured server");
 assertOrder(
   androidLoginActionSource,
-  "ensureConnectionReadyForAuth()",
+  "saveConnectionStateOrReport(connectionState)",
   "authRepository.login",
-  "Android login must test the connection before sending credentials",
+  "Android login must validate and save the selected endpoint before sending credentials",
 );
+assert.doesNotMatch(androidLoginActionSource, /ensureConnectionReadyForAuth\(\)/, "Android login must not add a redundant connection probe before the authentication request");
 const androidRegisterActionSource = sourceBetween(
   androidRegisterViewModelSource,
   "fun register(onSuccess: () -> Unit) {",
@@ -2403,14 +2700,10 @@ assert.match(readmeSource, /## 开发者和自托管说明[\s\S]*发布与镜像
 assert.match(readmeSource, /## 开发者和自托管说明[\s\S]*参与贡献/, "README developer/self-hosting section must retain contribution documentation");
 assert.match(
   webStylesSource,
-  /@media \(max-width: 960px\)[\s\S]{0,240}\.sidebar\s*\{[\s\S]{0,80}order:\s*1/,
-  "Web mobile workspace must show account, sync status, and navigation before the task workspace",
+  /@media \(max-width: 960px\)[\s\S]{0,180}grid-template-areas:\s*"mobile-actions"\s*"main"\s*"sidebar"/,
+  "Web mobile workspace must show quick actions and the primary task workflow before secondary account diagnostics",
 );
-assert.match(
-  webStylesSource,
-  /@media \(max-width: 960px\)[\s\S]{0,320}\.main-panel\s*\{[\s\S]{0,80}order:\s*2/,
-  "Web mobile workspace must not bury navigation below the task editor and task list",
-);
+assert.match(webHtmlSource, /<section id="appScreen" class="workspace" hidden>\s*<nav id="mobileQuickActions"[\s\S]*?<\/nav>\s*<aside id="sidebar"/, "Web mobile quick actions must be a direct workspace grid item");
 assert.match(webStylesSource, /--panel-muted:\s*#[0-9a-fA-F]{6}/, "Web technical support tint must use a defined panel-muted token");
 assert.doesNotMatch(webHtmlSource, /<section id="syncAdvancedDiagnostics"[\s\S]*?<h4[\s>]/, "Web sync details must not skip from h2 to h4 inside support tools");
 assert.doesNotMatch(webHtmlSource, /<section id="developerDiagnostics"[\s\S]*?<h4[\s>]/, "Web technical diagnostics must not skip from h2 to h4 inside support tools");
@@ -2462,6 +2755,9 @@ assertOrder(
 assert.match(webAppSource, /function getTaskSyncHealthText\(/, "Web must derive task-list sync health through a focused helper");
 assert.match(webAppSource, /function renderTaskSyncHealthBar\(/, "Web must render task-list sync health whenever task state changes");
 assert.match(webAppSource, /renderTaskSyncHealthBar\(\)/, "Web render cycle must refresh the task-list sync health bar");
+assert.match(webAppSource, /function shouldShowSyncSupportAction\(/, "Web must centralize when sync detail actions are worth interrupting ordinary users");
+assert.match(webAppSource, /nodes\.openSyncSupportButton\.hidden = !shouldShowSyncSupportAction\(\)/, "Web sidebar sync detail action must stay hidden while sync is healthy or not yet checked");
+assert.match(webAppSource, /nodes\.taskSyncHealthActionButton\.hidden = !shouldShowSyncSupportAction\(\)/, "Web task-list sync detail action must only appear when there is something to review");
 assert.match(webAppSource, /"task\.syncHealthReady"/, "Web i18n must include ready task-list sync health copy");
 assert.match(webAppSource, /"task\.syncHealthNeedsReview"/, "Web i18n must include attention-needed task-list sync health copy");
 assert.match(webStylesSource, /\.task-sync-health-bar/, "Web task-list sync health bar must have a compact product UI style");
@@ -2478,12 +2774,12 @@ assert.match(
 );
 assert.match(
   webAppSource,
-  /"app\.supportDataTools": "同步问题与数据安全"/,
+  /"app\.supportDataTools": "同步问题"/,
   "Web support disclosure must use the same sync-problem mental model as desktop and Android",
 );
 assert.match(
   webAppSource,
-  /"app\.supportDataTools": "Sync issues and data safety"/,
+  /"app\.supportDataTools": "Sync issues"/,
   "Web support disclosure must use consistent English sync-problem wording",
 );
 assert.match(
@@ -2501,6 +2797,27 @@ assert.match(webAppSource, /"sync\.overwriteServerConsequence"/, "Web conflict U
 assert.match(webAppSource, /function makeConflictDecisionNote\(/, "Web conflict UI must render consequence notes through a focused helper");
 assert.match(webAppSource, /conflict-resolution__decision-list/, "Web conflict UI must show decision consequences next to conflict actions");
 assert.doesNotMatch(desktopLoginSource, /showAdvancedConnectionEntry = computed\(\(\) => true\)/, "Desktop login must not show advanced connection settings by default");
+assert.match(
+  desktopLoginSource,
+  /docs\/user-quick-start\.md#%E6%B2%A1%E6%9C%89%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%9C%B0%E5%9D%80/,
+  "Desktop login local-trial help must deep-link to the focused no-server quick-start section instead of the README top",
+);
+const desktopAuthFormSource = sourceBetween(desktopLoginSource, '<form class="auth-form auth-main-form"', '</form>');
+assertOrder(
+  desktopAuthFormSource,
+  'settingsStore.t("settings.serverUrl")',
+  'settingsStore.t("auth.password")',
+  "Desktop login form must put the server address in the main sign-in form before account credentials",
+);
+assertOrder(
+  desktopAuthFormSource,
+  '<button class="primary-button" type="submit"',
+  'checkAndSaveConnection',
+  "Desktop connection testing must stay secondary after the primary sign-in action",
+);
+assert.match(desktopLoginSource, /class="segment-control" role="group"/, "Desktop auth mode controls must expose button-group semantics");
+assert.match(desktopLoginSource, /:aria-pressed="mode === 'login'"/, "Desktop login mode button must expose its pressed state");
+assert.match(desktopLoginSource, /:aria-pressed="mode === 'register'"/, "Desktop register mode button must expose its pressed state");
 assert.doesNotMatch(desktopSettingsSource, /showAdvancedConnectionEntry = computed\(\(\) => true\)/, "Desktop settings must not show advanced connection settings by default");
 assert.match(
   desktopLoginSource,
@@ -2523,19 +2840,38 @@ assert.match(desktopTaskViewSource, /hasActiveFilters\.value[\s\S]{0,180}task\.e
 assert.match(desktopTaskViewSource, /emptyTaskStateText/, "Desktop empty-state template must render the contextual empty-state copy");
 assert.match(desktopI18nSource, /"task\.emptySearch"/, "Desktop i18n must define empty search copy");
 assert.match(desktopI18nSource, /"task\.emptyFiltered"/, "Desktop i18n must define empty filtered copy");
-assert.match(desktopTaskSyncHealthBarSource, /defineProps<[\s\S]*text:\s*string/, "Desktop task sync health bar must accept derived text as a prop");
-assert.match(desktopTaskSyncHealthBarSource, /defineEmits<[\s\S]*openDetails/, "Desktop task sync health bar must emit a direct open-details action");
-assert.match(desktopTaskSyncHealthBarSource, /class="task-sync-health-bar"/, "Desktop task sync health bar must use a stable compact class");
-assert.match(desktopTaskViewSource, /import TaskSyncHealthBar/, "Desktop all-tasks view must render the task-level sync health bar");
-assert.match(desktopTodayViewSource, /import TaskSyncHealthBar/, "Desktop today view must render the task-level sync health bar");
-assert.match(desktopTaskViewSource, /const taskSyncHealthText = computed/, "Desktop all-tasks view must derive sync health text from sync store state");
-assert.match(desktopTodayViewSource, /const taskSyncHealthText = computed/, "Desktop today view must derive sync health text from sync store state");
-assert.match(desktopTaskViewSource, /@open-details="openSyncRecovery"/, "Desktop all-tasks sync health action must jump to sync recovery details");
-assert.match(desktopTodayViewSource, /@open-details="openSyncRecovery"/, "Desktop today sync health action must jump to sync recovery details");
-assert.match(desktopI18nSource, /"task\.syncHealthReady"/, "Desktop i18n must include ready task-list sync health copy");
-assert.match(desktopI18nSource, /"task\.syncHealthNeedsReview"/, "Desktop i18n must include attention-needed task-list sync health copy");
-assert.match(desktopI18nSource, /"task\.syncHealthAction"/, "Desktop i18n must include sync detail action copy");
-assert.match(desktopI18nSource, /"settings\.navSyncRecovery": \{ "zh-CN": "同步问题", "en-US": "Sync issues" \}/, "Desktop settings navigation must use the shared sync-issues label");
+assert.doesNotMatch(
+  desktopI18nSource,
+  /"task\.(emptySearch|emptyFiltered|empty|emptyToday|quickPlaceholder|autoFillHint)": [\s\S]{0,180}(?:#工作|#work|P3)/,
+  "Desktop ordinary task placeholders and empty states must not lead with shortcut syntax",
+);
+assert.match(
+  desktopI18nSource,
+  /"task\.quickPlaceholder"[\s\S]{0,120}例如：写周报/,
+  "Desktop Chinese task placeholder must start with a plain task title",
+);
+assert.match(
+  desktopI18nSource,
+  /"task\.quickPlaceholder"[\s\S]{0,120}Example: write weekly report/,
+  "Desktop English task placeholder must start with a plain task title",
+);
+assert.match(desktopWorkspaceStatusBannerSource, /defineProps<[\s\S]*status:\s*WorkspaceStatusPresentation/, "Desktop workspace status banner must accept a workspace status presentation");
+assert.match(desktopWorkspaceStatusBannerSource, /defineEmits<[\s\S]*retry:\s*\[\];[\s\S]*openDetails:\s*\[\]/, "Desktop workspace status banner must emit retry and details actions");
+assert.match(desktopWorkspaceStatusBannerSource, /aria-live="polite"/, "Desktop workspace status banner must announce changes politely");
+assert.match(desktopAppSource, /import \{ deriveWorkspaceStatus \} from "\.\.\/shared\/workspace-ui-policy"/, "Desktop app must import the shared workspace status policy");
+assert.match(desktopAppSource, /const workspaceStatus = computed\(\(\) =>[\s\S]{0,160}deriveWorkspaceStatus\(syncStore\.status, syncStore\.diagnostics\)/, "Desktop app must derive workspace status from sync state and diagnostics");
+assert.match(desktopAppSource, /<WorkspaceStatusBanner[\s\S]{0,160}v-if="auth\.isAuthenticated && workspaceStatus\.banner !== 'none'"/, "Desktop app must only render an actionable workspace banner for authenticated sessions");
+for (const [name, source] of [
+  ["Desktop all-tasks view", desktopTaskViewSource],
+  ["Desktop Today view", desktopTodayViewSource],
+]) {
+  assert.doesNotMatch(source, /TaskSyncHealthBar|taskSyncHealth|showTaskSyncHealth|diagnosticSyncIssueCount|taskRecordSyncIssueCount|taskSyncIssueCount|taskSyncHealthTone|taskSyncHealthText|useSyncStore/, `${name} must not derive or render duplicate task-level sync health`);
+}
+assert.match(desktopI18nSource, /"sync\.offlineWorkspace"/, "Desktop i18n must include offline workspace copy");
+assert.match(desktopI18nSource, /"sync\.attentionWorkspace"/, "Desktop i18n must include attention workspace copy");
+assert.match(desktopI18nSource, /"sync\.retry"/, "Desktop i18n must include retry copy");
+assert.match(desktopI18nSource, /"sync\.details"/, "Desktop i18n must include sync details copy");
+assert.doesNotMatch(desktopSettingsSource, /settings\.navSyncRecovery/, "Desktop settings navigation must not keep the old grouped sync label");
 assert.match(desktopI18nSource, /"settings\.syncRecoveryCenter": \{ "zh-CN": "同步问题", "en-US": "Sync issues" \}/, "Desktop sync recovery panel title must use the shared sync-issues label");
 assert.match(androidTaskListSource, /TaskFilterSummaryBar\(/, "Android task list must keep visible active-filter feedback near the list");
 assert.match(androidTaskListSource, /activeTaskFilterLabels\(/, "Android active-filter feedback must be derived through a focused helper");
@@ -2565,16 +2901,76 @@ assert.match(
   /initialSection == "sync-recovery"[\s\S]{0,180}supportToolsOpen = true/,
   "Android settings must auto-open sync recovery tools when reached from sync health",
 );
+assert.match(
+  androidSettingsSource,
+  /syncRecoveryToolsVisible = supportToolsOpen \|\| recoverableSyncIssueCount > 0 \|\| conflictTaskCount > 0/,
+  "Android sync issue actions must become visible automatically when recoverable sync problems exist",
+);
+assert.match(
+  androidSettingsSource,
+  /conflictTaskCount = conflictTaskCount/,
+  "Android sync recovery summary must include unresolved conflict tasks",
+);
+assert.match(
+  androidSettingsSource,
+  /syncRecoveryConflictActionText\(isEnglish\)/,
+  "Android settings sync recovery tools must include a direct conflict-review action",
+);
+assert.match(
+  androidSettingsSource,
+  /onOpenConflictTasks\(\)/,
+  "Android settings conflict-review action must navigate directly to conflict tasks",
+);
+assert.match(
+  androidMainActivitySource,
+  /Routes\.tasks\("conflict"\)/,
+  "Android settings conflict-review route must open the task list with the conflict filter",
+);
+assert.match(androidSettingsSource, /syncRecoveryToolsTitle\(isEnglish\)/, "Android settings sync recovery title copy must be centralized in a helper");
+assert.match(androidSettingsSource, /syncRecoveryToolsToggleText\(/, "Android settings sync recovery toggle copy must be centralized in a helper");
 assert.match(androidTaskListSource, /private fun TaskListSyncHealthBar/, "Android task-list sync health bar must be a focused composable");
 assert.match(androidTaskListSource, /syncHealth\.needsAttention/, "Android task-list sync health bar must visually distinguish attention states");
 assert.match(androidTaskListSource, /allTasks \+ trashTasks/, "Android task-list sync health must evaluate all local tasks, including trash");
 assert.match(androidTaskListSource, /strings\.syncHealthAction/, "Android task-list sync health action must use localized copy");
 assert.match(androidTaskListSource, /text = syncHealth\.title/, "Android task-list sync health must use the derived state title instead of one static heading");
 assert.match(androidTaskListSource, /text = syncHealth\.body/, "Android task-list sync health must always show the derived short body");
-assert.doesNotMatch(androidTaskListSource, /if \(syncHealth\.needsAttention\) \{[\s\S]{0,240}syncHealth\.body/, "Android task-list sync health must not hide healthy-state guidance");
+assert.match(
+  androidTaskListSource,
+  /if \(!localWorkspaceMode && syncHealth\.needsAttention\) \{[\s\S]{0,180}TaskListSyncHealthBar/,
+  "Android task-list sync health must only interrupt an online task workflow when an item needs attention",
+);
 assert.match(androidI18nSource, /syncHealthAction/, "Android i18n must include task-list sync detail action copy");
 assert.match(androidI18nSource, /syncHealthTitle = "同步问题"/, "Android i18n must keep sync-problem wording consistent for settings and support surfaces");
 assert.match(androidI18nSource, /syncHealthTitle = "Sync issues"/, "Android English i18n must keep sync-problem wording consistent for settings and support surfaces");
+assert.match(androidI18nSource, /taskBodyDetails = "添加备注和清单"/, "Android editor body disclosure copy must live in i18n");
+assert.match(androidI18nSource, /taskArrangementSettings = "时间与安排"/, "Android editor schedule disclosure copy must live in i18n");
+assert.doesNotMatch(androidEditorSource, /return if \(isEnglish\) "Add notes and checklist"/, "Android editor must not hard-code notes/checklist copy outside i18n");
+assert.doesNotMatch(androidEditorSource, /return if \(isEnglish\) "Time and schedule"/, "Android editor must not hard-code schedule disclosure copy outside i18n");
+assert.doesNotMatch(
+  androidI18nSource,
+  /quickAddPlaceholder = "[^"]*(?:#工作|#work|P3)/,
+  "Android quick-add placeholder must not make shortcut syntax look required",
+);
+assert.match(
+  androidI18nSource,
+  /quickAddPlaceholder = "例如：写周报"/,
+  "Android Chinese quick-add placeholder must start with a plain task title",
+);
+assert.match(
+  androidI18nSource,
+  /quickAddPlaceholder = "Example: write weekly report"/,
+  "Android English quick-add placeholder must start with a plain task title",
+);
+assert.match(
+  androidI18nSource,
+  /advancedConnectionSettings = "排障：自定义连接地址"/,
+  "Android Chinese advanced connection heading must frame custom URLs as troubleshooting",
+);
+assert.match(
+  androidI18nSource,
+  /advancedConnectionSettings = "Troubleshooting: custom connection URLs"/,
+  "Android English advanced connection heading must frame custom URLs as troubleshooting",
+);
 assert.match(readmeSource, /普通使用不需要阅读开发者说明/, "README must clearly tell ordinary users where the developer section starts");
 assert.match(
   readmeSource,
@@ -2583,13 +2979,226 @@ assert.match(
 );
 assert.match(
   readmeSource,
-  /WEB_CORS_ORIGINS=https:\/\/taskbridge\.example\.com/,
-  "README production CORS example must use an explicit HTTPS origin instead of a wildcard",
+  /如果你只是使用别人部署好的 TaskBridge，请先向管理员或部署者索取服务器地址/,
+  "README no-server path must give non-technical users an administrator/deployer path before deployment commands",
+);
+const readmeOpeningSource = readmeSource.split(/\r?\n/).slice(0, 25).join("\n");
+assert.match(
+  readmeOpeningSource,
+  /如果你只是使用别人部署好的 TaskBridge，请先向管理员或部署者索取服务器地址和账号/,
+  "README must put the ordinary no-server path in the opening decision area",
+);
+assert.match(
+  readmeOpeningSource,
+  /\| 我已经有服务器地址和账号 \|[\s\S]*\| 我还没有服务器地址 \|[\s\S]*\| 我要维护或部署服务 \|/,
+  "README opening must use one clear decision table without duplicating the hosted-service path",
+);
+assertOrder(
+  readmeOpeningSource,
+  "如果你只是使用别人部署好的 TaskBridge，请先向管理员或部署者索取服务器地址和账号",
+  "本机试用",
+  "README opening no-server path must route ordinary users to an administrator before local trial or self-hosting",
+);
+assert.match(
+  userQuickStartDocSource,
+  /如果你不是部署者，请先向管理员或部署者索取服务器地址和账号/,
+  "ordinary quick-start must tell non-technical users to ask for the server address instead of starting deployment",
+);
+assert.match(
+  webLocalTrialGuideSource,
+  /第一步：先确认你是不是普通使用者/,
+  "Web local-trial guide must start by helping ordinary users decide whether they should deploy anything",
+);
+assert.match(
+  webLocalTrialGuideSource,
+  /如果只是使用别人部署好的 TaskBridge，请先找管理员或部署者要服务器地址/,
+  "Web local-trial guide must route non-deploying users to an administrator or deployer before showing commands",
+);
+assert.match(
+  webLocalTrialGuideSource,
+  /Windows 桌面端[\s\S]{0,120}http:\/\/127\.0\.0\.1:8080/,
+  "Web local-trial guide must give a plain same-computer Windows address",
+);
+assert.match(
+  webLocalTrialGuideSource,
+  /Android 真机[\s\S]{0,160}局域网 IP/,
+  "Web local-trial guide must explain the Android phone address without making users infer it from Docker output",
+);
+assert.match(
+  webLocalTrialGuideSource,
+  /Step 1: check whether you are a regular user/,
+  "Web local-trial guide must include the same ordinary-user decision path in English",
+);
+assert.match(
+  webLocalTrialGuideSource,
+  /<body[^>]*data-language="zh-CN"/,
+  "Web local-trial guide must declare the active language so only one language is shown at a time",
+);
+assert.match(
+  webLocalTrialGuideSource,
+  /id="localTrialLanguageSelect"/,
+  "Web local-trial guide must expose a language selector instead of showing two full guides at once",
+);
+assert.match(
+  webGuideLanguageSource,
+  /function setGuideLanguage\(/,
+  "Web local-trial guide must switch visible language sections through a focused helper",
+);
+assert.match(webLocalTrialGuideSource, /src="\.\/guide-language\.js\?v=/, "Web local-trial guide must load the CSP-safe shared language helper");
+assert.match(
+  webSelfHostingGuideSource,
+  /<body[^>]*data-language="zh-CN"/,
+  "Web self-hosting guide must declare the active language so ordinary users do not see two full guides at once",
+);
+assert.match(
+  webSelfHostingGuideSource,
+  /<main[^>]*class="[^"]*local-trial-page[^"]*"[^>]*data-language="zh-CN"/,
+  "Web self-hosting guide must reuse the single-language guide shell",
+);
+assert.match(
+  webSelfHostingGuideSource,
+  /id="selfHostingLanguageSelect"/,
+  "Web self-hosting guide must expose a language selector like the local-trial guide",
+);
+assert.match(
+  webSelfHostingGuideSource,
+  /data-lang="zh-CN"/,
+  "Web self-hosting guide Chinese sections must be marked so they can be hidden when English is active",
+);
+assert.match(
+  webGuideLanguageSource,
+  /function setGuideLanguage\(/,
+  "Web self-hosting guide must switch visible language sections through a focused helper",
+);
+assert.match(webSelfHostingGuideSource, /src="\.\/guide-language\.js\?v=/, "Web self-hosting guide must load the CSP-safe shared language helper");
+assert.match(
+  webSelfHostingGuideSource,
+  /我只是使用别人部署好的 TaskBridge/,
+  "Web self-hosting guide must first separate ordinary users from deployers",
+);
+assert.match(
+  webSelfHostingGuideSource,
+  /If you use someone else's TaskBridge service/,
+  "Web self-hosting guide must include the ordinary-user decision path in English",
+);
+assertOrder(
+  webSelfHostingGuideSource,
+  "我只是使用别人部署好的 TaskBridge",
+  '<ol class="local-trial-steps" data-lang="zh-CN">',
+  "Web self-hosting guide must route ordinary users before showing deployment commands",
+);
+assertOrder(
+  webSelfHostingGuideSource,
+  "返回登录页填写地址",
+  '<ol class="local-trial-steps" data-lang="zh-CN">',
+  "Web self-hosting guide ordinary-user sign-in action must appear before deployment commands",
+);
+assertOrder(
+  webSelfHostingGuideSource,
+  "Back to sign-in with that address",
+  "<ol class=\"local-trial-steps\">",
+  "Web self-hosting guide English ordinary-user sign-in action must appear before deployment commands",
+);
+assert.match(
+  webStylesSource,
+  /\.local-trial-page\[data-language="zh-CN"\][\s\S]{0,220}\[lang="en"\]/,
+  "Web local-trial guide CSS must hide English content while Chinese is active",
+);
+assert.match(
+  webStylesSource,
+  /\.local-trial-page\[data-language="en-US"\][\s\S]{0,220}\[data-lang="zh-CN"\]/,
+  "Web local-trial guide CSS must hide Chinese content while English is active",
+);
+assert.doesNotMatch(webAppSource, /"auth\.localTrial":|"auth\.localTrialDocs":|"auth\.localTrialSameDevice":|"auth\.localTrialStartBackend":|"auth\.selfHost":|"auth\.selfHostHint":|"auth\.selfHostFirstAccount":/, "Web sign-in i18n must not keep unused nested setup-guide copy after moving setup guidance into dedicated pages");
+assert.match(webHtmlSource, /id="offlineTaskLimitNotice"/, "Web offline task list must reserve visible space for local-cache limit feedback");
+assert.match(webHtmlSource, /id="offlineTaskLimitLoadMoreButton"/, "Web offline task limit notice must offer a visible load-more action");
+assert.match(webAppSource, /cachedTaskTotalCount/, "Web offline cache hydration must remember the total local task count before applying the render limit");
+assert.match(webAppSource, /offlineTaskRenderLimit/, "Web offline cache hydration must keep a user-expandable render limit");
+assert.match(webAppSource, /function increaseOfflineTaskRenderLimit\(/, "Web offline task list must expose a focused load-more helper");
+assert.match(webAppSource, /function renderOfflineTaskLimitNotice\(/, "Web must render a clear notice when the offline cache has more tasks than the list limit");
+assert.match(webAppSource, /"task\.offlineLimitNotice"/, "Web i18n must include offline task limit notice copy");
+assert.match(webAppSource, /"task\.offlineLimitLoadMore"/, "Web i18n must include offline task load-more copy");
+assert.match(
+  webAppSource,
+  /offlineTaskLimitLoadMoreButton[\s\S]{0,220}increaseOfflineTaskRenderLimit\(\)/,
+  "Web offline task limit load-more button must expand the cached task render limit",
+);
+assert.match(
+  webAppSource,
+  /renderOfflineTaskLimitNotice\(\)/,
+  "Web render cycle must refresh the offline task limit notice with task state changes",
+);
+assert.match(
+  androidTaskListSource,
+  /private fun TaskListSearchField\(/,
+  "Android task list search field must be a focused composable instead of being hidden inside the filter panel",
+);
+assertOrder(
+  androidTaskListSource,
+  "TaskListSearchField(",
+  "TextButton(onClick = { listToolsOpen = !listToolsOpen }",
+  "Android task list must show search before the optional filter tools toggle",
+);
+assert.match(
+  desktopLoginSource,
+  /const registrationConnectionHint = computed/,
+  "Desktop login must derive an explicit registration status hint near the connection controls",
+);
+assertOrder(
+  desktopLoginSource,
+  "{{ registrationConnectionHint }}",
+  '<div class="segment-control"',
+  "Desktop registration status hint must appear before the login/register segmented control",
+);
+assert.match(
+  desktopI18nSource,
+  /"auth\.registrationConnectionHint"[\s\S]{0,240}检查服务器地址[\s\S]{0,240}管理员创建账号/,
+  "Desktop Chinese registration connection hint must tell users to check the server address and ask an admin for account creation",
+);
+assert.match(
+  desktopI18nSource,
+  /"auth\.registrationConnectionHint"[\s\S]{0,260}Check the server address[\s\S]{0,260}administrator to create an account/,
+  "Desktop English registration connection hint must tell users to check the server address and ask an admin for account creation",
+);
+assert.doesNotMatch(
+  desktopLoginSource,
+  /<p v-if="registrationBlocked" class="form-error">\{\{ registrationUnavailableText \}\}<\/p>/,
+  "Desktop login must not repeat the registration status warning below the segmented control",
+);
+assert.doesNotMatch(
+  desktopLoginSource,
+  /<p v-else-if="!auth\.registrationStatusKnown" class="form-message form-message-info">\{\{ registrationUnavailableText \}\}<\/p>/,
+  "Desktop login must keep unknown registration status guidance in one place instead of duplicating it below the segmented control",
+);
+assert.match(
+  troubleshootingDocSource,
+  /普通用户排障到这里就够了/,
+  "troubleshooting docs must clearly separate ordinary-user troubleshooting from maintainer-only sections",
+);
+assert.match(
+  troubleshootingDocSource,
+  /HTTP \/ WS 与 HTTPS \/ WSS[\s\S]{0,520}不会因为端点使用 `http:\/\/` 或 `ws:\/\/` 而失败/,
+  "Troubleshooting docs must explain that HTTP and WS endpoints are supported",
+);
+assert.match(
+  troubleshootingDocSource,
+  /高级连接设置什么时候需要改[\s\S]{0,520}大多数用户只需要填写服务器地址/,
+  "Troubleshooting docs must keep advanced connection settings secondary",
+);
+assert.match(
+  developmentDocSource,
+  /WEB_CORS_ORIGINS=http:\/\/taskbridge\.example\.com[\s\S]{0,80}WEB_CORS_ORIGINS=https:\/\/taskbridge\.example\.com/,
+  "Development docs must show explicit HTTP or HTTPS CORS origins instead of a wildcard",
 );
 assert.match(
   deployReadmeSource,
-  /WEB_CORS_ORIGINS=https:\/\/taskbridge\.example\.com/,
-  "Deploy README production CORS guidance must use an explicit HTTPS origin example",
+  /WEB_CORS_ORIGINS=http:\/\/taskbridge\.example\.com[\s\S]{0,120}WEB_CORS_ORIGINS=https:\/\/taskbridge\.example\.com/,
+  "Deploy README production CORS guidance must allow explicit HTTP or HTTPS origins instead of a wildcard",
+);
+assert.match(
+  rootPackageSource,
+  /"check:user-experience":\s*"npm --prefix desktop run check:user-experience"/,
+  "Workspace root must expose the UX check so maintainers do not have to know it lives under desktop/",
 );
 
 console.log("user experience optimization check passed");

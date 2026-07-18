@@ -15,6 +15,7 @@ const [
   androidSettingsSource,
   androidTaskRepositorySource,
   androidMainActivitySource,
+  androidSharedTextReaderSource,
   androidManifestSource,
   androidFilePathsSource,
 ] = await Promise.all([
@@ -27,6 +28,7 @@ const [
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/settings/SettingsScreen.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/data/repository/TaskRepository.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/MainActivity.kt"), "utf8"),
+  readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/editor/SharedTextReader.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/AndroidManifest.xml"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/res/xml/file_paths.xml"), "utf8"),
 ]);
@@ -105,12 +107,18 @@ assert.match(androidSettingsSource, /FileProvider\.getUriForFile/, "Android back
 assert.match(androidSettingsSource, /Intent\.EXTRA_STREAM/, "Android backup export must use EXTRA_STREAM");
 assert.match(androidMainActivitySource, /Intent\.EXTRA_STREAM/, "Android backup import must read shared backup file streams");
 assert.match(androidMainActivitySource, /contentResolver\.openInputStream/, "Android backup import must open shared backup URIs");
-assert.match(androidMainActivitySource, /MAX_SHARED_TEXT_BYTES/, "Android backup import must cap shared payload size");
+assert.match(androidMainActivitySource, /sharedPayloadReadLimit\(mimeType\)/, "Android shared payload reads must select a MIME-aware byte limit");
 assert.match(
-  androidMainActivitySource,
-  /MAX_SHARED_TEXT_BYTES\s*=\s*20_000_000/,
+  androidSharedTextReaderSource,
+  /MAX_SHARED_TEXT_BYTES\s*=\s*1_048_576/,
+  "Android ordinary shared text must keep a bounded 1MB input limit",
+);
+assert.match(
+  androidSharedTextReaderSource,
+  /MAX_SHARED_BACKUP_BYTES\s*=\s*20_000_000/,
   "Android share-target backup import must use the same 20MB cap as other backup import paths",
 );
+assert.match(androidMainActivitySource, /requireSharedPayloadWithinLimit\(text, isTaskBridgeBackupText\(text\)\)/, "Android must reapply the 1MB limit when shared JSON is not a TaskBridge backup");
 assert.match(androidSettingsSource, /MAX_SELECTED_BACKUP_BYTES/, "Android settings backup picker must define a selected-file import size cap");
 assert.match(
   androidSettingsSource,

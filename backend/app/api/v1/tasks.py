@@ -27,6 +27,7 @@ from app.schemas.task import (
     TaskSnoozeRequest,
     TaskTemplateInstantiateRequest,
     TaskUpdateWithVersion,
+    TaskView,
 )
 from app.services.task_service import (
     add_checklist_item,
@@ -56,6 +57,7 @@ from app.services.task_service import (
     update_checklist_item,
     update_task,
 )
+from app.utils.time import DEFAULT_TIMEZONE
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -88,8 +90,9 @@ def _check_task_rate_limit(
 def read_tasks(
     request: Request,
     q: str | None = None,
-    view: str | None = None,
+    view: TaskView | None = None,
     now: datetime | None = None,
+    timezone: str = Query(default=DEFAULT_TIMEZONE, min_length=1, max_length=64),
     status: str | None = None,
     tag: str | None = None,
     project: str | None = None,
@@ -119,6 +122,7 @@ def read_tasks(
         q=normalized_q,
         view=view,
         now=now,
+        timezone_name=timezone,
         status=status,
         tag=tag,
         project=project,
@@ -137,11 +141,13 @@ def read_tasks(
 @router.get("/meta")
 def meta(
     request: Request,
+    timezone: str = Query(default=DEFAULT_TIMEZONE, min_length=1, max_length=64),
+    now: datetime | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _check_task_rate_limit(request, current_user, scope="tasks:meta", limit=TASK_READ_RATE_LIMIT)
-    return api_success(get_task_meta(db, current_user))
+    return api_success(get_task_meta(db, current_user, timezone_name=timezone, now=now))
 
 
 @router.get("/export")

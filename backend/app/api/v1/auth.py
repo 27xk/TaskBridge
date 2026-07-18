@@ -9,6 +9,7 @@ from app.core.response import api_success
 from app.models.user import User
 from app.schemas.auth import (
     LoginRequest,
+    PasswordChangeRequest,
     RefreshTokenRequest,
     RevokeOtherSessionsRequest,
     UserCreate,
@@ -16,6 +17,7 @@ from app.schemas.auth import (
     WebSocketTicketRequest,
 )
 from app.services.auth_service import (
+    change_password,
     create_websocket_ticket,
     list_refresh_sessions,
     login_user,
@@ -77,6 +79,30 @@ def refresh(payload: RefreshTokenRequest, request: Request, db: Session = Depend
 @router.get("/me")
 def read_current_user(current_user: User = Depends(get_current_user)):
     return api_success(UserRead.model_validate(current_user))
+
+
+@router.put("/password")
+def update_password(
+    payload: PasswordChangeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_session: CurrentUserSession = Depends(get_current_user_session),
+):
+    check_rate_limit(
+        request,
+        scope="change-password",
+        identifier=str(current_session.user.id),
+        limit=10,
+        window_seconds=300,
+    )
+    return api_success(
+        change_password(
+            db,
+            current_session.user,
+            current_session.refresh_token.id,
+            payload,
+        ),
+    )
 
 
 @router.get("/sessions")

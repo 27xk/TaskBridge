@@ -15,6 +15,18 @@
 
 离线新增、编辑和完成任务依赖本机已有登录会话；第一次打开时请先连接服务器并登录一次。
 
+## 专注工作台界面
+
+![TaskBridge 桌面端专注工作台](../docs/assets/desktop-focus-1440.png)
+
+主窗口只保留「今日」「全部」和「设置」3 个一级入口。正常同步状态收在左下角账户区，不占用任务工作区。
+
+- **今日：** 首屏提供快捷添加，待办按逾期和稍后处理分组；完整编辑表单按需从右侧打开。
+- **全部：** 搜索、常用筛选和新增入口保持在顶部；低频筛选收在菜单中，选择任务后才显示批量操作栏。
+- **设置：** 账号与显示、账号安全、连接与同步、窗口、数据与备份、同步问题、项目与标签共 7 个分类，一次只显示当前分类。
+
+窗口收窄后，左侧栏会自动切换为带 Tooltip 的图标导航。在更窄的窗口中，工具栏和设置分类会重新排布；任务编辑器覆盖主工作区，不会挤压列表或产生横向滚动。
+
 ## 开发者说明
 
 下面内容面向本地开发、构建和发布。应用使用 Vue 3、TypeScript、Pinia、SQLite 和 electron-builder。运行时配置使用轻量 JSON 存储，避免引入额外桌面端配置依赖。
@@ -49,12 +61,15 @@ npm run check:sync-diagnostics
 npm run check:sync-recovery-center
 npm run check:desktop-theme
 npm run check:desktop-efficiency
+npm run check:ux-priority-polish
+npm run check:user-experience
 npm run check:desktop-docs
 npm run check:release-artifacts
 npm run check:production-hardening
 npm run check:android-sync-recovery
 npm run check:ci-workflows
 npm run check:contract-drift
+npm run check:desktop-focus-visual
 npm run typecheck
 npm run build
 npm run dist
@@ -88,9 +103,12 @@ npm run rebuild:native
 - `npm run check:desktop-backup` 检查桌面端备份导出分页、导入错误反馈和导入统计，避免坏备份静默显示为成功。
 - `npm run check:desktop-theme` 检查桌面端主题配置、持久化、IPC 校验和设置页入口是否完整。
 - `npm run check:desktop-efficiency` 检查桌面端设置自愈与恢复通知、提醒去重缓存裁剪以及任务列表排序 / 索引是否到位。
+- `npm run check:ux-priority-polish` 检查跨端主流程层级、首用引导和高优先级体验约束。
+- `npm run check:user-experience` 检查 Web、Windows 与 Android 的完整用户体验契约。
 - `npm run check:desktop-docs` 检查 README、部署说明和桌面端说明是否与实际连接地址策略一致。
 - `npm run check:ci-workflows` 检查 CI / release 是否真正运行桌面端关键守门脚本。
 - `npm run check:contract-drift` 检查后端、桌面端和 Android 端任务 / 同步字段是否发生漂移。
+- `npm run check:desktop-focus-visual` 使用隔离用户目录和本地假 API 启动真实 Electron，验证 3 档窗口、关键交互、可访问名称和截图像素，并更新 `docs/assets/desktop-focus-*.png`。
 - `npm run clean:dry-run` 查看会清理哪些本地构建缓存；`npm run clean` 会移除 `out/`、`release/`、Electron/Vite/npm 本地缓存等桌面端临时目录。
 
 ## 功能
@@ -113,6 +131,8 @@ npm run rebuild:native
 - `TASKBRIDGE_BASE_URL`
 - `TASKBRIDGE_WS_URL`
 
+普通用户连接 Release Compose 时，只在登录页填写 `http://<服务器>:8080`。下面分别注入 API / WebSocket 的示例用于开发直连或自定义代理，不是普通用户必填项。
+
 本地打包时可这样指定：
 
 ```powershell
@@ -121,7 +141,11 @@ $env:TASKBRIDGE_WS_URL="ws://192.168.1.10:8000/ws/sync"
 npm run dist
 ```
 
-用户安装后可以在设置页展示和修改后端连接地址。应用会迁移旧版本内置的默认地址，但会保留用户历史版本中已经手动改过的地址。
+用户安装后可以在设置页展示和修改后端连接地址。应用会迁移旧版本内置的默认地址，但会保留用户历史版本中已经手动改过的服务器地址，以及分别填写的自定义 API / WebSocket 端点。使用自定义端点登录失败后再次尝试时，也不会被服务器根地址自动派生的值覆盖。
+
+刷新会话自然失效时，桌面端会保留原服务器和用户对应的 SQLite 工作区，并在登录页提供本机模式。进入后可以继续编辑，点击“登录并同步”后恢复网络服务；主动退出或切换服务器会完整清除工作区身份。
+
+设置页中的连接地址是显式保存项。修改后如果切换到其他页面、退出或关闭窗口，桌面端会提示是否放弃未保存的连接草稿；刷新同步诊断不会覆盖正在编辑的地址。
 
 ## 卸载清理
 
@@ -152,6 +176,8 @@ ELECTRON_BUILDER_CACHE=<workspace>/.cache/electron-builder
 ```
 
 这样既避免发布未签名安装包，也避免使用系统级 Electron 缓存目录导致权限问题。
+
+公开 GitHub Release 只上传通过证书签名的 Windows 安装包。发布环境未配置签名证书时，workflow 会省略桌面客户端文件，不会生成或上传 unsigned EXE；此时 Release 仍可发布其他已满足发布条件的产物。
 
 ## 本地验证
 

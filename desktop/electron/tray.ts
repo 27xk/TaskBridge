@@ -2,13 +2,15 @@ import { app, Menu, nativeImage, Tray, type NativeImage } from "electron";
 
 import { hideFloatingWindow, showFloatingWindow } from "./floating-window";
 import { resolveAppIconPath } from "./app-icon";
-import { getSettings, windows } from "./state";
+import { getSettings, hasTokens, windows } from "./state";
 
 let tray: Tray | null = null;
-let latestSyncStatus = "已同步";
+let latestSyncStatus = "未登录";
 
 export function createAppTray(): Tray {
   if (tray) return tray;
+
+  latestSyncStatus = hasTokens() ? "已同步" : "未登录";
 
   tray = new Tray(createTrayIcon());
   tray.setToolTip("TaskBridge");
@@ -45,6 +47,7 @@ export function getTraySyncStatus(): string {
 function formatSyncStatus(status: string): string {
   const normalized = status.toLowerCase();
   if (normalized.includes("syncing")) return "同步中";
+  if (normalized.includes("signed-out") || normalized.includes("unauthenticated")) return "未登录";
   if (normalized.includes("offline")) return "离线";
   if (normalized.includes("error")) return "同步异常";
   if (normalized.includes("connected")) return "实时连接";
@@ -66,6 +69,7 @@ function localizedSyncStatus(): string {
     实时连接: "Connected",
     等待连接: "Waiting",
     已同步: "Synced",
+    未登录: "Not signed in",
   };
   return map[latestSyncStatus] ?? latestSyncStatus;
 }

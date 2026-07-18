@@ -3,6 +3,7 @@ package com.taskbridge.app
 import android.content.Context
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.local.AppDatabase
+import com.taskbridge.app.data.local.WorkspaceMigrationCoordinator
 import com.taskbridge.app.data.remote.RetrofitClient
 import com.taskbridge.app.data.repository.AuthRepository
 import com.taskbridge.app.data.repository.SyncRepository
@@ -17,18 +18,32 @@ class AppContainer(context: Context) {
 
     val tokenDataStore = TokenDataStore(appContext)
     private val apiService = RetrofitClient.create(appContext, tokenDataStore)
+    private val workspaceMigration = WorkspaceMigrationCoordinator(
+        database,
+        database.taskDao(),
+        database.syncQueueDao(),
+        tokenDataStore,
+    )
 
     private val deviceIdProvider = DeviceIdProvider(appContext)
 
     val authRepository = AuthRepository(apiService, tokenDataStore, deviceIdProvider)
-    val taskRepository = TaskRepository(apiService, database, database.taskDao(), database.syncQueueDao(), tokenDataStore)
+    val taskRepository = TaskRepository(
+        apiService,
+        database,
+        database.taskDao(),
+        database.syncQueueDao(),
+        tokenDataStore,
+        workspaceMigration,
+    )
     val syncRepository = SyncRepository(
         apiService = apiService,
         database = database,
         taskDao = database.taskDao(),
         syncQueueDao = database.syncQueueDao(),
         tokenDataStore = tokenDataStore,
+        workspaceMigration = workspaceMigration,
     )
-    val syncManager = SyncManager(appContext, syncRepository, tokenDataStore)
-    val reminderManager = ReminderManager(appContext, tokenDataStore)
+    val reminderManager = ReminderManager(appContext, tokenDataStore, taskRepository)
+    val syncManager = SyncManager(appContext, syncRepository, tokenDataStore, reminderManager)
 }

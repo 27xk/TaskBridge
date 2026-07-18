@@ -17,7 +17,7 @@ class RegistrationAvailabilityTest {
 
         assertTrue(ui.showCreateAccountAction)
         assertTrue(ui.canEditAccountFields)
-        assertFalse(ui.canSubmitRegistration)
+        assertTrue(ui.canSubmitRegistration)
         assertEquals("检查并创建账号", ui.actionText)
         assertEquals("点击“检查并创建账号”即可确认当前服务器是否开放注册。已有账号可以直接登录。", ui.helperText)
     }

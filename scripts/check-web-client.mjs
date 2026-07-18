@@ -20,6 +20,8 @@ const requiredFiles = [
   "web/self-hosting.html",
   "web/styles.css",
   "web/app.js",
+  "web/startup.js",
+  "web/guide-language.js",
   "web/offline-core.js",
   "web/manifest.webmanifest",
   "web/sw.js",
@@ -28,6 +30,9 @@ const requiredFiles = [
   "web/icon-512.png",
   "web/icon-maskable-512.png",
   "web/_headers.example",
+  "deploy/nginx.web.conf",
+  "deploy/docker-compose.release.yml",
+  "deploy/.env.example",
 ];
 
 for (const file of requiredFiles) {
@@ -47,12 +52,19 @@ const [
   backendEnvSource,
   architectureSource,
   readmeSource,
+  developmentSource,
   localCheckSource,
   ciSource,
   releaseSource,
   localTrialSource,
   selfHostingSource,
   smokeSource,
+  startupSource,
+  guideLanguageSource,
+  nginxWebSource,
+  releaseComposeSource,
+  deployEnvSource,
+  deployReadmeSource,
 ] = await Promise.all([
   readFile(resolve(repoRoot, "web/index.html"), "utf8"),
   readFile(resolve(repoRoot, "web/app.js"), "utf8"),
@@ -66,12 +78,19 @@ const [
   readFile(resolve(repoRoot, "backend/.env.example"), "utf8"),
   readFile(resolve(repoRoot, "docs/architecture.md"), "utf8"),
   readFile(resolve(repoRoot, "README.md"), "utf8"),
+  readFile(resolve(repoRoot, "docs/development.md"), "utf8"),
   readFile(resolve(repoRoot, "scripts/check-local.ps1"), "utf8"),
   readFile(resolve(repoRoot, ".github/workflows/ci.yml"), "utf8"),
   readFile(resolve(repoRoot, ".github/workflows/release.yml"), "utf8"),
   readFile(resolve(repoRoot, "web/local-trial.html"), "utf8"),
   readFile(resolve(repoRoot, "web/self-hosting.html"), "utf8"),
   readFile(resolve(repoRoot, "scripts/smoke-web-client.mjs"), "utf8"),
+  readFile(resolve(repoRoot, "web/startup.js"), "utf8"),
+  readFile(resolve(repoRoot, "web/guide-language.js"), "utf8"),
+  readFile(resolve(repoRoot, "deploy/nginx.web.conf"), "utf8"),
+  readFile(resolve(repoRoot, "deploy/docker-compose.release.yml"), "utf8"),
+  readFile(resolve(repoRoot, "deploy/.env.example"), "utf8"),
+  readFile(resolve(repoRoot, "deploy/README.md"), "utf8"),
 ]);
 
 const webVersionMatch = htmlSource.match(/<meta name="taskbridge-version" content="([^"]+)" \/>/);
@@ -82,6 +101,7 @@ for (const token of [
   'rel="manifest"',
   'href="./styles.css"',
   `src="./app.js?v=${webVersion}"`,
+  `src="./startup.js?v=${webVersion}"`,
   'id="serverBaseUrl"',
   'id="apiBaseUrl"',
   'id="testConnectionButton"',
@@ -95,7 +115,20 @@ for (const token of [
 
 assert.match(htmlSource, /id="startupFallback"/, "web must show a startup recovery panel when modules fail to load");
 assert.match(htmlSource, /id="clearStartupCacheButton"/, "web startup recovery must let users clear stale offline cache");
-assert.match(htmlSource, /window\.taskBridgeWebReady/, "web startup recovery must be driven by an app-ready marker");
+assert.match(startupSource, /window\.taskBridgeWebReady/, "web startup recovery must be driven by an app-ready marker");
+for (const [name, source] of [
+  ["index", htmlSource],
+  ["local trial", localTrialSource],
+  ["self-hosting", selfHostingSource],
+]) {
+  assert.doesNotMatch(source, /<script(?![^>]*\bsrc=)[^>]*>/i, `${name} page must not use CSP-blocked inline scripts`);
+}
+assert.match(localTrialSource, new RegExp(`src="\\./guide-language\\.js\\?v=${webVersion}"`));
+assert.match(selfHostingSource, new RegExp(`src="\\./guide-language\\.js\\?v=${webVersion}"`));
+assert.match(guideLanguageSource, /taskbridge\.web\.v1\.language/, "guide pages must share the app language preference");
+assert.match(htmlSource, /id="authModeSwitch"[^>]*role="group"/, "auth mode controls must use button-group semantics");
+assert.doesNotMatch(htmlSource, /role="tab(?:list)?"|aria-selected/, "auth mode controls must not claim an incomplete tab protocol");
+assert.match(appSource, /setAttribute\("aria-pressed"/, "auth mode buttons must announce their pressed state");
 assert.match(htmlSource, /id="confirmDialog"/, "web must provide an in-app confirmation dialog");
 assert.match(htmlSource, /id="confirmDialogConfirmButton"/, "web confirmation dialog must expose an explicit confirm button");
 assert.match(htmlSource, /id="confirmDialogCancelButton"/, "web confirmation dialog must expose an explicit cancel button");
@@ -151,15 +184,13 @@ assert.match(
   /<details id="advancedConnectionSettings" class="advanced-connection-settings" hidden>[\s\S]*?<summary[^>]*>\u9ad8\u7ea7\u8fde\u63a5\u8bbe\u7f6e<\/summary>[\s\S]*?id="apiBaseUrl"[\s\S]*?id="deviceId"[\s\S]*?<\/details>/,
   "web auth API and device fields must stay hidden until the advanced connection action is used",
 );
-assert.match(
+assert.match(htmlSource, /id="serverSetupHelp"/, "web first-use guide must keep no-server help behind one optional disclosure");
+assert.match(htmlSource, /href="\.\/local-trial\.html"/, "web first-use help must link to the same-origin local trial guide");
+assert.match(htmlSource, /href="\.\/self-hosting\.html"/, "web first-use help must link to the same-origin self-hosting guide");
+assert.doesNotMatch(
   htmlSource,
-  /<details id="localTrialGuide"[\s\S]*?<summary[^>]*>Docker 本机试用<\/summary>/,
-  "web first-use guide must clearly label the local trial as a Docker-backed path",
-);
-assert.match(
-  htmlSource,
-  /<details id="selfHostGuide"[\s\S]*?<summary[^>]*>自托管部署<\/summary>/,
-  "web first-use guide must collapse self-hosting details behind a separate choice",
+  /id="localTrialGuide"|id="selfHostGuide"|class="setup-checklist"/,
+  "web first-use guide must not render nested setup choices before sign-in",
 );
 assert.doesNotMatch(
   htmlSource,
@@ -312,8 +343,8 @@ assert.match(appSource, /"task\.list": "归类"/, "web task list-type field must
 assert.match(appSource, /"task\.list": "Location"/, "web English task list-type field must avoid checklist copy");
 assert.match(htmlSource, /data-i18n="task\.list">归类<\/span>/, "web list-type label fallback must match the current Location wording");
 assert.doesNotMatch(htmlSource, /data-i18n="task\.list">清单<\/span>/, "web list-type label fallback must not show the old checklist wording before i18n hydrates");
-assert.match(appSource, /"confirm\.clearDraft": "清空当前任务草稿吗？标题、内容、时间和步骤都会被清除。"/, "web clear-draft confirmation must avoid old list/checklist wording");
-assert.doesNotMatch(appSource, /"confirm\.clearDraft": "[^"]*清单/, "web clear-draft confirmation must not use the old 清单 wording");
+assert.match(appSource, /"confirm\.clearDraft": "清空当前任务草稿吗？标题、备注、清单和时间都会被清除。"/, "web clear-draft confirmation must match the current notes/checklist wording");
+assert.doesNotMatch(appSource, /"confirm\.clearDraft": "[^"]*(?:内容|步骤)/, "web clear-draft confirmation must not use old content/steps wording");
 assert.doesNotMatch(
   htmlSource,
   /<option value="(?:inbox|today)">(?:inbox|today)<\/option>/,
@@ -431,6 +462,8 @@ for (const token of [
   "./local-trial.html",
   "./self-hosting.html",
   "`./app.js?v=${WEB_VERSION}`",
+  "`./startup.js?v=${WEB_VERSION}`",
+  "`./guide-language.js?v=${WEB_VERSION}`",
   "`./offline-core.js?v=${WEB_VERSION}`",
   "./styles.css",
   "./icon.svg",
@@ -471,7 +504,7 @@ for (const token of [
   "cd TaskBridge\\deploy",
   "Copy-Item .env.local.example .env",
   "docker compose -f docker-compose.release.yml up -d",
-  "curl http://127.0.0.1:8000/ready",
+  "curl http://127.0.0.1:8080/ready",
 ]) {
   assert.ok(localTrialEnglishSource.includes(token), `web/local-trial.html English section must include ${token}`);
 }
@@ -553,6 +586,34 @@ assert.match(
   /X-Content-Type-Options:\s*nosniff/,
   "web/_headers.example must document browser security headers",
 );
+assert.doesNotMatch(
+  nginxWebSource,
+  /location\s*=\s*\/(?:index\.html|sw\.js)\s*\{[^}]*add_header/s,
+  "exact cache-control locations must inherit server security headers",
+);
+assert.match(
+  nginxWebSource,
+  /location\s*=\s*\/index\.html\s*\{[^}]*expires\s+-1;/s,
+  "index must disable caching without breaking header inheritance",
+);
+assert.match(
+  nginxWebSource,
+  /proxy_set_header\s+X-Forwarded-For\s+\$remote_addr;/,
+  "the bundled proxy must replace spoofable forwarded-for input",
+);
+assert.doesNotMatch(
+  nginxWebSource,
+  /\$proxy_add_x_forwarded_for/,
+  "the bundled proxy must not append untrusted forwarded-for input",
+);
+assert.match(releaseComposeSource, /ipv4_address:\s*172\.30\.27\.10/, "the bundled web proxy must have a stable internal address");
+assert.match(releaseComposeSource, /subnet:\s*172\.30\.27\.0\/24/, "the release network must use the documented fixed subnet");
+assert.match(deployEnvSource, /TRUSTED_PROXY_IPS=172\.30\.27\.10/, "the backend must trust only the bundled web proxy by default");
+assert.match(
+  deployReadmeSource,
+  /git pull --ff-only[\s\S]*docker compose -f docker-compose\.release\.yml pull/,
+  "source deployments must update bind-mounted Web files before pulling images",
+);
 
 assert.match(backendMainSource, /CORSMiddleware/, "backend must install CORS middleware for the web client");
 assert.match(backendConfigSource, /web_cors_origins/, "backend settings must expose WEB_CORS_ORIGINS");
@@ -561,9 +622,10 @@ assert.match(backendEnvSource, /WEB_CORS_ORIGINS=/, "backend env example must do
 assert.match(architectureSource, /Web\/PWA/, "architecture docs must include the Web/PWA client");
 assert.match(architectureSource, /cursor_id[\s\S]*cursor_updated_at/, "architecture docs must mention Web task cursor pagination");
 assert.match(architectureSource, /任务查看、新建、编辑、搜索/, "architecture docs must include Web task editing");
-assert.match(readmeSource, /### Web\/PWA/, "README must document how to start the Web/PWA client");
-assert.match(readmeSource, /断网时可以继续查看和修改本机任务/, "README must document Web offline use in user-facing language");
-assert.match(readmeSource, /任务新建、编辑、完成/, "README must document Web task editing");
+assert.match(developmentSource, /### Web\/PWA/, "development docs must document how to start the Web/PWA client");
+assert.match(developmentSource, /继续离线使用/, "development docs must document the explicit Web offline resume path");
+assert.match(developmentSource, /必须重新登录|重新登录才能上传/, "development docs must explain that a restored Web cache cannot sync without signing in again");
+assert.match(developmentSource, /任务新建、编辑、完成/, "development docs must document Web task editing");
 assert.match(localCheckSource, /check-web-client\.mjs/, "check-local.ps1 must run the Web client guard");
 assert.match(localCheckSource, /smoke-web-client\.mjs/, "check-local.ps1 must run the Web HTTP smoke test");
 assert.match(ciSource, /check-web-client\.mjs/, "CI workflow must run the Web client guard");

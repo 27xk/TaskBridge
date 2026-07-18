@@ -6,13 +6,36 @@
     <title>TaskBridge 自托管部署说明</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
-    <main class="startup-fallback local-trial-page">
+  <body data-language="zh-CN">
+    <main class="startup-fallback local-trial-page" data-language="zh-CN" data-guide-language-page>
       <p class="eyebrow">TaskBridge</p>
-      <h1>自托管部署说明</h1>
-      <p>这页用于从 Web/PWA 首屏直接完成部署准备。正式对外使用时，请先准备域名、HTTPS 反向代理、强密码和明确的 Web 跨域来源。</p>
+      <label class="language-select local-trial-language-row">
+        <span>语言 / Language</span>
+        <select id="selfHostingLanguageSelect" aria-label="Language" data-guide-language-select>
+          <option value="zh-CN">中文</option>
+          <option value="en-US">English</option>
+        </select>
+      </label>
 
-      <ol class="local-trial-steps">
+      <h1 data-lang="zh-CN">自托管部署说明</h1>
+      <p data-lang="zh-CN">这页用于从 Web/PWA 首屏直接完成部署准备。正式对外使用时，请先准备服务器地址、强密码和明确的 Web 跨域来源；公网建议使用 HTTPS / WSS 反向代理。</p>
+
+      <section class="local-trial-intro" data-lang="zh-CN" aria-labelledby="selfHostingChoiceTitle">
+        <h2 id="selfHostingChoiceTitle">第一步：先确认你是不是部署者</h2>
+        <div class="local-trial-choice-grid">
+          <article class="local-trial-choice">
+            <h3>我只是使用别人部署好的 TaskBridge</h3>
+            <p>请先向管理员或部署者索取服务器地址和账号，然后回到登录页填写地址。普通使用不需要执行下面的部署命令。</p>
+            <a class="secondary-button" href="./index.html">返回登录页填写地址</a>
+          </article>
+          <article class="local-trial-choice">
+            <h3>我是部署者，准备自托管</h3>
+            <p>继续阅读下面步骤，完成服务启动、健康检查和首个账号创建，再把服务器地址发给需要登录的用户。</p>
+          </article>
+        </div>
+      </section>
+
+      <ol class="local-trial-steps" data-lang="zh-CN">
         <li>
           <span>下载项目并进入部署目录</span>
           <pre class="command-snippet"><code>git clone https://github.com/27xk/TaskBridge.git
@@ -31,7 +54,7 @@ MYSQL_PASSWORD=replace-with-a-strong-password
 DATABASE_URL=mysql+pymysql://taskbridge:replace-with-a-strong-password@mysql:3306/taskbridge
 REGISTRATION_ENABLED=false
 WEB_CORS_ORIGINS=https://taskbridge.example.com</code></pre>
-          <p><code>DATABASE_URL</code> 里的密码必须和 <code>MYSQL_PASSWORD</code> 一致。<code>WEB_CORS_ORIGINS</code> 应写成真实 Web/PWA 地址，例如 <code>https://taskbridge.example.com</code>，不要在生产环境继续使用通配来源。</p>
+          <p><code>DATABASE_URL</code> 里的密码必须和 <code>MYSQL_PASSWORD</code> 一致。Compose 默认把 Web 和 API 绑定到本机，再由反向代理对外提供统一域名；<code>WEB_CORS_ORIGINS</code> 不要在生产环境继续使用通配来源。</p>
         </li>
         <li>
           <span>启动服务</span>
@@ -39,8 +62,8 @@ WEB_CORS_ORIGINS=https://taskbridge.example.com</code></pre>
         </li>
         <li>
           <span>检查健康状态</span>
-          <pre class="command-snippet"><code>curl http://127.0.0.1:8000/ready</code></pre>
-          <p><code>/ready</code> 返回可用后，再在客户端填写服务器根地址；如果通过 Nginx 或 Caddy 暴露 HTTPS，请填写反向代理后的域名。</p>
+          <pre class="command-snippet"><code>curl http://127.0.0.1:8080/ready</code></pre>
+          <p><code>/ready</code> 返回可用后，可打开 <code>http://127.0.0.1:8080</code> 验证 Web。通过 Nginx 或 Caddy 对外提供服务时，请把统一域名代理到该 Web 入口，并在客户端填写该域名。</p>
         </li>
         <li>
           <span>创建首个账号</span>
@@ -49,9 +72,25 @@ WEB_CORS_ORIGINS=https://taskbridge.example.com</code></pre>
         </li>
       </ol>
 
+      <p data-lang="zh-CN">明文 HTTP/WS 可用于本机和受控内网。非本机 HTTP 地址通常不能安装 PWA 或注册 Service Worker；普通 Web 页面和任务连接仍可使用。</p>
+
       <section lang="en">
         <h2>Self-hosting</h2>
-        <p>Copy <code>.env.example</code>, set strong secrets, pin <code>WEB_CORS_ORIGINS</code> to your HTTPS Web origin, start Compose, and verify <code>/ready</code> before signing in.</p>
+        <p>Copy <code>.env.example</code>, set strong secrets, start Compose, and verify the Web gateway's <code>/ready</code> endpoint before signing in.</p>
+        <div class="local-trial-intro" aria-labelledby="selfHostingChoiceTitleEn">
+          <h3 id="selfHostingChoiceTitleEn">Step 1: check whether you are the deployer</h3>
+          <div class="local-trial-choice-grid">
+            <article class="local-trial-choice">
+              <h4>If you use someone else's TaskBridge service</h4>
+              <p>Ask the administrator or deployer for the server address and account first. You do not need to run the deployment commands below.</p>
+              <a class="secondary-button" href="./index.html">Back to sign-in with that address</a>
+            </article>
+            <article class="local-trial-choice">
+              <h4>If you are deploying TaskBridge</h4>
+              <p>Continue with the steps below, start the service, check readiness, and create the first account before sharing the server address.</p>
+            </article>
+          </div>
+        </div>
         <ol class="local-trial-steps">
           <li>
             <span>Download the project and enter the deployment directory</span>
@@ -76,16 +115,20 @@ WEB_CORS_ORIGINS=https://taskbridge.example.com</code></pre>
           <li>
             <span>Start services and check readiness</span>
             <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml up -d
-curl http://127.0.0.1:8000/ready</code></pre>
+curl http://127.0.0.1:8080/ready</code></pre>
+            <p>Open <code>http://127.0.0.1:8080</code> to verify the Web client, or proxy your public domain to that gateway.</p>
           </li>
           <li>
             <span>Create the first account</span>
             <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml exec api python -m tools.create_user --username owner --email owner@example.com</code></pre>
           </li>
         </ol>
+        <p>Plain HTTP/WS works on local and controlled networks. Browsers may block PWA installation and Service Workers on non-localhost HTTP origins, while the regular Web page still works.</p>
       </section>
 
-      <a class="primary-button" href="./index.html">返回登录页 / Back to sign-in</a>
+      <a class="primary-button" href="./index.html" data-lang="zh-CN">返回登录页</a>
+      <a class="primary-button" href="./index.html" lang="en">Back to sign-in</a>
     </main>
+    <script src="./guide-language.js?v=0.1.8"></script>
   </body>
 </html>

@@ -1,0 +1,1303 @@
+/* Focused desktop workspace overrides. The base stylesheet still serves login and floating windows. */
+.focus-workspace {
+  --workspace-sidebar: color-mix(in srgb, var(--surface-muted) 84%, #dce8e2);
+  --workspace-canvas: var(--surface);
+  --workspace-subtle: var(--surface-muted);
+  --workspace-line: var(--border);
+  --workspace-text: var(--text);
+  --workspace-muted: var(--muted);
+  --workspace-accent: var(--primary);
+  --workspace-accent-hover: var(--primary-hover);
+  --workspace-danger: var(--danger);
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  width: 100%;
+  height: 100vh;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
+}
+
+.focus-workspace .sidebar {
+  display: flex;
+  gap: 18px;
+  height: 100vh;
+  min-height: 0;
+  padding: 20px 12px 16px;
+  color: var(--workspace-text);
+  background: var(--workspace-sidebar);
+  border-right: 1px solid var(--workspace-line);
+  box-shadow: none;
+}
+
+.focus-workspace .brand {
+  min-width: 0;
+  padding: 2px 6px 14px;
+  color: var(--workspace-text);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.focus-workspace .brand-mark {
+  width: 32px;
+  height: 32px;
+  border: 1px solid color-mix(in srgb, var(--workspace-accent) 30%, var(--workspace-line));
+  border-radius: 6px;
+  color: var(--workspace-accent);
+  background: var(--workspace-canvas);
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.focus-workspace .brand-name,
+.focus-workspace .account-name,
+.focus-workspace .nav-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.focus-workspace .nav-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.focus-workspace .nav-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--workspace-muted);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-align: left;
+}
+
+.focus-workspace .nav-list button:hover {
+  color: var(--workspace-text);
+  background: color-mix(in srgb, var(--workspace-accent) 8%, transparent);
+}
+
+.focus-workspace .nav-list button.active {
+  border-color: color-mix(in srgb, var(--workspace-accent) 18%, var(--workspace-line));
+  color: var(--workspace-accent);
+  background: color-mix(in srgb, var(--workspace-accent) 12%, var(--workspace-canvas));
+}
+
+.focus-workspace .sidebar-footer {
+  position: relative;
+  display: block;
+  margin-top: auto;
+  padding: 12px 4px 0;
+  border-top: 1px solid var(--workspace-line);
+  color: var(--workspace-muted);
+}
+
+.focus-workspace .account-menu-trigger {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 10px auto 16px;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  gap: 7px;
+  padding: 5px 4px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--workspace-text);
+  background: transparent;
+  text-align: left;
+}
+
+.focus-workspace .account-menu-trigger:hover {
+  background: color-mix(in srgb, var(--workspace-accent) 8%, transparent);
+}
+
+.focus-workspace .account-avatar {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--workspace-line);
+  border-radius: 50%;
+  color: var(--workspace-accent);
+  background: var(--workspace-canvas);
+}
+
+.focus-workspace .account-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--workspace-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-workspace .account-status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #79857f;
+}
+
+.focus-workspace .account-status-indicator[data-indicator="ready"] {
+  background: #2d9a71;
+}
+
+.focus-workspace .account-status-indicator[data-indicator="attention"] {
+  background: var(--workspace-danger);
+}
+
+.focus-workspace .account-status-indicator.syncing {
+  background: var(--workspace-accent);
+  animation: workspace-status-pulse 1.1s ease-in-out infinite;
+}
+
+.focus-workspace .account-status-count {
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 9px;
+  color: #ffffff;
+  background: var(--workspace-danger);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.focus-workspace .account-menu-items {
+  position: absolute;
+  right: auto;
+  bottom: calc(100% + 8px);
+  left: calc(100% + 8px);
+  z-index: 24;
+  display: grid;
+  min-width: 188px;
+  padding: 6px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 8px;
+  background: var(--workspace-canvas);
+  box-shadow: 0 14px 32px color-mix(in srgb, var(--workspace-text) 16%, transparent);
+}
+
+.focus-workspace .account-menu-items button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--workspace-text);
+  background: transparent;
+  text-align: left;
+}
+
+.focus-workspace .account-menu-items button:hover,
+.focus-workspace .account-menu-items button:focus-visible {
+  background: var(--workspace-subtle);
+}
+
+.focus-workspace .workspace-main {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--workspace-canvas);
+}
+
+.focus-workspace .view-shell {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  width: min(1080px, 100%);
+  max-width: 1080px;
+  height: auto;
+  min-height: 0;
+  margin: 0 auto;
+  padding: 28px 40px 48px;
+  overflow: visible;
+}
+
+.focus-workspace .view-header {
+  align-items: center;
+  min-height: 48px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.focus-workspace .view-header h1 {
+  color: var(--workspace-text);
+  font-size: 26px;
+  font-weight: 780;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.focus-workspace .view-count,
+.focus-workspace .view-subtitle {
+  margin-top: 4px;
+  color: var(--workspace-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.focus-workspace .primary-button,
+.focus-workspace .secondary-button,
+.focus-workspace .ghost-button,
+.focus-workspace .text-button,
+.focus-workspace .icon-button {
+  min-height: 36px;
+  border-radius: 6px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.focus-workspace .icon-button {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  place-items: center;
+  padding: 0;
+}
+
+.focus-workspace .primary-button {
+  padding: 0 14px;
+  border: 1px solid var(--workspace-accent);
+  color: var(--primary-text);
+  background: var(--workspace-accent);
+}
+
+.focus-workspace .primary-button:hover {
+  background: var(--workspace-accent-hover);
+}
+
+.focus-workspace .secondary-button,
+.focus-workspace .ghost-button,
+.focus-workspace .icon-button {
+  border: 1px solid var(--workspace-line);
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
+}
+
+.focus-workspace .secondary-button:hover,
+.focus-workspace .ghost-button:hover,
+.focus-workspace .icon-button:hover {
+  border-color: color-mix(in srgb, var(--workspace-accent) 35%, var(--workspace-line));
+  background: var(--workspace-subtle);
+}
+
+.focus-workspace .text-button {
+  min-height: 30px;
+  padding: 0 4px;
+  border: 0;
+  color: var(--workspace-accent);
+  background: transparent;
+}
+
+.focus-workspace .text-button:hover {
+  color: var(--workspace-accent-hover);
+  background: transparent;
+}
+
+.focus-workspace button:focus-visible,
+.focus-workspace summary:focus-visible,
+.focus-workspace input:focus-visible,
+.focus-workspace select:focus-visible,
+.focus-workspace textarea:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.focus-workspace input,
+.focus-workspace select,
+.focus-workspace textarea {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 6px;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
+}
+
+.focus-workspace input::placeholder,
+.focus-workspace textarea::placeholder {
+  color: color-mix(in srgb, var(--workspace-muted) 76%, transparent);
+}
+
+.focus-workspace .workspace-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(1080px, calc(100% - 80px));
+  min-height: 44px;
+  margin: 18px auto -8px;
+  padding: 8px 12px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 6px;
+  color: var(--workspace-text);
+  background: var(--workspace-subtle);
+}
+
+.focus-workspace .reauthentication-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--workspace-line);
+  color: var(--workspace-text);
+  background: var(--workspace-subtle);
+}
+
+.focus-workspace .reauthentication-banner > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.focus-workspace .reauthentication-banner span {
+  color: var(--workspace-muted);
+  font-size: 12px;
+}
+
+.focus-workspace .reauthentication-banner button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 6px;
+  color: var(--workspace-accent);
+  background: var(--workspace-canvas);
+  font-weight: 700;
+}
+
+.focus-workspace .reauthentication-banner button span {
+  color: inherit;
+}
+
+.focus-workspace .workspace-status-banner[data-banner="attention"] {
+  border-color: color-mix(in srgb, var(--workspace-danger) 40%, var(--workspace-line));
+  color: var(--workspace-danger);
+}
+
+.focus-workspace .workspace-status-banner p {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: inherit;
+  font-size: 13px;
+}
+
+.focus-workspace .workspace-status-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.focus-workspace .workspace-status-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid currentcolor;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.focus-workspace .workspace-quick-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px 36px;
+  align-items: center;
+  max-width: 720px;
+  min-height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--workspace-line);
+  border-radius: 6px;
+  background: var(--workspace-canvas);
+}
+
+.focus-workspace .workspace-quick-add input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  outline-offset: -3px;
+}
+
+.focus-workspace .workspace-quick-add button,
+.focus-workspace .task-search-field .icon-button,
+.focus-workspace .task-menu-trigger {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--workspace-line);
+  border-radius: 0;
+  color: var(--workspace-muted);
+  background: transparent;
+}
+
+.focus-workspace .workspace-quick-add button:hover,
+.focus-workspace .task-search-field .icon-button:hover,
+.focus-workspace .task-menu-trigger:hover {
+  color: var(--workspace-accent);
+  background: var(--workspace-subtle);
+}
+
+.focus-workspace .quick-add-error,
+.focus-workspace .inline-error {
+  max-width: 720px;
+  margin-top: -12px;
+}
+
+.focus-workspace .task-command-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.focus-workspace .task-command-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.focus-workspace .task-search-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 38px;
+  overflow: hidden;
+  border: 1px solid var(--workspace-line);
+  border-radius: 6px;
+  background: var(--workspace-canvas);
+}
+
+.focus-workspace .task-search-field input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  outline-offset: -3px;
+}
+
+.focus-workspace .task-filter-toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 4px;
+}
+
+.focus-workspace .segment-control.task-filter-segments {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 6px;
+  background: var(--workspace-subtle);
+}
+
+.focus-workspace .segment-control.task-filter-segments button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--workspace-muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.focus-workspace .segment-control.task-filter-segments button.active {
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
+}
+
+.focus-workspace .filter-menu,
+.focus-workspace .task-menu {
+  position: relative;
+}
+
+.focus-workspace .filter-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 6px;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.focus-workspace .filter-menu > summary::-webkit-details-marker,
+.focus-workspace .task-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.focus-workspace .filter-menu[open] > summary {
+  border-color: color-mix(in srgb, var(--workspace-accent) 36%, var(--workspace-line));
+  background: var(--workspace-subtle);
+}
+
+.focus-workspace .filter-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: grid;
+  width: min(360px, calc(100vw - 124px));
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 8px;
+  background: var(--workspace-canvas);
+  box-shadow: 0 16px 38px color-mix(in srgb, var(--workspace-text) 15%, transparent);
+}
+
+.focus-workspace .filter-menu-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.focus-workspace .filter-menu-label {
+  flex: 0 0 100%;
+  color: var(--workspace-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.focus-workspace .filter-menu-section > button {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 5px;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
+  font-size: 12px;
+}
+
+.focus-workspace .filter-menu-section > button.active,
+.focus-workspace .filter-menu-section > button:hover {
+  border-color: color-mix(in srgb, var(--workspace-accent) 36%, var(--workspace-line));
+  color: var(--workspace-accent);
+  background: color-mix(in srgb, var(--workspace-accent) 8%, var(--workspace-canvas));
+}
+
+.focus-workspace .filter-selects {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  width: 100%;
+  gap: 8px;
+}
+
+.focus-workspace .filter-selects select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.focus-workspace .active-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.focus-workspace .active-filter-chips {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.focus-workspace .active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 28px;
+  max-width: 100%;
+  padding: 0 7px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 5px;
+  color: var(--workspace-text);
+  background: var(--workspace-subtle);
+  font-size: 12px;
+}
+
+.focus-workspace .active-filter-chip span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.focus-workspace .active-filter-chip:hover {
+  border-color: color-mix(in srgb, var(--workspace-accent) 36%, var(--workspace-line));
+  color: var(--workspace-accent);
+}
+
+.focus-workspace .bulk-action-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--workspace-line);
+  border-bottom: 1px solid var(--workspace-line);
+  color: var(--workspace-text);
+  background: transparent;
+}
+
+.focus-workspace .bulk-action-toolbar > span {
+  margin-right: auto;
+  color: var(--workspace-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.focus-workspace .task-list {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.focus-workspace .task-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 14px 2px 6px;
+  color: var(--workspace-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.focus-workspace .task-section-header.overdue-section {
+  color: var(--workspace-danger);
+}
+
+.focus-workspace .task-row {
+  min-height: 56px;
+  gap: 12px;
+  padding: 12px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--workspace-line);
+  border-radius: 0;
+  color: var(--workspace-text);
+  background: transparent;
+  box-shadow: none;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.focus-workspace .task-row:hover {
+  border-color: var(--workspace-line);
+  background: color-mix(in srgb, var(--workspace-accent) 4%, transparent);
+  box-shadow: none;
+}
+
+.focus-workspace .task-row.overdue:not(.completed) {
+  padding-left: 5px;
+  border-left: 3px solid var(--workspace-danger);
+  border-bottom-color: var(--workspace-line);
+  background: transparent;
+}
+
+.focus-workspace .task-row.completed {
+  color: var(--workspace-muted);
+  background: transparent;
+}
+
+.focus-workspace .task-row.deleted.selectable {
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+}
+
+.focus-workspace .task-body {
+  min-width: 0;
+}
+
+.focus-workspace .task-title-line {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.focus-workspace .task-title-line .task-title {
+  color: var(--workspace-text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.focus-workspace .task-row.completed .task-title-line .task-title {
+  color: var(--workspace-muted);
+}
+
+.focus-workspace .task-row.overdue:not(.completed) .task-title-line .task-title {
+  color: var(--workspace-text);
+}
+
+.focus-workspace .task-body > p {
+  margin-top: 3px;
+  color: var(--workspace-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.focus-workspace .task-meta {
+  gap: 4px 10px;
+  margin-top: 5px;
+  color: var(--workspace-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.focus-workspace .sync-pill,
+.focus-workspace .overdue-pill {
+  min-height: 20px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.focus-workspace .overdue-pill {
+  color: var(--workspace-danger);
+  background: color-mix(in srgb, var(--workspace-danger) 9%, var(--workspace-canvas));
+}
+
+.focus-workspace .task-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: none;
+  opacity: 0.72;
+  transition: opacity 120ms ease;
+}
+
+.focus-workspace .task-row:hover .task-actions,
+.focus-workspace .task-row:focus-within .task-actions {
+  opacity: 1;
+}
+
+.focus-workspace .task-actions > button {
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 5px;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
+  font-size: 12px;
+}
+
+.focus-workspace .task-menu-trigger {
+  border: 1px solid var(--workspace-line);
+  border-radius: 5px;
+}
+
+.focus-workspace .task-menu-panel {
+  z-index: 21;
+  min-width: 162px;
+  padding: 6px;
+  border: 1px solid var(--workspace-line);
+  border-radius: 7px;
+  background: var(--workspace-canvas);
+  box-shadow: 0 14px 32px color-mix(in srgb, var(--workspace-text) 16%, transparent);
+}
+
+.focus-workspace .task-menu-panel button {
+  min-height: 32px;
+  border-radius: 4px;
+  color: var(--workspace-text);
+}
+
+.focus-workspace .task-menu-panel button:hover {
+  background: var(--workspace-subtle);
+}
+
+.focus-workspace .empty-state {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 92px;
+  padding: 18px 0;
+  border: 0;
+  border-top: 1px solid var(--workspace-line);
+  border-bottom: 1px solid var(--workspace-line);
+  border-radius: 0;
+  color: var(--workspace-muted);
+  background: transparent;
+}
+
+.focus-workspace .drawer-layer {
+  z-index: 50;
+}
+
+.focus-workspace .drawer-scrim {
+  background: color-mix(in srgb, var(--workspace-text) 18%, transparent);
+}
+
+.focus-workspace .side-panel {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(440px, calc(100vw - 184px));
+  margin: 0;
+  border: 0;
+  border-left: 1px solid var(--workspace-line);
+  border-radius: 0;
+  background: var(--workspace-canvas);
+  box-shadow: -16px 0 32px color-mix(in srgb, var(--workspace-text) 12%, transparent);
+}
+
+.focus-workspace .task-editor {
+  min-height: 100%;
+  padding: 22px;
+  border: 0;
+  border-radius: 0;
+  background: var(--workspace-canvas);
+  box-shadow: none;
+}
+
+.focus-workspace .panel-header {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--workspace-line);
+}
+
+.focus-workspace .settings-workspace {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.focus-workspace .settings-category-nav {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  gap: 3px;
+  padding-right: 16px;
+  border-right: 1px solid var(--workspace-line);
+}
+
+.focus-workspace .settings-category-nav button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--workspace-muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.focus-workspace .settings-category-nav button:hover {
+  color: var(--workspace-text);
+  background: var(--workspace-subtle);
+}
+
+.focus-workspace .settings-category-nav button.active {
+  border-color: color-mix(in srgb, var(--workspace-accent) 18%, var(--workspace-line));
+  color: var(--workspace-accent);
+  background: color-mix(in srgb, var(--workspace-accent) 9%, var(--workspace-canvas));
+}
+
+.focus-workspace .settings-content {
+  min-width: 0;
+}
+
+.focus-workspace .settings-content > .settings-section,
+.focus-workspace .settings-content > .settings-data,
+.focus-workspace .settings-content > .settings-data-content,
+.focus-workspace .settings-content .settings-data-content {
+  display: grid;
+  gap: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.focus-workspace .settings-section h2,
+.focus-workspace .settings-content h2 {
+  color: var(--workspace-text);
+  font-size: 17px;
+  font-weight: 760;
+  line-height: 1.3;
+}
+
+.focus-workspace .settings-grid,
+.focus-workspace .editor-grid,
+.focus-workspace .settings-window-grid,
+.focus-workspace .settings-primary-grid {
+  gap: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.focus-workspace .settings-grid label,
+.focus-workspace .settings-field-label {
+  color: var(--workspace-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.focus-workspace .settings-grid small,
+.focus-workspace .settings-sensitive-note,
+.focus-workspace .settings-device-list dt {
+  color: var(--workspace-muted);
+}
+
+.focus-workspace .settings-advanced-details {
+  border: 1px solid var(--workspace-line);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.focus-workspace .settings-advanced-details > summary {
+  min-height: 40px;
+  padding: 10px 12px;
+  color: var(--workspace-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.focus-workspace .settings-advanced-details > :not(summary) {
+  margin: 0 12px 12px;
+}
+
+.focus-workspace .settings-device-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+
+.focus-workspace .settings-device-list > div {
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--workspace-line);
+}
+
+.focus-workspace .settings-device-list dd,
+.focus-workspace .settings-device-list dt {
+  overflow-wrap: anywhere;
+}
+
+.focus-workspace .settings-device-list dd {
+  margin: 3px 0 0;
+  color: var(--workspace-text);
+  font-size: 13px;
+}
+
+.focus-workspace .sync-issue-list,
+.focus-workspace .settings-session-items {
+  border-top: 1px solid var(--workspace-line);
+}
+
+.focus-workspace .sync-issue-list li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--workspace-line);
+}
+
+.focus-workspace .theme-picker {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.focus-workspace .theme-option {
+  min-height: 68px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--workspace-canvas);
+}
+
+.focus-workspace .theme-option > span:last-child {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.focus-workspace .theme-swatch {
+  border-radius: 5px;
+}
+
+.app-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(360px, calc(100vw - 32px));
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--text) 16%, transparent);
+}
+
+.app-toast span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+@keyframes workspace-status-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .focus-workspace .task-actions {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1099px) {
+  .focus-workspace {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .focus-workspace .sidebar {
+    align-items: center;
+    padding: 20px 10px 14px;
+  }
+
+  .focus-workspace .brand-name,
+  .focus-workspace .account-name,
+  .focus-workspace .nav-label {
+    display: none;
+  }
+
+  .focus-workspace .brand,
+  .focus-workspace .nav-list,
+  .focus-workspace .sidebar-footer {
+    width: 100%;
+  }
+
+  .focus-workspace .brand,
+  .focus-workspace .nav-list button,
+  .focus-workspace .account-menu-trigger {
+    justify-content: center;
+  }
+
+  .focus-workspace .nav-list button {
+    padding: 0;
+  }
+
+  .focus-workspace .account-menu-trigger {
+    grid-template-columns: 28px 10px auto;
+  }
+
+  .focus-workspace .account-menu-trigger > :last-child {
+    display: none;
+  }
+
+  .focus-workspace .side-panel {
+    width: min(440px, calc(100vw - 72px));
+  }
+
+  .focus-workspace .view-shell {
+    padding: 26px 28px 44px;
+  }
+
+  .focus-workspace .workspace-status-banner {
+    width: min(1080px, calc(100% - 56px));
+  }
+
+  .focus-workspace .settings-workspace {
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 24px;
+  }
+}
+
+@media (max-width: 799px) {
+  .focus-workspace {
+    grid-template-columns: 64px minmax(0, 1fr);
+    overflow-x: hidden;
+  }
+
+  .focus-workspace .sidebar {
+    padding: 16px 8px 12px;
+  }
+
+  .focus-workspace .workspace-main {
+    overflow-x: hidden;
+  }
+
+  .focus-workspace .view-shell {
+    width: 100%;
+    padding: 22px 20px 40px;
+  }
+
+  .focus-workspace .workspace-status-banner {
+    width: calc(100% - 40px);
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .focus-workspace .workspace-status-actions {
+    width: 100%;
+  }
+
+  .focus-workspace .task-command-bar,
+  .focus-workspace .settings-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .focus-workspace .task-command-bar > .primary-button {
+    width: 100%;
+  }
+
+  .focus-workspace .task-filter-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .focus-workspace .segment-control.task-filter-segments {
+    width: 100%;
+  }
+
+  .focus-workspace .segment-control.task-filter-segments button {
+    flex: 1 1 120px;
+  }
+
+  .focus-workspace .filter-menu > summary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .focus-workspace .filter-menu-panel {
+    right: 0;
+    left: auto;
+    width: min(360px, calc(100vw - 88px));
+  }
+
+  .focus-workspace .task-row {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 8px;
+    padding-right: 0;
+  }
+
+  .focus-workspace .task-row.selectable {
+    grid-template-columns: 22px 24px minmax(0, 1fr) auto;
+  }
+
+  .focus-workspace .task-row.deleted {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .focus-workspace .task-row.deleted.selectable {
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+  }
+
+  .focus-workspace .task-actions {
+    opacity: 1;
+  }
+
+  .focus-workspace .task-menu-panel {
+    right: 0;
+  }
+
+  .focus-workspace .active-filter-bar,
+  .focus-workspace .empty-state {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .focus-workspace .active-filter-bar .text-button {
+    padding: 0;
+  }
+
+  .focus-workspace .side-panel {
+    width: min(440px, calc(100vw - 64px));
+  }
+
+  .focus-workspace .settings-category-nav {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0 0 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--workspace-line);
+  }
+
+  .focus-workspace .settings-category-nav button {
+    min-height: 34px;
+    font-size: 12px;
+  }
+
+  .focus-workspace .settings-device-list,
+  .focus-workspace .filter-selects {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .focus-workspace .theme-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-toast {
+    right: 16px;
+    bottom: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-workspace *,
+  .app-toast {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation: none !important;
+  }
+}

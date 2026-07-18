@@ -12,7 +12,7 @@
 | `backend/tools/openapi_contract.py` | 从 FastAPI 运行时导出 `shared/openapi.taskbridge.v1.json`，并检查 OpenAPI 契约漂移 |
 | `npm run test:web` | 运行 Web/PWA Node 单元测试，覆盖离线核心真实行为 |
 | `check-web-client.mjs` | 检查 Web/PWA 静态客户端、任务列表 cursor 分页、后端 CORS 和 CI 守门是否齐全 |
-| `check-web-offline-first.mjs` | 检查 Web/PWA IndexedDB 任务缓存、离线队列、恢复在线同步和文档/CI 守门 |
+| `check-web-offline-first.mjs` | 检查 Web/PWA 是否按服务器与用户隔离 IndexedDB、校验缓存就绪标记、迁移旧库、对账远端快照，并守卫离线队列、文档和 CI |
 | `check-web-offline-core.mjs` | 执行 Web/PWA 离线核心行为回归，覆盖本地任务、视图过滤、冲突状态和本地统计 |
 | `smoke-web-client.mjs` | 启动随机端口本地 HTTP 服务，检查 Web/PWA shell 和静态资源能被真实 HTTP 访问 |
 | `clean-local.ps1` | 清理本地生成文件和缓存，支持 `-DryRun` 和 `-All` |
@@ -77,13 +77,15 @@ python -m tools.openapi_contract --check
 | `npm run check:desktop-backup` | 检查桌面端备份导出分页、导入错误反馈和统计 |
 | `npm run check:desktop-theme` | 检查桌面端主题配置、持久化和设置页入口 |
 | `npm run check:desktop-efficiency` | 检查桌面端设置自愈与恢复通知、提醒去重缓存裁剪以及任务列表排序/索引 |
+| `npm run check:ux-priority-polish` | 检查跨端主流程层级、首用引导与高优先级体验约束 |
+| `npm run check:user-experience` | 检查 Web、Windows 与 Android 的完整用户体验契约 |
 | `npm run check:desktop-docs` | 检查桌面端文档和实际连接地址策略一致 |
 | `npm run check:release-readiness` | 检查 release 产物不会写死局域网地址，并允许 HTTP/HTTPS 与 WS/WSS 端点 |
 | `npm run check:release-artifacts` | 检查 release 会生成 SHA-256 校验清单 |
 | `npm run check:desktop-auto-update` | 检查桌面端自动更新依赖、更新入口和 release manifest / blockmap 产物 |
 | `npm run check:android-data-extraction` | 检查 Android backup / device transfer 排除 Token、设备 ID、本地数据库和导出缓存 |
 | `npm run check:security-governance` | 检查 `SECURITY.md`、Dependabot、CodeQL、dependency-review、Scorecard 和 Trivy 治理配置 |
-| `npm run check:production-hardening` | 检查发布签名/unsigned 分支、备份恢复脚本和 readiness 策略 |
+| `npm run check:production-hardening` | 检查公开 Release 仅含签名客户端、备份恢复脚本和 readiness 策略 |
 | `npm run check:ci-workflows` | 检查 CI / release 是否运行关键守门脚本 |
 | `npm run check:contract-drift` | 检查后端、桌面端和 Android 字段契约是否漂移 |
 

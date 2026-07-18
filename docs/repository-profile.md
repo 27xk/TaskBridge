@@ -57,7 +57,7 @@ https://github.com/27xk/TaskBridge/releases
 - [x] README 首屏有下载入口。
 - [x] README 有截图。
 - [x] README 有 Demo 链接。
-- [x] README 有一键部署命令。
+- [x] README 有一键部署入口，具体命令放在部署说明中。
 - [x] Issue 模板可用。
 - [x] Pull Request 模板可用。
 - [x] Roadmap 链接可见。

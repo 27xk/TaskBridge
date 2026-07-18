@@ -8,6 +8,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.taskbridge.app.ui.i18n.AppLanguage
 import com.taskbridge.app.ui.i18n.LocalAppLanguage
@@ -30,13 +33,18 @@ sealed interface SyncStatusMessage {
     object PlannedForToday : SyncStatusMessage
     object MovedToInbox : SyncStatusMessage
     object Syncing : SyncStatusMessage
+    object SyncSucceeded : SyncStatusMessage
+    object SyncFailed : SyncStatusMessage
+    object Offline : SyncStatusMessage
 }
 
 @Composable
 fun SyncStatusBar(message: SyncStatusMessage, modifier: Modifier = Modifier) {
     val language = LocalAppLanguage.current
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite },
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
@@ -69,6 +77,9 @@ fun syncStatusMessageText(message: SyncStatusMessage, language: AppLanguage): St
             SyncStatusMessage.PlannedForToday -> "已加入今日计划"
             SyncStatusMessage.MovedToInbox -> "已移回收件箱"
             SyncStatusMessage.Syncing -> "正在同步"
+            SyncStatusMessage.SyncSucceeded -> "同步完成"
+            SyncStatusMessage.SyncFailed -> "同步失败，请重试"
+            SyncStatusMessage.Offline -> "当前离线，联网后会自动同步"
         }
     } else {
         when (message) {
@@ -89,6 +100,9 @@ fun syncStatusMessageText(message: SyncStatusMessage, language: AppLanguage): St
             SyncStatusMessage.PlannedForToday -> "Planned for today"
             SyncStatusMessage.MovedToInbox -> "Moved to inbox"
             SyncStatusMessage.Syncing -> "Syncing"
+            SyncStatusMessage.SyncSucceeded -> "Sync complete"
+            SyncStatusMessage.SyncFailed -> "Sync failed. Try again."
+            SyncStatusMessage.Offline -> "Offline. Changes will sync automatically when connected."
         }
     }
 }

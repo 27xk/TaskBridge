@@ -1,26 +1,37 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef } from "vue";
 
+import AppToast from "../components/AppToast.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
+import EditorDrawer from "../components/EditorDrawer.vue";
 import TaskEditor from "../components/TaskEditor.vue";
 import TaskItem from "../components/TaskItem.vue";
-import TaskSyncHealthBar from "../components/TaskSyncHealthBar.vue";
+import WorkspaceQuickAdd from "../components/WorkspaceQuickAdd.vue";
 import { useConfirmDialog } from "../composables/useConfirmDialog";
 import { useSettingsStore } from "../stores/settings";
-import { useSyncStore } from "../stores/sync";
 import { useTaskStore, type TaskDraft } from "../stores/task";
 import { isCompletedStatus, isTaskOverdue, sortTasksByTimeline } from "../utils/task-order";
+import { todayLocalDate } from "../../shared/quick-add-parser";
 import { getTaskActionConfirmationMessage } from "../../shared/task-ui-policy";
+
+interface WorkspaceQuickAddHandle {
+  clear(submittedTitle: string): boolean;
+  focus(): void;
+}
 
 const taskStore = useTaskStore();
 const settingsStore = useSettingsStore();
-const syncStore = useSyncStore();
 const emit = defineEmits<{
-  openSettings: [];
+  editorDirtyChange: [dirty: boolean];
 }>();
 const editorOpen = ref(false);
 const editorDirty = ref(false);
+const isSaving = ref(false);
 const editingTask = ref<TaskRecord | null>(null);
+const quickAddRef = useTemplateRef<WorkspaceQuickAddHandle>("quickAdd");
+const quickAddError = ref("");
+const editorSaveError = ref("");
+const isQuickAdding = ref(false);
 const notice = ref("");
 let noticeTimer: number | undefined;
 const {
@@ -42,42 +53,28 @@ const overdueTodayTasks = computed(() =>
 const upcomingTodayTasks = computed(() =>
   openTodayTasks.value.filter((task) => !isTaskOverdue(task, taskStore.timelineNow, settingsStore.displayTimeZone)),
 );
-const diagnosticSyncIssueCount = computed(
-  () =>
-    syncStore.diagnostics.pendingQueueCount +
-    syncStore.diagnostics.exhaustedQueueCount +
-    syncStore.diagnostics.failedCount +
-    syncStore.diagnostics.conflictCount,
-);
-const taskRecordSyncIssueCount = computed(() => taskStore.tasks.filter((task) => task.syncStatus !== "synced").length);
-const taskSyncIssueCount = computed(() => Math.max(diagnosticSyncIssueCount.value, taskRecordSyncIssueCount.value));
-const taskSyncHealthTone = computed<"ready" | "attention" | "unknown">(() => {
-  if (taskSyncIssueCount.value > 0 || syncStore.status === "error") return "attention";
-  if (syncStore.status === "offline" || syncStore.status === "idle") return "unknown";
-  return "ready";
-});
-const taskSyncHealthText = computed(() => {
-  if (taskSyncIssueCount.value > 0) {
-    return settingsStore.t("task.syncHealthNeedsReview").replace("{count}", String(taskSyncIssueCount.value));
-  }
-  if (syncStore.status === "offline" || syncStore.status === "idle") return settingsStore.t("task.syncHealthUnknown");
-  if (syncStore.status === "error") return settingsStore.t("task.syncHealthDegraded");
-  return settingsStore.t("task.syncHealthReady");
-});
+
+function setEditorDirty(dirty: boolean): void {
+  editorDirty.value = dirty;
+  emit("editorDirtyChange", dirty);
+}
 
 function openCreate(): void {
+  editorSaveError.value = "";
   editingTask.value = null;
-  editorDirty.value = false;
+  setEditorDirty(false);
   editorOpen.value = true;
 }
 
 function openEdit(task: TaskRecord): void {
+  editorSaveError.value = "";
   editingTask.value = task;
-  editorDirty.value = false;
+  setEditorDirty(false);
   editorOpen.value = true;
 }
 
 async function closeEditor(): Promise<void> {
+  if (isSaving.value) return;
   if (
     editorDirty.value &&
     !(await requestConfirmation({
@@ -89,19 +86,49 @@ async function closeEditor(): Promise<void> {
   }
   editorOpen.value = false;
   editingTask.value = null;
-  editorDirty.value = false;
+  setEditorDirty(false);
 }
 
 async function save(draft: TaskDraft): Promise<void> {
-  if (editingTask.value) {
-    await taskStore.updateTask(editingTask.value, draft);
-  } else {
-    await taskStore.addTask(draft);
+  if (isSaving.value) return;
+  editorSaveError.value = "";
+  isSaving.value = true;
+  try {
+    if (editingTask.value) {
+      await taskStore.updateTask(editingTask.value, draft);
+    } else {
+      await taskStore.addTask(draft);
+    }
+    editorOpen.value = false;
+    editingTask.value = null;
+    setEditorDirty(false);
+    showNotice(settingsStore.t("task.feedbackSaved"));
+  } catch {
+    editorSaveError.value = settingsStore.t("task.saveFailed");
+  } finally {
+    isSaving.value = false;
   }
-  editorOpen.value = false;
-  editingTask.value = null;
-  editorDirty.value = false;
-  showNotice(settingsStore.t("task.feedbackSaved"));
+}
+
+async function quickAddTask(title: string): Promise<void> {
+  if (isQuickAdding.value) return;
+  isQuickAdding.value = true;
+  quickAddError.value = "";
+  try {
+    await taskStore.addTask({
+      title,
+      listType: "today",
+      plannedDate: todayLocalDate(taskStore.timelineNow, settingsStore.displayTimeZone),
+    });
+    quickAddRef.value?.clear(title);
+    showNotice(settingsStore.t("task.feedbackSaved"));
+  } catch {
+    quickAddError.value = settingsStore.t("task.saveFailed");
+  } finally {
+    isQuickAdding.value = false;
+    await nextTick();
+    quickAddRef.value?.focus();
+  }
 }
 
 async function completeTask(task: TaskRecord): Promise<void> {
@@ -139,61 +166,51 @@ function showNotice(message: string): void {
   }, 1800);
 }
 
-function openSyncRecovery(): void {
-  emit("openSettings");
-}
+onBeforeUnmount(() => {
+  if (noticeTimer !== undefined) window.clearTimeout(noticeTimer);
+});
+
 </script>
 
 <template>
   <section class="view-shell today-view">
     <header class="view-header">
       <div>
-        <p class="eyebrow">{{ settingsStore.t("nav.today") }}</p>
-        <h1>{{ openTodayTasks.length }} {{ settingsStore.t("task.todayCountSuffix") }}</h1>
+        <h1>{{ settingsStore.t("nav.today") }}</h1>
+        <p class="view-count">{{ openTodayTasks.length }} {{ settingsStore.t("task.todayCountSuffix") }}</p>
       </div>
       <button class="primary-button" type="button" @click="openCreate">{{ settingsStore.t("task.addToday") }}</button>
     </header>
 
-    <div v-if="editorOpen" class="drawer-layer">
-      <button class="drawer-scrim" type="button" :aria-label="settingsStore.t('task.close')" @click="closeEditor"></button>
-      <aside class="side-panel">
+    <WorkspaceQuickAdd
+      ref="quickAdd"
+      :disabled="isQuickAdding"
+      :invalid="Boolean(quickAddError)"
+      :error-id="'today-quick-add-error'"
+      @submit="quickAddTask"
+      @open-editor="openCreate"
+    />
+    <p id="today-quick-add-error" v-if="quickAddError" class="inline-error quick-add-error" role="alert" aria-live="assertive">
+      {{ quickAddError }}
+    </p>
+
+    <EditorDrawer
+      v-if="editorOpen"
+      :label="settingsStore.t(editingTask ? 'task.edit' : 'task.todayTitle')"
+      @close="closeEditor"
+    >
         <TaskEditor
           :task="editingTask"
           :title="settingsStore.t('task.todayTitle')"
           :create-preset="editingTask ? 'default' : 'today'"
+          :is-saving="isSaving"
+          :error-message="editorSaveError"
+          error-id="today-editor-save-error"
           @save="save"
           @cancel="closeEditor"
-          @dirty-change="editorDirty = $event"
+          @dirty-change="setEditorDirty"
         />
-      </aside>
-    </div>
-
-    <p v-if="notice" class="action-feedback">{{ notice }}</p>
-
-    <section class="today-overview" :class="{ empty: openTodayTasks.length === 0 }">
-      <div class="today-overview-main">
-        <span>{{ settingsStore.t("task.todayOverview") }}</span>
-        <strong>{{ openTodayTasks.length }}</strong>
-      </div>
-      <div class="today-metrics">
-        <div class="today-metric overdue">
-          <span>{{ settingsStore.t("task.filterOverdue") }}</span>
-          <strong>{{ overdueTodayTasks.length }}</strong>
-        </div>
-        <div class="today-metric">
-          <span>{{ settingsStore.t("task.upcomingToday") }}</span>
-          <strong>{{ upcomingTodayTasks.length }}</strong>
-        </div>
-      </div>
-    </section>
-
-    <TaskSyncHealthBar
-      :title="settingsStore.t('task.syncHealthTitle')"
-      :text="taskSyncHealthText"
-      :action-label="settingsStore.t('task.syncHealthAction')"
-      :tone="taskSyncHealthTone"
-      @open-details="openSyncRecovery"
-    />
+    </EditorDrawer>
 
     <div class="today-workspace">
       <div class="task-list today-task-list">
@@ -256,5 +273,6 @@ function openSyncRecovery(): void {
       @confirm="confirmRequestedAction"
       @cancel="cancelRequestedAction"
     />
+    <AppToast :message="notice" />
   </section>
 </template>

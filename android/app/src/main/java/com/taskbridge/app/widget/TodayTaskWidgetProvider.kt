@@ -74,10 +74,15 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
         private fun buildViews(context: Context, state: TodayTaskWidgetState): RemoteViews {
             return RemoteViews(context.packageName, R.layout.widget_today_task).apply {
                 val transparentStyle = state.style == WidgetConstants.STYLE_TRANSPARENT
+                setInt(
+                    R.id.widgetBackground,
+                    "setBackgroundResource",
+                    if (transparentStyle) R.drawable.widget_background_dark else R.drawable.widget_background,
+                )
                 setFloat(
                     R.id.widgetBackground,
                     "setAlpha",
-                    (state.opacityPercent.coerceIn(0, 100) / 100f) * 0.88f,
+                    state.opacityPercent.coerceIn(60, 100) / 100f,
                 )
                 val openTarget = if (state.taskScope == WidgetConstants.TASK_SCOPE_ALL) {
                     WidgetConstants.TARGET_ALL
@@ -87,9 +92,9 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
                 setOnClickPendingIntent(R.id.widgetRoot, openAppIntent(context, openTarget))
 
                 val message = when {
-                    !state.isLoggedIn -> "\u8BF7\u767B\u5F55 TaskBridge"
-                    state.taskScope == WidgetConstants.TASK_SCOPE_ALL && state.tasks.isEmpty() -> "\u6682\u65E0\u4EFB\u52A1"
-                    state.tasks.isEmpty() -> "\u4ECA\u5929\u6682\u65E0\u5F85\u529E"
+                    !state.hasWorkspace -> state.copy.signInRequired
+                    state.taskScope == WidgetConstants.TASK_SCOPE_ALL && state.tasks.isEmpty() -> state.copy.emptyAll
+                    state.tasks.isEmpty() -> state.copy.emptyToday
                     else -> null
                 }
                 setViewVisibility(R.id.widgetMessage, if (message == null) View.GONE else View.VISIBLE)
@@ -97,12 +102,21 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
                 setTextViewText(R.id.widgetMessage, message.orEmpty())
                 setTextColor(R.id.widgetMessage, if (transparentStyle) Color.argb(230, 255, 255, 255) else Color.rgb(78, 92, 89))
 
+                val showMoreTasks = state.hasWorkspace && state.hasMoreTasks
+                setViewVisibility(R.id.widgetMoreTasks, if (showMoreTasks) View.VISIBLE else View.GONE)
+                setTextViewText(R.id.widgetMoreTasks, state.copy.moreTasks)
+                setTextColor(
+                    R.id.widgetMoreTasks,
+                    if (transparentStyle) Color.WHITE else Color.rgb(19, 124, 107),
+                )
+                setOnClickPendingIntent(R.id.widgetMoreTasks, openAppIntent(context, openTarget))
+
                 rowIds.forEachIndexed { index, rowId ->
                     val item = state.tasks.getOrNull(index)
-                    if (item == null || !state.isLoggedIn) {
+                    if (item == null || !state.hasWorkspace) {
                         setViewVisibility(rowId, View.GONE)
                     } else {
-                        bindTaskRow(context, this, index, item, transparentStyle)
+                        bindTaskRow(context, this, index, item, transparentStyle, state.copy)
                     }
                 }
             }
@@ -114,6 +128,7 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
             index: Int,
             item: TodayTaskWidgetItem,
             transparentStyle: Boolean,
+            copy: WidgetCopy,
         ) {
             val titleColor = when {
                 transparentStyle && item.isCompleted -> Color.argb(178, 255, 255, 255)
@@ -133,7 +148,7 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
                 append(item.dueLabel)
                 append(" / ")
                 append(item.priorityLabel)
-                if (item.isCompleted) append(" / \u5DF2\u5B8C\u6210")
+                if (item.isCompleted) append(" / ${copy.completed}")
             }
 
             views.setViewVisibility(rowIds[index], View.VISIBLE)
@@ -151,6 +166,11 @@ class TodayTaskWidgetProvider : AppWidgetProvider() {
                 },
             )
             views.setTextColor(statusIds[index], metaColor)
+            views.setContentDescription(statusIds[index], if (item.isCompleted) {
+                copy.openCompletedTaskDescription(item.title)
+            } else {
+                copy.completeTaskDescription(item.title)
+            })
             views.setTextViewText(titleIds[index], item.title)
             views.setTextColor(titleIds[index], titleColor)
             views.setTextViewText(metaIds[index], meta)

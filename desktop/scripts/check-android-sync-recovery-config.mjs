@@ -17,10 +17,10 @@ const [taskDaoSource, taskRepositorySource, settingsScreenSource, mainActivitySo
 
 for (const token of [
   "data class SyncQueueCounts",
-  "fun queueCounts(ownerUserId: String)",
-  "fun exhaustedChanges(ownerUserId: String, limit: Int)",
-  "fun resetExhaustedAttempts(ownerUserId: String)",
-  "suspend fun countFailedSyncTasks(ownerUserId: String): Int",
+  "fun queueCounts(workspaceId: String)",
+  "fun exhaustedChanges(workspaceId: String, limit: Int)",
+  "fun resetExhaustedAttempts(workspaceId: String)",
+  "suspend fun countFailedSyncTasks(workspaceId: String): Int",
 ]) {
   assert.match(taskDaoSource, new RegExp(escapeRegExp(token)), `Android DAO must expose ${token}`);
 }
@@ -30,10 +30,11 @@ for (const token of [
   "suspend fun getExhaustedSyncQueuePreview",
   "suspend fun getFailedSyncTaskCount()",
   "suspend fun retryExhaustedSyncQueue()",
-  "syncQueueDao.resetExhaustedAttempts(ownerUserId())",
+  "syncQueueDao.resetExhaustedAttempts(workspaceId())",
 ]) {
   assert.match(taskRepositorySource, new RegExp(escapeRegExp(token)), `Android repository must expose ${token}`);
 }
+assert.doesNotMatch(taskDaoSource, /WHERE ownerUserId = :ownerUserId/, "Android sync recovery queries must use server-and-user workspace isolation");
 
 for (const token of [
   "syncManager: SyncManager",
@@ -57,9 +58,10 @@ assert.match(
 );
 assert.match(
   settingsScreenSource,
-  /syncRecoveryRetryStartedText\(isEnglish\)/,
-  "Android settings must show a generic retry-started result for pending or failed sync",
+  /val syncResult = syncManager\.syncNowAndWait\(\)[\s\S]{0,900}SyncRunState\.Success[\s\S]{0,900}SyncRunState\.Offline[\s\S]{0,900}SyncRunState\.Failure/,
+  "Android settings must wait for sync and show distinct success, offline, and failure results",
 );
+assert.match(settingsScreenSource, /AppDynamicStatusText\([\s\S]{0,160}text = syncRecoveryNote[\s\S]{0,160}isError = syncRecoveryNoteIsError/, "Android sync recovery must render terminal retry feedback with an error state");
 assert.match(mainActivitySource, /syncManager = container\.syncManager/, "MainActivity must pass SyncManager to SettingsScreen");
 assert.match(packageSource, /check:android-sync-recovery/, "desktop package scripts must expose Android sync recovery check");
 assert.match(localCheckSource, /check:android-sync-recovery/, "local check runner must include Android sync recovery check");

@@ -164,6 +164,7 @@ assertRouteCoverage("backend auth routes", backendAuthRoutes, [
   ["/auth/login", /@router\.post\("\/login"\)/],
   ["/auth/refresh", /@router\.post\("\/refresh"\)/],
   ["/auth/me", /@router\.get\("\/me"\)/],
+  ["/auth/password", /@router\.put\("\/password"\)/],
   ["/auth/ws-ticket", /@router\.post\("\/ws-ticket"\)/],
   ["/auth/sessions", /@router\.get\("\/sessions"\)/],
   ["/auth/sessions/revoke-other-devices", /@router\.post\("\/sessions\/revoke-other-devices"\)/],
@@ -235,6 +236,10 @@ assertRouteCoverage("desktop auth api", desktopAuthApi, [
   ["/auth/login", /request\.post\("\/auth\/login"/],
   ["/auth/me", /request\.get\("\/auth\/me"/],
   ["/auth/ws-ticket", /request\.post\("\/auth\/ws-ticket"/],
+  ["/auth/password", /request\.put\("\/auth\/password"/],
+  ["/auth/sessions", /request\.get\("\/auth\/sessions"/],
+  ["/auth/sessions/revoke-other-devices", /request\.post\("\/auth\/sessions\/revoke-other-devices"/],
+  ["/auth/sessions/{session_id}", /request\.delete\(`\/auth\/sessions\/\$\{sessionId\}`/],
 ]);
 assertRouteCoverage("desktop auth refresh path", desktopHttpSource, [
   ["/auth/refresh", /"\/auth\/refresh"/],
@@ -247,7 +252,8 @@ assertRouteCoverage("desktop sync api", desktopSyncApi, [
   ["/sync/push", /request\.post\("\/sync\/push"/],
 ]);
 assertRouteCoverage("desktop task api", desktopTaskApi, [
-  ["GET /tasks", /request\.get\(params \? `\/tasks\?\$\{params\}` : "\/tasks"\)/],
+  ["GET /tasks", /request\.get\("\/tasks", \{ params \}\)/],
+  ["GET /tasks/meta", /request\.get\("\/tasks\/meta", \{ params:/],
   ["POST /tasks", /request\.post\("\/tasks"/],
   ["GET /tasks/{task_id}", /request\.get\(`\/tasks\/\$\{taskId\}`/],
   ["PUT /tasks/{task_id}", /request\.put\(`\/tasks\/\$\{taskId\}`/],

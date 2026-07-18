@@ -97,13 +97,8 @@ assert.match(
 );
 assert.match(
   settingsViewSource,
-  /setSetting\("baseUrl"/,
-  "settings page must persist API base URL edits",
-);
-assert.match(
-  settingsViewSource,
-  /setSetting\("wsUrl"/,
-  "settings page must persist sync WebSocket URL edits",
+  /setConnection\(baseUrl\.trim\(\), wsUrl\.trim\(\)\)/,
+  "settings page must atomically persist API and WebSocket endpoint edits",
 );
 assert.match(
   settingsSurfaceSource,

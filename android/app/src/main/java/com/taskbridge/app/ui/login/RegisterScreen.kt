@@ -20,15 +20,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.taskbridge.app.ui.components.AppDropdownField
+import com.taskbridge.app.ui.components.AppDynamicStatusText
 import com.taskbridge.app.ui.components.AppHeader
 import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
+import com.taskbridge.app.ui.components.tryOpenExternalUri
 import com.taskbridge.app.ui.components.registrationDisabledMessageKey
 import com.taskbridge.app.ui.components.registrationFailureMessageKey
 import com.taskbridge.app.ui.components.registrationStatusUnknownMessageKey
@@ -38,6 +42,13 @@ import com.taskbridge.app.ui.components.languageOptions
 import com.taskbridge.app.ui.i18n.AppLanguage
 import com.taskbridge.app.ui.i18n.LocalAppLanguage
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
+import com.taskbridge.app.ui.i18n.TaskBridgeStrings
+import kotlinx.coroutines.launch
+
+private const val LOCAL_TRIAL_GUIDE_URL =
+    "https://github.com/27xk/TaskBridge/blob/main/docs/user-quick-start.md#%E6%B2%A1%E6%9C%89%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%9C%B0%E5%9D%80"
+private const val SELF_HOST_GUIDE_URL =
+    "https://github.com/27xk/TaskBridge/blob/main/deploy/README.md"
 
 @Composable
 fun RegisterScreen(
@@ -51,6 +62,8 @@ fun RegisterScreen(
     val language = LocalAppLanguage.current
     var languageMenuOpen by remember { mutableStateOf(false) }
     var advancedConnectionOpen by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
     val isEnglish = language == AppLanguage.English
     val registrationAvailability = registrationAvailabilityUi(
         registrationStatusKnown = state.registrationStatusKnown,
@@ -63,7 +76,7 @@ fun RegisterScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 24.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
@@ -86,75 +99,9 @@ fun RegisterScreen(
 
             AppPanel {
                 Text(
-                    text = strings.connectionSettings,
+                    text = strings.createAccount,
                     style = MaterialTheme.typography.titleMedium,
                 )
-                OutlinedTextField(
-                        value = state.serverBaseUrl,
-                        onValueChange = viewModel::updateServerBaseUrl,
-                        label = { Text(strings.serverUrl) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = strings.serverUrlHint,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    localhostWarningText(state.serverBaseUrl, isEnglish)?.let { warning ->
-                        Text(
-                            text = warning,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = { viewModel.testConnection() },
-                        enabled = !state.isTestingConnection,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            if (state.isTestingConnection) strings.testingConnection else strings.saveAndTestConnection,
-                        )
-                    }
-                    state.connectionMessage?.let {
-                        Text(
-                            text = localizeConnectionMessage(it, isEnglish),
-                            color = if (state.connectionMessageIsError) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    TextButton(onClick = { advancedConnectionOpen = !advancedConnectionOpen }) {
-                        Text(strings.advancedConnectionSettings)
-                    }
-                    if (advancedConnectionOpen) {
-                        OutlinedTextField(
-                            value = state.apiBaseUrl,
-                            onValueChange = viewModel::updateApiBaseUrl,
-                            label = { Text(strings.requestUrlAdvanced) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = state.webSocketUrl,
-                            onValueChange = viewModel::updateWebSocketUrl,
-                            label = { Text(strings.syncConnectionUrlAdvanced) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        TextButton(onClick = { viewModel.resetGeneratedEndpoints() }) {
-                            Text(strings.regenerateFromServerUrl)
-                        }
-                    }
-                    Text(
-                        text = strings.savedBeforeRegistration,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
                 registrationAvailability.helperText?.let {
                     Text(
                         text = it,
@@ -166,6 +113,7 @@ fun RegisterScreen(
                     value = state.username,
                     onValueChange = viewModel::updateUsername,
                     label = { Text(strings.username) },
+                    isError = state.error != null,
                     enabled = registrationAvailability.canEditAccountFields,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -174,6 +122,7 @@ fun RegisterScreen(
                     value = state.email,
                     onValueChange = viewModel::updateEmail,
                     label = { Text(strings.email) },
+                    isError = state.error != null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                     enabled = registrationAvailability.canEditAccountFields,
                     singleLine = true,
@@ -183,30 +132,141 @@ fun RegisterScreen(
                     value = state.password,
                     onValueChange = viewModel::updatePassword,
                     strings = strings,
+                    isError = state.error != null,
                     enabled = registrationAvailability.canEditAccountFields,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 state.error?.let {
-                    Text(localizeRegisterError(it, strings), color = MaterialTheme.colorScheme.error)
+                    AppDynamicStatusText(
+                        text = localizeRegisterError(it, strings),
+                        isError = true,
+                    )
                 }
                 Button(
                     onClick = { viewModel.register(onRegisterSuccess) },
-                    enabled = state.registrationStatusKnown && state.registrationEnabled && registrationAvailability.canSubmitRegistration,
+                    enabled = registrationAvailability.canSubmitRegistration,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (state.isLoading) strings.creating else strings.createAccount)
+                    Text(if (state.isLoading) strings.creating else registrationAvailability.actionText ?: strings.createAccount)
                 }
+                RegistrationConnectionFeedbackNearSubmit(
+                    connectionMessage = state.connectionMessage,
+                    connectionMessageIsError = state.connectionMessageIsError,
+                    isEnglish = isEnglish,
+                    strings = strings,
+                    onChangeServerAddress = {
+                        scope.launch {
+                            scrollState.animateScrollTo(scrollState.maxValue)
+                        }
+                    },
+                )
                 TextButton(onClick = onLoginClick, modifier = Modifier.fillMaxWidth()) {
                     Text(strings.backToSignIn)
                 }
+            }
+
+            AppPanel {
+                Text(
+                    text = strings.connectionSettings,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                OutlinedTextField(
+                    value = state.serverBaseUrl,
+                    onValueChange = viewModel::updateServerBaseUrl,
+                    label = { Text(strings.serverUrl) },
+                    isError = state.connectionMessageIsError,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = strings.serverUrlHint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                localhostWarningText(state.serverBaseUrl, isEnglish)?.let { warning ->
+                    Text(
+                        text = warning,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                OutlinedButton(
+                    onClick = { viewModel.testConnection() },
+                    enabled = !state.isTestingConnection,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (state.isTestingConnection) strings.testingConnection else strings.saveAndTestConnection,
+                    )
+                }
+                state.connectionMessage?.let {
+                    AppDynamicStatusText(
+                        text = localizeConnectionMessage(it, isEnglish),
+                        isError = state.connectionMessageIsError,
+                    )
+                }
+                TextButton(onClick = { advancedConnectionOpen = !advancedConnectionOpen }) {
+                    Text(strings.advancedConnectionSettings)
+                }
+                Text(
+                    text = strings.advancedConnectionSecondaryHint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (advancedConnectionOpen) {
+                    OutlinedTextField(
+                        value = state.apiBaseUrl,
+                        onValueChange = viewModel::updateApiBaseUrl,
+                        label = { Text(strings.requestUrlAdvanced) },
+                        isError = state.connectionMessageIsError,
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = state.webSocketUrl,
+                        onValueChange = viewModel::updateWebSocketUrl,
+                        label = { Text(strings.syncConnectionUrlAdvanced) },
+                        isError = state.connectionMessageIsError,
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    TextButton(onClick = { viewModel.resetGeneratedEndpoints() }) {
+                        Text(strings.regenerateFromServerUrl)
+                    }
+                }
+                Text(
+                    text = strings.savedBeforeRegistration,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }
 }
 
 @Composable
+private fun RegistrationConnectionFeedbackNearSubmit(
+    connectionMessage: String?,
+    connectionMessageIsError: Boolean,
+    isEnglish: Boolean,
+    strings: TaskBridgeStrings,
+    onChangeServerAddress: () -> Unit,
+) {
+    if (connectionMessage.isNullOrBlank() || !connectionMessageIsError) return
+    AppDynamicStatusText(
+        text = localizeConnectionMessage(connectionMessage, isEnglish),
+        isError = true,
+    )
+    TextButton(onClick = onChangeServerAddress, modifier = Modifier.fillMaxWidth()) {
+        Text(strings.changeServerAddress)
+    }
+}
+
+@Composable
 private fun FirstUseGuide(strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings) {
     var detailsOpen by remember { mutableStateOf(false) }
+    var externalLinkError by remember { mutableStateOf("") }
+    val uriHandler = LocalUriHandler.current
     AppPanel {
         Text(
             text = strings.registerFirstUseTitle,
@@ -222,11 +282,6 @@ private fun FirstUseGuide(strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings)
         }
         if (detailsOpen) {
             Text(
-                text = strings.setupChecklist,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
                 text = strings.localTrialHelp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
@@ -241,6 +296,36 @@ private fun FirstUseGuide(strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings)
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
+            OutlinedButton(
+                onClick = {
+                    externalLinkError = if (tryOpenExternalUri(uriHandler, LOCAL_TRIAL_GUIDE_URL)) {
+                        ""
+                    } else {
+                        strings.externalLinkFailed
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(strings.openLocalTrialGuide)
+            }
+            TextButton(
+                onClick = {
+                    externalLinkError = if (tryOpenExternalUri(uriHandler, SELF_HOST_GUIDE_URL)) {
+                        ""
+                    } else {
+                        strings.externalLinkFailed
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(strings.openSelfHostGuide)
+            }
+            if (externalLinkError.isNotBlank()) {
+                AppDynamicStatusText(
+                    text = externalLinkError,
+                    isError = true,
+                )
+            }
         }
     }
 }
@@ -252,7 +337,7 @@ private fun localizeRegisterError(error: String, strings: com.taskbridge.app.ui.
         "Registration is disabled on this server." -> registrationDisabledHelp(strings.chinese != "中文")
         "Registration failed." -> strings.registrationFailed
         registrationDisabledMessageKey -> registrationDisabledHelp(isEnglish)
-        registrationStatusUnknownMessageKey -> registrationStatusPendingHelp(isEnglish)
+        registrationStatusUnknownMessageKey -> registrationStatusUnknownAfterCheckHelp(isEnglish)
         registrationFailureMessageKey -> strings.registrationFailed
         else -> userFacingAuthErrorMessage(error, isEnglish, strings.registrationFailed)
     }

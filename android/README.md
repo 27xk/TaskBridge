@@ -11,9 +11,7 @@
 
 没有服务器时，先看根目录 README 的“没有服务器地址”章节；服务准备好后，再回到 Android 端填写服务器地址并登录。登录会自动检查连接。
 
-如果手机要连接电脑上的本机试用服务，跨设备地址以根目录说明为准。
-
-离线新增、编辑和完成任务依赖本机已有登录会话；如果是第一次打开，请先完成一次登录。
+第一次使用仍需完成登录。会话自然失效后，登录页会提供本机工作区入口；可以继续查看和修改缓存任务，但不会连接服务器或上传修改，重新登录后才同步。主动退出会清除本机工作区身份。
 
 ## 开发者说明
 
@@ -38,6 +36,8 @@ cd android
 
 后端地址可通过 Gradle 参数或 `local.properties` 配置。
 
+连接电脑上的 Release Compose 本机试用服务时，Android 真机填写 `http://<电脑局域网 IP>:8080`，模拟器填写 `http://10.0.2.2:8080`。
+
 复制本地配置：
 
 ```powershell
@@ -45,14 +45,14 @@ cd android
 Copy-Item local.properties.example local.properties
 ```
 
-常用参数：
+下面参数用于不经过 Release Compose 代理、直接连接开发后端：
 
 ```properties
 TASKBRIDGE_BASE_URL=http://10.0.2.2:8000/api/v1/
 TASKBRIDGE_WS_URL=ws://10.0.2.2:8000/ws/sync
 ```
 
-这些值会在构建时写入 APK 的 `BuildConfig`，作为首次启动默认地址。安装后也可以在登录 / 注册页的「连接设置」或 App 设置页修改服务器地址。
+这些值会在构建时写入 APK 的 `BuildConfig`，作为首次启动默认地址。安装后也可以在登录 / 注册页的「连接设置」或 App 设置页修改服务器地址。Debug 和 Release 都允许在运行时填写 HTTP / HTTPS API 地址以及 WS / WSS 同步地址；Release 不会因为使用明文 HTTP / WS 而拒绝保存端点。
 
 ## 构建命令
 
@@ -62,7 +62,7 @@ TASKBRIDGE_WS_URL=ws://10.0.2.2:8000/ws/sync
 .\gradlew.bat :app:assembleDebug
 ```
 
-连接模拟器访问本机后端：
+开发直连：模拟器访问本机后端：
 
 ```powershell
 .\gradlew.bat :app:assembleDebug `
@@ -70,7 +70,7 @@ TASKBRIDGE_WS_URL=ws://10.0.2.2:8000/ws/sync
   -PTASKBRIDGE_WS_URL=ws://10.0.2.2:8000/ws/sync
 ```
 
-连接局域网后端：
+开发直连：连接局域网后端：
 
 ```powershell
 .\gradlew.bat :app:assembleDebug `
@@ -84,9 +84,9 @@ Release APK：
 .\gradlew.bat :app:assembleRelease
 ```
 
-Release 构建会优先使用正式签名。配置完整 keystore、密码、alias 和 key 密码时会生成已签名 APK；缺少签名配置时，`assembleRelease` 会生成 unsigned release APK，不会回退到 debug signing。
+本地 `assembleRelease` 仍允许生成 unsigned APK 用于开发验证，不会回退到 debug signing。配置完整 keystore、密码、alias 和 key 密码时，本地构建会生成已签名 APK。
 
-本机临时验证仍建议使用 debug 构建；如果需要发布 unsigned release，请在文件名和说明中明确标注，避免用户把它当作已签名正式 APK。
+GitHub Release workflow 的发布条件不同：配置完整 Android 签名时，workflow 才会构建并上传公开 APK；未配置完整 Android 签名时，Release workflow 只运行测试并省略 APK 发布，不会上传 unsigned APK。unsigned release 仅用于本地开发验证，不应作为公开下载文件。
 
 ## Release 签名
 
@@ -118,7 +118,9 @@ GitHub Actions 发布时还支持 `ANDROID_KEYSTORE_BASE64`，详见 [GitHub 发
 ## 主要功能
 
 - 登录、注册、Token 保存和自动刷新。
+- 冷启动先等待本机登录态读取完成，不会短暂闪现登录页；Token 被清除或失效后会自动返回登录页。
 - 今日任务、全部任务、任务详情、添加和编辑。
+- 编辑中的表单和“是否有未保存修改”状态通过 `SavedStateHandle` 恢复；Android 回收并重建进程后仍可继续编辑，保存成功或确认放弃后清除恢复草稿。
 - Room 本地缓存和离线操作。
 - WorkManager 网络恢复后自动同步。
 - 前台 WebSocket 通知。
@@ -126,6 +128,7 @@ GitHub Actions 发布时还支持 `ANDROID_KEYSTORE_BASE64`，详见 [GitHub 发
 - Android 桌面小组件，支持清晰黑字和透明白字两套样式。
 - 分享文本快速添加任务。
 - 导入 TaskBridge 备份 JSON。
+- 登录、注册和设置中的帮助链接在系统没有可用浏览器时显示错误提示，不会导致 App 崩溃。
 
 ## 小组件测试
 

@@ -165,6 +165,9 @@ jobs:
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
 
+      - name: Rebuild Electron native dependencies
+        run: npm run rebuild:native
+
       - name: Verify desktop endpoint config
         run: npm run check:desktop-endpoint-config
 
@@ -203,6 +206,9 @@ jobs:
 
       - name: Verify desktop theme config
         run: npm run check:desktop-theme
+
+      - name: Verify desktop efficiency config
+        run: npm run check:desktop-efficiency
 
       - name: Verify desktop docs consistency
         run: npm run check:desktop-docs
@@ -269,6 +275,12 @@ jobs:
 
       - name: Verify security governance config
         run: npm run check:security-governance
+
+      - name: Verify priority UX polish
+        run: npm run check:ux-priority-polish
+
+      - name: Verify cross-client user experience
+        run: npm run check:user-experience
 
       - name: Verify Web client shell
         run: node ..\scripts\check-web-client.mjs

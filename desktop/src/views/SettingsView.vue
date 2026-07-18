@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, type Component } from "vue";
+import { Cable, Database, Monitor, RefreshCw, ShieldCheck, Tags, UserRound } from "lucide-vue-next";
 
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import SettingsAccountDisplayPanel from "../components/settings/SettingsAccountDisplayPanel.vue";
+import SettingsAccountSecurityPanel from "../components/settings/SettingsAccountSecurityPanel.vue";
 import SettingsConnectionPanel from "../components/settings/SettingsConnectionPanel.vue";
 import SettingsDataSessionPanel from "../components/settings/SettingsDataSessionPanel.vue";
 import SettingsMetadataPanel from "../components/settings/SettingsMetadataPanel.vue";
+import SettingsSyncRecoveryPanel from "../components/settings/SettingsSyncRecoveryPanel.vue";
 import SettingsWindowPanel from "../components/settings/SettingsWindowPanel.vue";
 import { useConfirmDialog } from "../composables/useConfirmDialog";
 import { bridge } from "../db/sqlite";
@@ -14,16 +17,41 @@ import { useAuthStore } from "../stores/auth";
 import { useSettingsStore } from "../stores/settings";
 import { useSyncStore } from "../stores/sync";
 import { useTaskStore } from "../stores/task";
+import { fetchTaskMeta, type TaskMetaDto } from "../api/task";
 import { DESKTOP_THEME_OPTIONS, type DesktopThemeId } from "../../shared/desktop-theme";
 import {
   getBackupImportUndoConfirmationMessage,
   getBackupImportUndoResultMessage,
 } from "../../shared/backup-import-policy";
 import { formatConnectionFailureMessage } from "../../shared/user-facing-errors";
+import {
+  deriveConnectionEndpoints,
+  hasCustomConnectionEndpoints,
+  inferServerUrlFromApi,
+} from "../../shared/connection-endpoints";
 
 const props = defineProps<{
   sectionRequest?: { sectionId: string; nonce: number } | null;
 }>();
+
+const emit = defineEmits<{
+  connectionDirtyChange: [dirty: boolean];
+}>();
+
+type SettingsSectionId =
+  | "account-display"
+  | "account-security"
+  | "connection"
+  | "window"
+  | "data"
+  | "sync-recovery"
+  | "metadata";
+
+type SettingsNavItem = {
+  sectionId: SettingsSectionId;
+  label: string;
+  icon: Component;
+};
 
 const settings = reactive<TaskBridgeSettings>({
   baseUrl: "",
@@ -44,6 +72,8 @@ const settings = reactive<TaskBridgeSettings>({
 });
 const saved = ref(false);
 const exportNote = ref("");
+const metadataNote = ref("");
+const diagnosticsExportNote = ref("");
 const syncRecoveryNote = ref("");
 const serverUrlDraft = ref("");
 const connectionNote = ref("");
@@ -53,12 +83,20 @@ const advancedConnectionOpen = ref(false);
 const advancedEndpointsEdited = ref(false);
 const advancedConnectionManuallyRequested = ref(false);
 const syncDiagnosticsOpen = ref(false);
+const metadataOpen = ref(false);
+const activeSettingsSection = ref<SettingsSectionId>("account-display");
+const serverTaskMeta = ref<TaskMetaDto | null>(null);
 const updateStatus = ref<UpdateStatus | null>(null);
 const pendingBackupImport = ref<BackupImportPreview | null>(null);
 const confirmBackupImport = ref(false);
 const lastImportedBackupLocalIds = ref<string[]>([]);
 let unsubscribeUpdateStatus: (() => void) | null = null;
 let autoSaveTimer: number | undefined;
+const savedConnection = reactive({
+  serverUrl: "",
+  baseUrl: "",
+  wsUrl: "",
+});
 const taskStore = useTaskStore();
 const authStore = useAuthStore();
 const settingsStore = useSettingsStore();
@@ -90,6 +128,12 @@ const timeZoneOptions = computed(() =>
 const showAdvancedConnectionEntry = computed(
   () => advancedConnectionManuallyRequested.value || advancedConnectionOpen.value || advancedEndpointsEdited.value || connectionNoteTone.value === "error",
 );
+const connectionDraftDirty = computed(
+  () =>
+    normalizedConnectionValue(serverUrlDraft.value) !== savedConnection.serverUrl ||
+    normalizedConnectionValue(settings.baseUrl) !== savedConnection.baseUrl ||
+    normalizedConnectionValue(settings.wsUrl) !== savedConnection.wsUrl,
+);
 const clearLocalDataBlocked = computed(
   () =>
     syncStore.diagnostics.pendingQueueCount > 0 ||
@@ -97,57 +141,42 @@ const clearLocalDataBlocked = computed(
     syncStore.diagnostics.failedCount > 0 ||
     syncStore.diagnostics.conflictCount > 0,
 );
-const settingsNavGroups = computed(() => [
-  {
-    label: settingsStore.t("settings.navCommon"),
-    items: [
-      { sectionId: "account-display", label: settingsStore.t("settings.accountDisplay") },
-      { sectionId: "connection", label: settingsStore.t("settings.connection") },
-      { sectionId: "window", label: settingsStore.t("settings.window") },
-    ],
-  },
-  {
-    label: settingsStore.t("settings.navDataSafety"),
-    items: [{ sectionId: "data", label: settingsStore.t("settings.dataSession") }],
-  },
-  {
-    label: settingsStore.t("settings.navSyncRecovery"),
-    items: [{ sectionId: "sync-recovery", label: settingsStore.t("settings.syncRecoveryCenter") }],
-  },
-  {
-    label: settingsStore.t("settings.navAdvancedMaintenance"),
-    items: [{ sectionId: "metadata", label: settingsStore.t("settings.metadata") }],
-  },
+const settingsNavItems = computed<SettingsNavItem[]>(() => [
+  { sectionId: "account-display", label: settingsStore.t("settings.accountDisplay"), icon: UserRound },
+  { sectionId: "account-security", label: settingsStore.t("settings.accountSecurity"), icon: ShieldCheck },
+  { sectionId: "connection", label: settingsStore.t("settings.connection"), icon: Cable },
+  { sectionId: "window", label: settingsStore.t("settings.window"), icon: Monitor },
+  { sectionId: "data", label: settingsStore.t("settings.dataSession"), icon: Database },
+  { sectionId: "sync-recovery", label: settingsStore.t("settings.syncRecoveryCenter"), icon: RefreshCw },
+  { sectionId: "metadata", label: settingsStore.t("settings.metadata"), icon: Tags },
 ]);
 
 function localizeText(zh: string, en: string): string {
   return settingsStore.language === "zh-CN" ? zh : en;
 }
 
-async function scrollToSettingsSection(sectionId: string): Promise<void> {
-  if (sectionId === "sync-recovery") {
-    syncDiagnosticsOpen.value = true;
-    await nextTick();
-  }
-  document.getElementById(`settings-${sectionId}`)?.scrollIntoView({
-    behavior: "smooth",
-    block: "start",
-  });
+function showSettingsSection(sectionId: string): void {
+  const target = settingsNavItems.value.find((item) => item.sectionId === sectionId);
+  if (!target) return;
+  activeSettingsSection.value = target.sectionId;
+  if (target.sectionId === "metadata") metadataOpen.value = false;
 }
 
 watch(
   () => props.sectionRequest,
   (request) => {
-    if (request) void scrollToSettingsSection(request.sectionId);
+    if (!request) return;
+    showSettingsSection(request.sectionId);
+    if (request.sectionId === "sync-recovery") syncDiagnosticsOpen.value = true;
   },
   { immediate: true },
 );
 
-function handleSyncDiagnosticsToggle(event: Event): void {
-  if (event.target instanceof HTMLDetailsElement) {
-    syncDiagnosticsOpen.value = event.target.open;
-  }
-}
+watch(
+  connectionDraftDirty,
+  (dirty) => emit("connectionDirtyChange", dirty),
+  { immediate: true },
+);
 
 function timeZoneOptionLabel(value: string): string {
   const knownNames: Record<string, { zh: string; en: string }> = {
@@ -191,15 +220,26 @@ const metaEdit = reactive({
 onMounted(async () => {
   Object.assign(settings, await bridge().app.getSettings());
   serverUrlDraft.value = inferServerUrlFromApi(settings.baseUrl);
+  markConnectionSaved();
+  const hasCustomEndpoints = hasCustomConnectionEndpoints(
+    serverUrlDraft.value,
+    settings.baseUrl,
+    settings.wsUrl,
+  );
+  advancedEndpointsEdited.value = hasCustomEndpoints;
+  advancedConnectionManuallyRequested.value = hasCustomEndpoints;
+  advancedConnectionOpen.value = hasCustomEndpoints;
   updateStatus.value = await bridge().app.getUpdateStatus();
   unsubscribeUpdateStatus = bridge().app.onUpdateStatus((status) => {
     updateStatus.value = status;
   });
   await refreshLastImportUndoSummary();
   await syncStore.refreshDiagnostics();
+  await refreshServerTaskMeta();
 });
 
 onBeforeUnmount(() => {
+  emit("connectionDirtyChange", false);
   unsubscribeUpdateStatus?.();
   unsubscribeUpdateStatus = null;
   if (autoSaveTimer !== undefined) window.clearTimeout(autoSaveTimer);
@@ -226,17 +266,6 @@ async function save(): Promise<void> {
   Object.assign(settings, await bridge().app.setAutoStart(settings.autoStart));
   serverUrlDraft.value = inferServerUrlFromApi(settings.baseUrl);
   showAutoSaveFeedback();
-}
-
-function deriveConnectionEndpoints(serverUrl: string): { serverUrl: string; baseUrl: string; wsUrl: string } {
-  const normalizedServerUrl = normalizeServerUrl(serverUrl);
-  const url = new URL(normalizedServerUrl);
-  const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return {
-    serverUrl: normalizedServerUrl,
-    baseUrl: `${normalizedServerUrl}/api/v1`,
-    wsUrl: `${wsProtocol}//${url.host}${url.pathname === "/" ? "" : url.pathname}/ws/sync`,
-  };
 }
 
 function applyServerUrl(): boolean {
@@ -288,13 +317,21 @@ function showAdvancedConnection(): void {
 }
 
 async function persistConnectionSettings(baseUrl = settings.baseUrl, wsUrl = settings.wsUrl): Promise<void> {
-  Object.assign(settings, await bridge().app.setSetting("baseUrl", baseUrl.trim()));
-  Object.assign(settings, await bridge().app.setSetting("wsUrl", wsUrl.trim()));
+  if (normalizedConnectionOrigin(baseUrl) !== normalizedConnectionOrigin(savedConnection.baseUrl)) {
+    syncStore.stop();
+  }
+  Object.assign(settings, await bridge().app.setConnection(baseUrl.trim(), wsUrl.trim()));
   serverUrlDraft.value = inferServerUrlFromApi(settings.baseUrl);
+  markConnectionSaved();
+  advancedEndpointsEdited.value = hasCustomConnectionEndpoints(
+    serverUrlDraft.value,
+    settings.baseUrl,
+    settings.wsUrl,
+  );
 }
 
 async function saveConnection(): Promise<void> {
-  applyServerUrl();
+  if (!applyServerUrl()) return;
   await persistConnectionSettings();
   connectionNote.value = settingsStore.t("settings.connectionSaved");
   connectionNoteTone.value = "success";
@@ -320,7 +357,11 @@ async function saveAdvancedConnection(): Promise<void> {
     await bridge().api.request({ method: "GET", url: "/sync/status" });
     connectionNote.value = settingsStore.t("settings.connectionReady");
     connectionNoteTone.value = "success";
-    advancedEndpointsEdited.value = false;
+    advancedEndpointsEdited.value = hasCustomConnectionEndpoints(
+      serverUrlDraft.value,
+      settings.baseUrl,
+      settings.wsUrl,
+    );
   } catch (error) {
     connectionNote.value = formatConnectionFailureMessage(
       error,
@@ -345,7 +386,11 @@ async function checkAndSaveConnection(): Promise<void> {
     await bridge().api.request({ method: "GET", url: "/sync/status" });
     connectionNote.value = settingsStore.t("settings.connectionReady");
     connectionNoteTone.value = "success";
-    advancedEndpointsEdited.value = false;
+    advancedEndpointsEdited.value = hasCustomConnectionEndpoints(
+      serverUrlDraft.value,
+      settings.baseUrl,
+      settings.wsUrl,
+    );
   } catch (error) {
     connectionNote.value = formatConnectionFailureMessage(
       error,
@@ -358,27 +403,21 @@ async function checkAndSaveConnection(): Promise<void> {
   }
 }
 
-function normalizeServerUrl(value: string): string {
-  const trimmed = value.trim().replace(/\/+$/, "");
-  if (!trimmed) throw new Error("server_url_required");
-  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
-  const url = new URL(candidate);
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Server URL must start with http:// or https://");
-  }
-  url.username = "";
-  url.password = "";
-  url.search = "";
-  url.hash = "";
-  url.pathname = url.pathname.replace(/\/api\/v1\/?$/, "") || "/";
-  return url.toString().replace(/\/+$/, "");
+function markConnectionSaved(): void {
+  savedConnection.serverUrl = normalizedConnectionValue(serverUrlDraft.value);
+  savedConnection.baseUrl = normalizedConnectionValue(settings.baseUrl);
+  savedConnection.wsUrl = normalizedConnectionValue(settings.wsUrl);
 }
 
-function inferServerUrlFromApi(apiUrl: string): string {
+function normalizedConnectionValue(value: string): string {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function normalizedConnectionOrigin(value: string): string {
   try {
-    return normalizeServerUrl(apiUrl);
+    return new URL(value).origin;
   } catch {
-    return "http://127.0.0.1:8000";
+    return "";
   }
 }
 
@@ -481,12 +520,13 @@ async function refreshLastImportUndoSummary(): Promise<void> {
 }
 
 async function exportDiagnostics(): Promise<void> {
+  diagnosticsExportNote.value = "";
   if (!(await confirmDiagnosticsExport())) {
-    exportNote.value = settingsStore.t("settings.diagnosticsExportCanceled");
+    diagnosticsExportNote.value = settingsStore.t("settings.diagnosticsExportCanceled");
     return;
   }
   const result = await bridge().task.exportDiagnostics();
-  exportNote.value = result.canceled
+  diagnosticsExportNote.value = result.canceled
     ? settingsStore.t("settings.diagnosticsExportCanceled")
     : `${settingsStore.t("settings.diagnosticsExported")}${result.filePath}`;
 }
@@ -587,15 +627,17 @@ async function confirmRenameTaskMeta(field: "project" | "tag", oldValue: string,
 }
 
 async function renameProject(): Promise<void> {
+  metadataNote.value = "";
   if (!(await confirmRenameTaskMeta("project", metaEdit.projectFrom, metaEdit.projectTo))) return;
   await taskStore.renameProject(metaEdit.projectFrom, metaEdit.projectTo);
-  exportNote.value = settingsStore.t("settings.projectRenamed");
+  metadataNote.value = settingsStore.t("settings.projectRenamed");
 }
 
 async function renameTag(): Promise<void> {
+  metadataNote.value = "";
   if (!(await confirmRenameTaskMeta("tag", metaEdit.tagFrom, metaEdit.tagTo))) return;
   await taskStore.renameTag(metaEdit.tagFrom, metaEdit.tagTo);
-  exportNote.value = settingsStore.t("settings.tagRenamed");
+  metadataNote.value = settingsStore.t("settings.tagRenamed");
 }
 
 function updateLanguage(language: AppLanguage): void {
@@ -608,6 +650,8 @@ async function updateDisplayTimeZone(timeZone: string): Promise<void> {
   settings.displayTimeZone = timeZone;
   await settingsStore.setDisplayTimeZone(settings.displayTimeZone);
   settings.displayTimeZone = settingsStore.displayTimeZone;
+  await taskStore.load();
+  await refreshServerTaskMeta();
   showAutoSaveFeedback();
 }
 
@@ -630,10 +674,32 @@ async function updateFloatingVisibleOnStart(enabled: boolean): Promise<void> {
 }
 
 async function refreshDiagnostics(): Promise<void> {
+  const connectionDraft = {
+    serverUrl: serverUrlDraft.value,
+    baseUrl: settings.baseUrl,
+    wsUrl: settings.wsUrl,
+  };
+  const preserveConnectionDraft = connectionDraftDirty.value;
   Object.assign(settings, await bridge().app.getSettings());
-  serverUrlDraft.value = inferServerUrlFromApi(settings.baseUrl);
+  if (preserveConnectionDraft) {
+    serverUrlDraft.value = connectionDraft.serverUrl;
+    settings.baseUrl = connectionDraft.baseUrl;
+    settings.wsUrl = connectionDraft.wsUrl;
+  } else {
+    serverUrlDraft.value = inferServerUrlFromApi(settings.baseUrl);
+    markConnectionSaved();
+  }
   await refreshLastImportUndoSummary();
   await syncStore.refreshDiagnostics();
+  await refreshServerTaskMeta();
+}
+
+async function refreshServerTaskMeta(): Promise<void> {
+  try {
+    serverTaskMeta.value = await fetchTaskMeta(settings.displayTimeZone);
+  } catch {
+    serverTaskMeta.value = null;
+  }
 }
 
 async function retryExhaustedQueue(): Promise<void> {
@@ -641,96 +707,79 @@ async function retryExhaustedQueue(): Promise<void> {
   await syncStore.retryExhaustedQueue();
   syncRecoveryNote.value = settingsStore.t("settings.retryExhaustedDone");
 }
-
-function syncQueueActionText(action: string): string {
-  const normalized = String(action || "").toLowerCase();
-  const english = settingsStore.language === "en-US";
-  switch (normalized) {
-    case "create":
-    case "pending_create":
-      return english ? "Create task" : "新建任务";
-    case "update":
-    case "pending_update":
-      return english ? "Update task" : "更新任务";
-    case "delete":
-    case "pending_delete":
-      return english ? "Delete task" : "删除任务";
-    case "complete":
-      return english ? "Complete task" : "完成任务";
-    case "restore":
-      return english ? "Restore task" : "恢复任务";
-    default:
-      return english ? "Pending change" : "待同步修改";
-  }
-}
 </script>
 
 <template>
   <section class="view-shell settings-view">
     <header class="view-header">
       <div>
-        <p class="eyebrow">{{ settingsStore.t("settings.title") }}</p>
-        <h1>{{ settingsStore.t("settings.subtitle") }}</h1>
-        <p class="settings-save-hint">{{ settingsStore.t("settings.autoSaveHint") }}</p>
+        <h1>{{ settingsStore.t("settings.title") }}</h1>
       </div>
-      <p class="save-note" v-if="saved">{{ settingsStore.t("settings.autoSaved") }}</p>
+      <p v-if="saved" class="save-note">{{ settingsStore.t("settings.autoSaved") }}</p>
     </header>
 
-    <nav class="settings-section-nav" :aria-label="settingsStore.t('settings.title')">
-      <div v-for="group in settingsNavGroups" :key="group.label" class="settings-nav-group">
-        <span class="settings-nav-group-label">{{ group.label }}</span>
-        <div class="settings-nav-group-actions">
-          <button
-            v-for="item in group.items"
-            :key="item.sectionId"
-            class="secondary-button"
-            type="button"
-            @click="scrollToSettingsSection(item.sectionId)"
-          >
-            {{ item.label }}
-          </button>
-        </div>
-      </div>
-    </nav>
+    <div class="settings-workspace">
+      <nav class="settings-category-nav" :aria-label="settingsStore.t('settings.title')">
+        <button
+          v-for="item in settingsNavItems"
+          :key="item.sectionId"
+          type="button"
+          :class="{ active: activeSettingsSection === item.sectionId }"
+          :aria-current="activeSettingsSection === item.sectionId ? 'page' : undefined"
+          @click="showSettingsSection(item.sectionId)"
+        >
+          <component :is="item.icon" :size="17" aria-hidden="true" />
+          <span>{{ item.label }}</span>
+        </button>
+      </nav>
 
-    <div class="settings-layout">
-      <SettingsAccountDisplayPanel
-        id="settings-account-display"
-        class="theme-picker-surface"
-        :language="settings.language"
-        :display-time-zone="settings.displayTimeZone"
-        :desktop-theme="settings.desktopTheme"
-        :auto-start="settings.autoStart"
-        :time-zone-options="timeZoneOptions"
-        :theme-options="DESKTOP_THEME_OPTIONS"
-        @language-change="updateLanguage"
-        @display-time-zone-change="updateDisplayTimeZone"
-        @desktop-theme-change="updateDesktopTheme"
-        @auto-start-change="updateAutoStart"
-      />
+      <div class="settings-content">
+        <SettingsAccountDisplayPanel
+          v-show="activeSettingsSection === 'account-display'"
+          id="settings-account-display"
+          class="theme-picker-surface"
+          :language="settings.language"
+          :display-time-zone="settings.displayTimeZone"
+          :desktop-theme="settings.desktopTheme"
+          :auto-start="settings.autoStart"
+          :time-zone-options="timeZoneOptions"
+          :theme-options="DESKTOP_THEME_OPTIONS"
+          @language-change="updateLanguage"
+          @display-time-zone-change="updateDisplayTimeZone"
+          @desktop-theme-change="updateDesktopTheme"
+          @auto-start-change="updateAutoStart"
+        />
 
-      <SettingsConnectionPanel
-        id="settings-connection"
-        v-model:server-url-draft="serverUrlDraft"
-        v-model:base-url="settings.baseUrl"
-        v-model:ws-url="settings.wsUrl"
-        :connection-testing="connectionTesting"
-        :connection-note="connectionNote"
-        :connection-note-tone="connectionNoteTone"
-        :advanced-connection-open="advancedConnectionOpen"
-        :show-advanced-connection-entry="showAdvancedConnectionEntry"
-        @apply-server-url="applyServerUrl"
-        @check-and-save-connection="checkAndSaveConnection"
-        @advanced-connection-toggle="setAdvancedConnectionOpen"
-        @show-advanced-connection="showAdvancedConnection"
-        @sync-server-url-from-advanced="syncServerUrlFromAdvanced"
-        @mark-advanced-endpoint-edited="markAdvancedEndpointEdited"
-        @reset-generated-connection-endpoints="resetGeneratedConnectionEndpoints"
-        @save-advanced-connection="saveAdvancedConnection"
-      />
+        <SettingsAccountSecurityPanel
+          v-show="activeSettingsSection === 'account-security'"
+          id="settings-account-security"
+          :current-device-id="settings.deviceId"
+          :display-time-zone="settings.displayTimeZone"
+        />
 
-      <div class="settings-row">
+        <SettingsConnectionPanel
+          v-show="activeSettingsSection === 'connection'"
+          id="settings-connection"
+          v-model:server-url-draft="serverUrlDraft"
+          v-model:base-url="settings.baseUrl"
+          v-model:ws-url="settings.wsUrl"
+          :connection-testing="connectionTesting"
+          :connection-note="connectionNote"
+          :connection-note-tone="connectionNoteTone"
+          :advanced-connection-open="advancedConnectionOpen"
+          :show-advanced-connection-entry="showAdvancedConnectionEntry"
+          @apply-server-url="applyServerUrl"
+          @check-and-save-connection="checkAndSaveConnection"
+          @advanced-connection-toggle="setAdvancedConnectionOpen"
+          @show-advanced-connection="showAdvancedConnection"
+          @sync-server-url-from-advanced="syncServerUrlFromAdvanced"
+          @mark-advanced-endpoint-edited="markAdvancedEndpointEdited"
+          @reset-generated-connection-endpoints="resetGeneratedConnectionEndpoints"
+          @save-advanced-connection="saveAdvancedConnection"
+        />
+
         <SettingsWindowPanel
+          v-show="activeSettingsSection === 'window'"
           id="settings-window"
           v-model:floating-visible-on-start="settings.floatingVisibleOnStart"
           v-model:floating-opacity="settings.floatingOpacity"
@@ -738,8 +787,11 @@ function syncQueueActionText(action: string): string {
           @update:floating-visible-on-start="updateFloatingVisibleOnStart"
         />
 
-        <span id="settings-data" class="settings-anchor" aria-hidden="true"></span>
-        <section class="settings-section settings-data">
+        <section
+          v-show="activeSettingsSection === 'data'"
+          id="settings-data"
+          class="settings-section settings-data"
+        >
           <SettingsDataSessionPanel
             :last-sync-time="settings.lastSyncTime"
             :last-imported-backup-local-ids="lastImportedBackupLocalIds"
@@ -754,113 +806,38 @@ function syncQueueActionText(action: string): string {
             @clear-local-device-data="clearLocalDeviceData"
             @check-for-updates="checkForUpdates"
           />
-
-          <span id="settings-sync-recovery" class="settings-anchor" aria-hidden="true"></span>
-          <div class="settings-diagnostics-section">
-            <details class="settings-advanced-details" :open="syncDiagnosticsOpen" @toggle="handleSyncDiagnosticsToggle">
-              <summary>{{ settingsStore.t("settings.syncDiagnostics") }}</summary>
-              <div class="sync-diagnostics">
-                <dl class="settings-device-list">
-                  <div>
-                    <dt>{{ settingsStore.t("settings.deviceId") }}</dt>
-                    <dd>{{ settings.deviceId || "-" }}</dd>
-                  </div>
-                  <div>
-                    <dt>{{ settingsStore.t("settings.pendingQueueCount") }}</dt>
-                    <dd>{{ syncStore.diagnostics.pendingQueueCount }}</dd>
-                  </div>
-                  <div>
-                    <dt>{{ settingsStore.t("settings.exhaustedQueueCount") }}</dt>
-                    <dd>{{ syncStore.diagnostics.exhaustedQueueCount }}</dd>
-                  </div>
-                  <div>
-                    <dt>{{ settingsStore.t("settings.failedTaskCount") }}</dt>
-                    <dd>{{ syncStore.diagnostics.failedCount }}</dd>
-                  </div>
-                  <div>
-                    <dt>{{ settingsStore.t("settings.conflictCount") }}</dt>
-                    <dd>{{ syncStore.diagnostics.conflictCount }}</dd>
-                  </div>
-                  <div>
-                    <dt>{{ settingsStore.t("settings.diagnosticsUpdatedAt") }}</dt>
-                    <dd>{{ syncStore.diagnostics.updatedAt || "-" }}</dd>
-                  </div>
-                </dl>
-                <div class="form-actions settings-actions">
-                  <button class="secondary-button" type="button" @click="refreshDiagnostics">
-                    {{ settingsStore.t("settings.refreshDiagnostics") }}
-                  </button>
-                </div>
-                <div class="sync-recovery-center">
-                  <div class="settings-section-heading-row">
-                    <h3>{{ settingsStore.t("settings.syncRecoveryCenter") }}</h3>
-                    <button
-                      class="secondary-button"
-                      type="button"
-                      :disabled="syncStore.diagnostics.recoverableSyncIssueCount === 0"
-                      @click="retryExhaustedQueue"
-                    >
-                      {{ settingsStore.t("settings.retryExhaustedQueue") }}
-                    </button>
-                  </div>
-                  <p v-if="syncStore.diagnostics.recoverableSyncIssueCount > 0" class="settings-sensitive-note">
-                    {{ settingsStore.t("settings.pendingOrFailedSyncRetryAvailable") }}
-                  </p>
-                  <p v-if="syncRecoveryNote" class="form-message form-message-success">{{ syncRecoveryNote }}</p>
-                  <p v-if="syncStore.diagnostics.exhaustedQueueItems.length === 0" class="settings-sensitive-note">
-                    {{ settingsStore.t("settings.noExhaustedQueueItems") }}
-                  </p>
-                  <ul v-else class="sync-issue-list">
-                  <li v-for="issue in syncStore.diagnostics.exhaustedQueueItems" :key="issue.id">
-                    <strong>{{ issue.title }}</strong>
-                    <span>
-                      {{ settingsStore.t("settings.syncIssueAction") }}:
-                      {{ syncQueueActionText(issue.action) }}
-                    </span>
-                    <span>
-                      {{ settingsStore.t("settings.syncIssueAttempts") }}:
-                      {{ issue.attemptCount }}
-                    </span>
-                    <span>
-                      {{ settingsStore.t("settings.syncIssueCreatedAt") }}:
-                      {{ issue.createdAt || "-" }}
-                    </span>
-                  </li>
-                  </ul>
-                </div>
-              </div>
-            </details>
-
-            <details class="settings-advanced-details settings-support-tools">
-              <summary>{{ settingsStore.t("settings.diagnosticsSupportTools") }}</summary>
-              <div class="sync-diagnostics">
-                <p class="settings-sensitive-note">{{ settingsStore.t("settings.diagnosticsSensitiveHint") }}</p>
-                <div class="form-actions settings-actions">
-                  <button class="secondary-button" type="button" @click="exportDiagnostics">
-                    {{ settingsStore.t("settings.exportDiagnostics") }}
-                  </button>
-                </div>
-                <details v-if="updateTechnicalDetail" class="settings-technical-details">
-                  <summary>{{ settingsStore.t("settings.updateTechnicalDetails") }}</summary>
-                  <p>{{ updateTechnicalDetail }}</p>
-                </details>
-              </div>
-            </details>
-          </div>
         </section>
-      </div>
 
-      <SettingsMetadataPanel
-        id="settings-metadata"
-        v-model:project-from="metaEdit.projectFrom"
-        v-model:project-to="metaEdit.projectTo"
-        v-model:tag-from="metaEdit.tagFrom"
-        v-model:tag-to="metaEdit.tagTo"
-        :projects="taskStore.projects"
-        :tags="taskStore.tags"
-        @rename-project="renameProject"
-        @rename-tag="renameTag"
-      />
+        <SettingsSyncRecoveryPanel
+          v-show="activeSettingsSection === 'sync-recovery'"
+          id="settings-sync-recovery"
+          v-model:diagnostics-open="syncDiagnosticsOpen"
+          :device-id="settings.deviceId"
+          :diagnostics="syncStore.diagnostics"
+          :server-task-meta="serverTaskMeta"
+          :note="syncRecoveryNote"
+          :export-note="diagnosticsExportNote"
+          :update-technical-detail="updateTechnicalDetail"
+          @refresh="refreshDiagnostics"
+          @retry="retryExhaustedQueue"
+          @export-diagnostics="exportDiagnostics"
+        />
+
+        <SettingsMetadataPanel
+          v-show="activeSettingsSection === 'metadata'"
+          id="settings-metadata"
+          v-model:open="metadataOpen"
+          v-model:project-from="metaEdit.projectFrom"
+          v-model:project-to="metaEdit.projectTo"
+          v-model:tag-from="metaEdit.tagFrom"
+          v-model:tag-to="metaEdit.tagTo"
+          :projects="taskStore.projects"
+          :tags="taskStore.tags"
+          :note="metadataNote"
+          @rename-project="renameProject"
+          @rename-tag="renameTag"
+        />
+      </div>
     </div>
 
     <ConfirmDialog

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import type { MutableAppSettingKey } from "../shared/settings-policy";
 
 type Listener<Args extends unknown[] = []> = (...args: Args) => void;
 
@@ -17,9 +18,10 @@ contextBridge.exposeInMainWorld("taskBridge", {
   },
   app: {
     getSettings: () => ipcRenderer.invoke("app:get-settings"),
-    setSetting: (key: string, value: unknown) => ipcRenderer.invoke("app:set-setting", key, value),
+    setSetting: (key: MutableAppSettingKey, value: unknown) => ipcRenderer.invoke("app:set-setting", key, value),
+    setConnection: (baseUrl: string, wsUrl: string) => ipcRenderer.invoke("app:set-connection", baseUrl, wsUrl),
     setSyncStatus: (status: string) => ipcRenderer.invoke("app:set-sync-status", status),
-    notify: (title: string, body: string) => ipcRenderer.invoke("app:notify", title, body),
+    notify: (title: string, body: string, localId?: string) => ipcRenderer.invoke("app:notify", title, body, localId),
     toggleFloating: () => ipcRenderer.invoke("app:toggle-floating"),
     showFloating: () => ipcRenderer.invoke("app:show-floating"),
     openExternal: (url: string) => ipcRenderer.invoke("app:open-external", url),
@@ -31,6 +33,7 @@ contextBridge.exposeInMainWorld("taskBridge", {
   auth: {
     hasTokens: () => ipcRenderer.invoke("auth:has-tokens"),
     clearTokens: () => ipcRenderer.invoke("auth:clear-tokens"),
+    onSessionExpired: (callback: Listener<[string]>) => on("taskbridge:session-expired", callback),
   },
   api: {
     request: (payload: unknown) => ipcRenderer.invoke("api:request", payload),
@@ -79,6 +82,7 @@ contextBridge.exposeInMainWorld("taskBridge", {
   },
   task: {
     listToday: (limit?: number) => ipcRenderer.invoke("task:list-today", limit),
+    getTodaySummary: (limit?: number) => ipcRenderer.invoke("task:today-summary", limit),
     quickAdd: (title: string) => ipcRenderer.invoke("task:quick-add", title),
     complete: (localId: string) => ipcRenderer.invoke("task:complete", localId),
     openDetail: (localId: string) => ipcRenderer.invoke("task:open-detail", localId),

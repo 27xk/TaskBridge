@@ -10,11 +10,12 @@ const [desktopHttpSource, androidRetrofitSource] = await Promise.all([
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/data/remote/RetrofitClient.kt"), "utf8"),
 ]);
 
-assert.match(desktopHttpSource, /let refreshInFlight: Promise</, "desktop HTTP client must share one refresh request");
+assert.match(desktopHttpSource, /const refreshFlights = new Map<string, Promise<TokenRefreshResponse>>\(\)/, "desktop HTTP client must isolate shared refresh requests by captured session");
 assert.match(desktopHttpSource, /function refreshTokenOnce/, "desktop HTTP client must centralize refresh singleflight");
-assert.match(desktopHttpSource, /refreshInFlight = refreshToken\(refreshTokenValue\)/, "desktop singleflight must wrap refreshToken()");
-assert.match(desktopHttpSource, /\.finally\(\(\) => \{\s*refreshInFlight = null;/s, "desktop singleflight must clear after completion");
-assert.match(desktopHttpSource, /await refreshTokenOnce\(tokens\.refreshToken\)/, "desktop 401 retry must use refresh singleflight");
+assert.match(desktopHttpSource, /const existing = refreshFlights\.get\(session\.key\)/, "desktop singleflight must reuse only a matching session refresh");
+assert.match(desktopHttpSource, /const request = refreshToken\(session\)\.finally/, "desktop singleflight must refresh the captured session");
+assert.match(desktopHttpSource, /if \(refreshFlights\.get\(session\.key\) === request\)[\s\S]{0,120}refreshFlights\.delete\(session\.key\)/, "desktop singleflight must clear only its own completed session request");
+assert.match(desktopHttpSource, /await refreshTokenOnce\(refreshSession\)/, "desktop 401 retry must use session-scoped refresh singleflight");
 
 assert.match(androidRetrofitSource, /private val refreshLock = Any\(\)/, "Android authenticator must serialize refresh attempts");
 assert.match(androidRetrofitSource, /synchronized\(refreshLock\)/, "Android authenticator must guard refresh with refreshLock");

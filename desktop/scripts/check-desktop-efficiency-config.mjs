@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { workspaceRoot } from "./script-helpers.mjs";
+import {
+  extractOpeningTag,
+  hasLiteralBooleanAttribute,
+  workspaceRoot,
+} from "./script-helpers.mjs";
 
 const root = workspaceRoot(import.meta.url);
 
-const [stateSource, appSource, dbSource, mainSource, settingsViewSource] = await Promise.all([
+const [stateSource, appSource, dbSource, mainSource, settingsViewSource, syncRecoveryPanelSource] = await Promise.all([
   readFile(resolve(root, "electron/state.ts"), "utf8"),
   readFile(resolve(root, "src/App.vue"), "utf8"),
   readFile(resolve(root, "electron/db.ts"), "utf8"),
   readFile(resolve(root, "electron/main.ts"), "utf8"),
   readFile(resolve(root, "src/views/SettingsView.vue"), "utf8"),
+  readFile(resolve(root, "src/components/settings/SettingsSyncRecoveryPanel.vue"), "utf8"),
 ]);
 
 assert.match(
@@ -45,9 +50,10 @@ assert.match(
 );
 assert.match(
   stateSource,
-  /const CURRENT_SETTINGS_SCHEMA_VERSION = 2;/,
-  "settings schema version must be bumped for startup normalization",
+  /const CURRENT_SETTINGS_SCHEMA_VERSION = 4;/,
+  "settings schema version must be bumped for workspace ownership migration",
 );
+assert.match(stateSource, /initializeLegacyWorkspaceOwnership\(previousSettingsSchemaVersion\);/, "settings migration must record the known owner of legacy workspace data once");
 assert.match(
   stateSource,
   /normalizeStoredSettings\(\);/,
@@ -149,11 +155,13 @@ assert.match(
   /updated_at DESC,\s+local_id ASC/,
   "desktop task ordering must be deterministic across equal timestamps",
 );
-assert.match(
-  settingsViewSource,
-  /<details class="settings-advanced-details">[\s\S]*?<summary>\{\{ settingsStore\.t\("settings\.syncDiagnostics"\) \}\}<\/summary>[\s\S]*?<div class="sync-diagnostics">[\s\S]*?<\/details>/,
-  "desktop sync diagnostics must be hidden behind an advanced details disclosure",
+const diagnosticsDetailsTag = extractOpeningTag(
+  syncRecoveryPanelSource,
+  '<details class="settings-advanced-details"',
 );
+assert.match(diagnosticsDetailsTag, /:open="diagnosticsOpen"/, "desktop sync diagnostics must bind its disclosure state");
+assert.equal(hasLiteralBooleanAttribute(diagnosticsDetailsTag, "open"), false, "desktop sync diagnostics must not be open by default");
+assert.match(syncRecoveryPanelSource, /<summary>\{\{ settingsStore\.t\("settings\.syncDiagnostics"\) \}\}<\/summary>[\s\S]*?<div class="sync-diagnostics">/, "desktop sync diagnostics must be hidden behind an advanced details disclosure");
 assert.match(
   settingsViewSource,
   /function timeZoneOptionLabel/,

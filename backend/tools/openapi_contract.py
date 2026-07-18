@@ -4,6 +4,7 @@ import argparse
 import difflib
 import json
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from app.main import create_app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = REPO_ROOT / "shared" / "openapi.taskbridge.v1.json"
+VERSION_PATH = REPO_ROOT / "VERSION"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--write", action="store_true", help="refresh the committed contract")
     args = parser.parse_args(argv)
 
-    schema = create_app().openapi()
+    schema = build_contract_schema()
     rendered_schema = render_schema(schema)
 
     if args.write:
@@ -30,6 +32,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     return check_contract(schema, rendered_schema)
+
+
+def build_contract_schema() -> dict[str, Any]:
+    return normalize_contract_schema(create_app().openapi())
+
+
+def normalize_contract_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(schema)
+    normalized.setdefault("info", {})["version"] = VERSION_PATH.read_text(
+        encoding="utf-8",
+    ).strip()
+    validation_properties = (
+        normalized.get("components", {})
+        .get("schemas", {})
+        .get("ValidationError", {})
+        .get("properties", {})
+    )
+    if isinstance(validation_properties, dict):
+        validation_properties.pop("ctx", None)
+        validation_properties.pop("input", None)
+    return normalized
 
 
 def check_contract(schema: dict[str, Any], rendered_schema: str) -> int:

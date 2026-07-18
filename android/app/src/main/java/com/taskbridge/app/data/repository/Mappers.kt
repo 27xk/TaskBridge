@@ -11,6 +11,7 @@ import com.google.gson.Gson
 private val mapperGson = Gson()
 
 fun TaskDto.toEntity(
+    workspaceId: String,
     ownerUserId: String,
     localId: String,
     syncStatus: SyncStatus = SyncStatus.Synced,
@@ -20,6 +21,7 @@ fun TaskDto.toEntity(
 ): TaskEntity {
     return TaskEntity(
         localId = localId,
+        workspaceId = workspaceId,
         ownerUserId = ownerUserId,
         serverId = id,
         title = title,

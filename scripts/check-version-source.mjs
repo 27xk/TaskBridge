@@ -18,6 +18,11 @@ const [
   androidBuildSource,
   webIndexSource,
   readmeSource,
+  developmentDocSource,
+  backendEnvExampleSource,
+  backendDockerEnvExampleSource,
+  deployEnvExampleSource,
+  deployLocalEnvExampleSource,
   ciSource,
   releaseSource,
 ] = await Promise.all([
@@ -29,6 +34,11 @@ const [
   read("android/app/build.gradle.kts"),
   read("web/index.html"),
   read("README.md"),
+  read("docs/development.md"),
+  read("backend/.env.example"),
+  read("backend/.env.docker.example"),
+  read("deploy/.env.example"),
+  read("deploy/.env.local.example"),
   read(".github/workflows/ci.yml"),
   read(".github/workflows/release.yml"),
 ]);
@@ -62,12 +72,27 @@ assert.match(
   "Web meta taskbridge-version must match VERSION",
 );
 
+assert.match(
+  readmeSource,
+  /docs\/development\.md/,
+  "README.md must link to the developer verification guide",
+);
+
 for (const [name, source] of [
-  ["README.md", readmeSource],
+  ["docs/development.md", developmentDocSource],
   [".github/workflows/ci.yml", ciSource],
   [".github/workflows/release.yml", releaseSource],
 ]) {
   assert.match(source, /check-version-source\.mjs/, `${name} must run or document the version source guard`);
+}
+
+for (const [name, source] of [
+  ["backend/.env.example", backendEnvExampleSource],
+  ["backend/.env.docker.example", backendDockerEnvExampleSource],
+  ["deploy/.env.example", deployEnvExampleSource],
+  ["deploy/.env.local.example", deployLocalEnvExampleSource],
+]) {
+  assert.match(source, new RegExp(`^APP_VERSION=${version}$`, "m"), `${name} APP_VERSION must match VERSION`);
 }
 
 assert.match(

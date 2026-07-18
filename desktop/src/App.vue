@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
+import AppSidebar from "./components/AppSidebar.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
-import SyncStatus from "./components/SyncStatus.vue";
+import ReauthenticationBanner from "./components/ReauthenticationBanner.vue";
+import WorkspaceStatusBanner from "./components/WorkspaceStatusBanner.vue";
 import { bridge } from "./db/sqlite";
 import { useConfirmDialog } from "./composables/useConfirmDialog";
 import { useAuthStore, useSettingsStore, useSyncStore, useTaskStore } from "./stores";
@@ -12,17 +14,44 @@ import SettingsView from "./views/SettingsView.vue";
 import TaskView from "./views/TaskView.vue";
 import TodayView from "./views/TodayView.vue";
 import { parseTaskBridgeDate } from "../shared/quick-add-parser";
+import { shouldPreserveWorkspaceState } from "../shared/workspace";
+import { deriveWorkspaceStatus } from "../shared/workspace-ui-policy";
 import { isCompletedStatus } from "./utils/task-order";
 
 const isFloating = new URLSearchParams(window.location.search).get("view") === "floating";
-const activeView = ref<"today" | "tasks" | "settings">("today");
+type AppView = "today" | "tasks" | "settings";
+
+const activeView = ref<AppView>("today");
+const editorDirty = ref(false);
+const settingsConnectionDirty = ref(false);
 const quickAddSignal = ref(0);
 const openTaskRequest = ref<{ localId: string; nonce: number } | null>(null);
 const settingsSectionRequest = ref<{ sectionId: string; nonce: number } | null>(null);
+const workspaceInstanceKey = ref(0);
+const continueOfflineAfterExpiry = ref(false);
 const auth = useAuthStore();
 const taskStore = useTaskStore();
 const syncStore = useSyncStore();
 const settingsStore = useSettingsStore();
+const workspaceStatus = computed(() =>
+  deriveWorkspaceStatus(syncStore.status, syncStore.diagnostics),
+);
+const displayedWorkspaceStatus = computed(() =>
+  continueOfflineAfterExpiry.value
+    ? { indicator: "offline", banner: "none", issueCount: 0 } as const
+    : workspaceStatus.value,
+);
+const canContinueOffline = computed(
+  () =>
+    auth.sessionExpired &&
+    auth.sessionExpiredReason === "refresh-rejected" &&
+    Boolean(auth.workspaceKey),
+);
+const keepWorkspaceMounted = computed(
+  () =>
+    auth.isAuthenticated ||
+    (auth.sessionExpired && auth.sessionExpiredReason === "refresh-rejected"),
+);
 const {
   confirmDialog,
   requestConfirmation,
@@ -35,21 +64,46 @@ let removeSettingsListener: (() => void) | undefined;
 let removeTasksChangedListener: (() => void) | undefined;
 let removeOpenTaskDetailListener: (() => void) | undefined;
 let removeSyncNowListener: (() => void) | undefined;
+let removeSessionExpiredListener: (() => void) | undefined;
 let reminderTimer: number | undefined;
+let preservedWorkspaceKey: string | null = null;
+let desktopServicesWorkspaceKey: string | null = null;
+let desktopServicesActivationId = 0;
 const notifiedReminderIds = new Set<string>();
 const REMINDER_DEDUP_STORAGE_KEY = "taskbridge.desktop.notifiedReminders.v1";
 
+watch(
+  () => [auth.isAuthenticated, auth.workspaceKey] as const,
+  ([isAuthenticated, workspaceKey]) => {
+    if (isFloating) return;
+    if (isAuthenticated) {
+      continueOfflineAfterExpiry.value = false;
+    }
+    if (!isAuthenticated || !workspaceKey) {
+      desktopServicesWorkspaceKey = null;
+      desktopServicesActivationId += 1;
+      return;
+    }
+    if (desktopServicesWorkspaceKey === workspaceKey) return;
+    void activateAuthenticatedWorkspace(workspaceKey);
+  },
+  { flush: "post" },
+);
+
 onMounted(async () => {
   await settingsStore.load();
+  removeSessionExpiredListener = bridge().auth.onSessionExpired((reason) => {
+    handleSessionExpired(reason);
+  });
   if (isFloating) return;
   loadNotifiedReminderIds();
+  window.addEventListener("beforeunload", handleBeforeUnload);
 
   removeQuickAddListener = bridge().window.onQuickAdd(() => {
-    activeView.value = "tasks";
-    quickAddSignal.value += 1;
+    void openQuickAdd();
   });
   removeSettingsListener = bridge().window.onShowSettings(() => {
-    activeView.value = "settings";
+    void requestViewChange("settings");
   });
   removeTasksChangedListener = bridge().window.onTasksChanged(() => {
     if (!auth.isAuthenticated) return;
@@ -57,43 +111,121 @@ onMounted(async () => {
     void syncStore.syncNow();
   });
   removeOpenTaskDetailListener = bridge().window.onOpenTaskDetail((localId) => {
-    activeView.value = "tasks";
-    openTaskRequest.value = {
-      localId,
-      nonce: Date.now(),
-    };
+    void openTaskDetail(localId);
   });
   removeSyncNowListener = bridge().window.onSyncNow(() => {
     void manualSync();
   });
 
   await auth.loadSession();
-  if (auth.isAuthenticated) {
-    await startDesktopServices();
+  if (canContinueOffline.value && taskStore.tasks.length === 0) {
+    await loadCachedWorkspace();
   }
 });
 
 onBeforeUnmount(() => {
+  desktopServicesActivationId += 1;
+  desktopServicesWorkspaceKey = null;
   removeQuickAddListener?.();
   removeSettingsListener?.();
   removeTasksChangedListener?.();
   removeOpenTaskDetailListener?.();
   removeSyncNowListener?.();
+  removeSessionExpiredListener?.();
+  window.removeEventListener("beforeunload", handleBeforeUnload);
   stopReminderLoop();
   syncStore.stop();
 });
 
-async function startDesktopServices(): Promise<void> {
+function handleSessionExpired(reason: "refresh-rejected" | "server-changed"): void {
+  preservedWorkspaceKey ??= auth.workspaceKey;
+  continueOfflineAfterExpiry.value = false;
+  syncStore.stop();
+  stopReminderLoop();
+  auth.expireSession(reason);
+}
+
+async function loadCachedWorkspace(): Promise<void> {
+  try {
+    await settingsStore.load();
+    await reloadTasksAndPruneReminders();
+  } catch (error) {
+    console.error("[TaskBridge] cached workspace failed to load", error);
+  }
+}
+
+async function continueWithCachedWorkspace(): Promise<void> {
+  if (!canContinueOffline.value) return;
+  if (taskStore.tasks.length === 0) {
+    await loadCachedWorkspace();
+  }
+  activeView.value = "today";
+  continueOfflineAfterExpiry.value = true;
+}
+
+function showReauthentication(): void {
+  continueOfflineAfterExpiry.value = false;
+}
+
+async function startDesktopServices(
+  workspaceKey: string,
+  activationId: number,
+): Promise<void> {
   await reloadTasksAndPruneReminders();
+  if (!isCurrentWorkspaceActivation(workspaceKey, activationId)) return;
   await syncStore.start(reloadTasksAndPruneReminders);
+  if (!isCurrentWorkspaceActivation(workspaceKey, activationId)) return;
   startReminderLoop();
 }
 
-async function handleAuthenticated(): Promise<void> {
-  await startDesktopServices();
+async function activateAuthenticatedWorkspace(workspaceKey: string): Promise<void> {
+  if (!auth.isAuthenticated || auth.workspaceKey !== workspaceKey) return;
+  desktopServicesWorkspaceKey = workspaceKey;
+  const activationId = ++desktopServicesActivationId;
+  const preserveWorkspace = shouldPreserveWorkspaceState(
+    preservedWorkspaceKey,
+    workspaceKey,
+  );
+  preservedWorkspaceKey = null;
+  if (!preserveWorkspace) {
+    resetWorkspaceUiState();
+  }
+  try {
+    await settingsStore.load();
+    if (!isCurrentWorkspaceActivation(workspaceKey, activationId)) return;
+    await startDesktopServices(workspaceKey, activationId);
+  } catch (error) {
+    if (isCurrentWorkspaceActivation(workspaceKey, activationId)) {
+      desktopServicesWorkspaceKey = null;
+    }
+    console.error("[TaskBridge] desktop services failed to start", error);
+  }
+}
+
+function isCurrentWorkspaceActivation(workspaceKey: string, activationId: number): boolean {
+  return (
+    auth.isAuthenticated &&
+    auth.workspaceKey === workspaceKey &&
+    desktopServicesWorkspaceKey === workspaceKey &&
+    desktopServicesActivationId === activationId
+  );
+}
+
+function resetWorkspaceUiState(): void {
+  taskStore.resetWorkspace();
+  syncStore.resetWorkspace();
+  editorDirty.value = false;
+  settingsConnectionDirty.value = false;
+  activeView.value = "today";
+  openTaskRequest.value = null;
+  settingsSectionRequest.value = null;
+  notifiedReminderIds.clear();
+  saveNotifiedReminderIds();
+  workspaceInstanceKey.value += 1;
 }
 
 async function logout(): Promise<void> {
+  if (!(await confirmDiscardCurrentEditor())) return;
   if (
     await hasUnsyncedWork() &&
     !(await requestConfirmation({
@@ -108,7 +240,12 @@ async function logout(): Promise<void> {
   stopReminderLoop();
   notifiedReminderIds.clear();
   saveNotifiedReminderIds();
+  editorDirty.value = false;
+  settingsConnectionDirty.value = false;
   await auth.logout();
+  continueOfflineAfterExpiry.value = false;
+  preservedWorkspaceKey = null;
+  resetWorkspaceUiState();
 }
 
 async function hasUnsyncedWork(): Promise<boolean> {
@@ -123,16 +260,78 @@ async function hasUnsyncedWork(): Promise<boolean> {
 }
 
 async function manualSync(): Promise<void> {
+  if (!auth.isAuthenticated) {
+    showReauthentication();
+    return;
+  }
   await syncStore.syncNow(true);
   await reloadTasksAndPruneReminders();
 }
 
-function openSettingsSection(sectionId: string): void {
-  activeView.value = "settings";
+async function openSettingsSection(sectionId: string): Promise<void> {
+  if (!(await requestViewChange("settings"))) return;
   settingsSectionRequest.value = {
     sectionId,
     nonce: Date.now(),
   };
+}
+
+async function requestViewChange(nextView: AppView): Promise<boolean> {
+  if (nextView === activeView.value) return true;
+  if (!(await confirmDiscardCurrentEditor())) return false;
+  editorDirty.value = false;
+  settingsConnectionDirty.value = false;
+  activeView.value = nextView;
+  return true;
+}
+
+async function confirmDiscardCurrentEditor(): Promise<boolean> {
+  if (editorDirty.value) {
+    return requestConfirmation({
+      message: settingsStore.t("task.discardChangesConfirm"),
+      danger: true,
+    });
+  }
+  if (settingsConnectionDirty.value) {
+    return requestConfirmation({
+      message: settingsStore.t("settings.discardConnectionChangesConfirm"),
+      danger: true,
+    });
+  }
+  return true;
+}
+
+async function openQuickAdd(): Promise<void> {
+  if (!(await confirmDiscardCurrentEditor())) return;
+  editorDirty.value = false;
+  settingsConnectionDirty.value = false;
+  activeView.value = "tasks";
+  quickAddSignal.value += 1;
+}
+
+async function openTaskDetail(localId: string): Promise<void> {
+  if (!(await confirmDiscardCurrentEditor())) return;
+  editorDirty.value = false;
+  settingsConnectionDirty.value = false;
+  activeView.value = "tasks";
+  openTaskRequest.value = {
+    localId,
+    nonce: Date.now(),
+  };
+}
+
+function updateEditorDirty(dirty: boolean): void {
+  editorDirty.value = dirty;
+}
+
+function updateSettingsConnectionDirty(dirty: boolean): void {
+  settingsConnectionDirty.value = dirty;
+}
+
+function handleBeforeUnload(event: BeforeUnloadEvent): void {
+  if (!editorDirty.value && !settingsConnectionDirty.value) return;
+  event.preventDefault();
+  event.returnValue = "";
 }
 
 async function reloadTasksAndPruneReminders(): Promise<void> {
@@ -167,7 +366,7 @@ async function scanDueReminders(): Promise<void> {
     if (notifiedReminderIds.has(key)) continue;
     notifiedReminderIds.add(key);
     saveNotifiedReminderIds();
-    await bridge().app.notify(task.title, task.content || settingsStore.t("app.reminder"));
+    await bridge().app.notify(task.title, task.content || settingsStore.t("app.reminder"), task.localId);
   }
   pruneNotifiedReminders();
 }
@@ -224,66 +423,57 @@ function saveNotifiedReminderIds(): void {
 <template>
   <FloatingView v-if="isFloating" />
 
-  <LoginView v-else-if="!auth.isAuthenticated" @authenticated="handleAuthenticated" />
+  <LoginView
+    v-if="!isFloating && !auth.isAuthenticated && !continueOfflineAfterExpiry"
+    :can-continue-offline="canContinueOffline"
+    :cached-task-count="taskStore.tasks.length"
+    @continue-offline="continueWithCachedWorkspace"
+  />
 
-  <main v-else class="app-shell">
-    <aside class="sidebar" :aria-label="settingsStore.t('nav.label')">
-      <div class="brand">
-        <span class="brand-mark">TB</span>
-        <span>TaskBridge</span>
-      </div>
-
-      <nav class="nav-list" :aria-label="settingsStore.t('nav.label')">
-        <button
-          type="button"
-          :class="{ active: activeView === 'today' }"
-          :aria-current="activeView === 'today' ? 'page' : undefined"
-          @click="activeView = 'today'"
-        >
-          <span>{{ settingsStore.t("nav.today") }}</span>
-        </button>
-        <button
-          type="button"
-          :class="{ active: activeView === 'tasks' }"
-          :aria-current="activeView === 'tasks' ? 'page' : undefined"
-          @click="activeView = 'tasks'"
-        >
-          <span>{{ settingsStore.t("nav.all") }}</span>
-        </button>
-        <button
-          type="button"
-          :class="{ active: activeView === 'settings' }"
-          :aria-current="activeView === 'settings' ? 'page' : undefined"
-          @click="activeView = 'settings'"
-        >
-          <span>{{ settingsStore.t("nav.settings") }}</span>
-        </button>
-      </nav>
-
-      <SyncStatus :status="syncStore.status" :message="syncStore.message" />
-      <button
-        type="button"
-        class="sidebar-sync-button"
-        :disabled="syncStore.status === 'syncing'"
-        @click="manualSync"
-      >
-        {{ settingsStore.t("sync.manual") }}
-      </button>
-
-      <div class="sidebar-footer">
-        <span>{{ auth.user?.username }}</span>
-        <button type="button" class="ghost-button" @click="logout">{{ settingsStore.t("nav.logout") }}</button>
-      </div>
-    </aside>
-
-    <TaskView
-      v-if="activeView === 'tasks'"
-      :quick-add-signal="quickAddSignal"
-      :open-task-request="openTaskRequest"
-      @open-settings="openSettingsSection('sync-recovery')"
+  <main
+    v-if="!isFloating && keepWorkspaceMounted"
+    v-show="auth.isAuthenticated || continueOfflineAfterExpiry"
+    :key="workspaceInstanceKey"
+    class="app-shell focus-workspace"
+  >
+    <AppSidebar
+      :active-view="activeView"
+      :username="auth.user?.username ?? settingsStore.t('auth.localWorkspaceTitle')"
+      :status="displayedWorkspaceStatus"
+      :syncing="auth.isAuthenticated && syncStore.status === 'syncing'"
+      @navigate="requestViewChange"
+      @sync-now="manualSync"
+      @open-sync-details="openSettingsSection('sync-recovery')"
+      @logout="logout"
     />
-    <TodayView v-else-if="activeView === 'today'" @open-settings="openSettingsSection('sync-recovery')" />
-    <SettingsView v-else :section-request="settingsSectionRequest" />
+
+    <section class="workspace-main">
+      <ReauthenticationBanner
+        v-if="continueOfflineAfterExpiry"
+        @reauthenticate="showReauthentication"
+      />
+      <WorkspaceStatusBanner
+        v-if="auth.isAuthenticated && workspaceStatus.banner !== 'none'"
+        :status="workspaceStatus"
+        @retry="manualSync"
+        @open-details="openSettingsSection('sync-recovery')"
+      />
+      <TaskView
+        v-if="activeView === 'tasks'"
+        :quick-add-signal="quickAddSignal"
+        :open-task-request="openTaskRequest"
+        @editor-dirty-change="updateEditorDirty"
+      />
+      <TodayView
+        v-else-if="activeView === 'today'"
+        @editor-dirty-change="updateEditorDirty"
+      />
+      <SettingsView
+        v-else
+        :section-request="settingsSectionRequest"
+        @connection-dirty-change="updateSettingsConnectionDirty"
+      />
+    </section>
   </main>
 
   <ConfirmDialog

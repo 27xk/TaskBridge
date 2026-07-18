@@ -5,12 +5,13 @@ import { workspacePaths } from "./script-helpers.mjs";
 
 const { desktopRoot, repoRoot } = workspacePaths(import.meta.url);
 
-const [rootReadme, desktopReadme, deployReadme, troubleshootingReadme, androidReadme] = await Promise.all([
+const [rootReadme, desktopReadme, deployReadme, troubleshootingReadme, androidReadme, developmentReadme] = await Promise.all([
   readFile(resolve(repoRoot, "README.md"), "utf8"),
   readFile(resolve(desktopRoot, "README.md"), "utf8"),
   readFile(resolve(repoRoot, "deploy/README.md"), "utf8"),
   readFile(resolve(repoRoot, "docs/troubleshooting.md"), "utf8"),
   readFile(resolve(repoRoot, "android/README.md"), "utf8"),
+  readFile(resolve(repoRoot, "docs/development.md"), "utf8"),
 ]);
 
 assert.match(
@@ -47,9 +48,9 @@ for (const source of [rootReadme, deployReadme, troubleshootingReadme, androidRe
   assert.match(source, /服务器地址/, "user-facing docs must mention server address");
 }
 assert.match(
-  rootReadme,
-  /http:\/\/192\.168\.1\.10:8000\s*```/,
-  "README normal setup example must show a single server address",
+  developmentReadme,
+  /http:\/\/192\.168\.1\.10:8080\s*```/,
+  "development docs normal setup example must show a single server address",
 );
 assert.doesNotMatch(
   rootReadme,
@@ -63,14 +64,14 @@ assert.doesNotMatch(
   "README.md must not tell users installed desktop endpoints are locked after installation",
 );
 assert.match(
-  rootReadme,
+  developmentReadme,
   /轻量 JSON 配置/,
-  "README.md technology stack must mention the current desktop settings storage",
+  "development docs technology stack must mention the current desktop settings storage",
 );
 assert.match(
-  rootReadme,
+  developmentReadme,
   /桌面端主题/,
-  "README.md must document the desktop theme feature",
+  "development docs must document the desktop theme feature",
 );
 for (const script of [
   "check:auth-session-config",
@@ -87,7 +88,7 @@ for (const script of [
   "check:ci-workflows",
   "check:contract-drift",
 ]) {
-  assert.match(rootReadme, new RegExp(script), `README.md must list ${script} in desktop verification commands`);
+  assert.match(developmentReadme, new RegExp(script), `development docs must list ${script} in desktop verification commands`);
 }
 assert.match(
   deployReadme,

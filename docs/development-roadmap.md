@@ -110,9 +110,9 @@
 已完成：
 
 - CI 工作流：后端测试、Docker 构建、桌面端构建、Android 构建。
-- Release 工作流：Android APK、Windows 安装包和后端 Docker 镜像。
+- Release 工作流：自托管部署包、已签名 Android APK、已签名 Windows 安装包和后端 Docker 镜像。
 - GHCR 后端镜像发布。
-- Android release 支持正式签名校验；缺少签名配置时发布明确标注的 unsigned APK。
+- Android release 支持正式签名校验；缺少签名配置时省略公开 APK，本地仍可生成 unsigned 包做开发验证。
 - 发布说明文档。
 - 安全说明和常见问题文档。
 - 后端响应增加 `X-Request-ID`、基础安全头和数据库 readiness 探针。

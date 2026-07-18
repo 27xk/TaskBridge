@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from app.main import create_app
+from tools.openapi_contract import build_contract_schema, normalize_contract_schema
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OPENAPI_CONTRACT_PATH = REPO_ROOT / "shared" / "openapi.taskbridge.v1.json"
@@ -14,9 +15,39 @@ def test_openapi_contract_snapshot_matches_runtime_schema():
     )
 
     committed_schema = json.loads(OPENAPI_CONTRACT_PATH.read_text(encoding="utf-8"))
-    runtime_schema = create_app().openapi()
+    runtime_schema = build_contract_schema()
 
     assert committed_schema == runtime_schema
+
+
+def test_openapi_contract_uses_repository_version():
+    expected_version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+
+    assert build_contract_schema()["info"]["version"] == expected_version
+
+
+def test_openapi_contract_ignores_framework_validation_detail_drift():
+    runtime_schema = {
+        "info": {"version": "runtime-override"},
+        "components": {
+            "schemas": {
+                "ValidationError": {
+                    "properties": {
+                        "loc": {"type": "array"},
+                        "ctx": {"type": "object"},
+                        "input": {"title": "Input"},
+                    },
+                },
+            },
+        },
+    }
+
+    normalized = normalize_contract_schema(runtime_schema)
+
+    assert normalized["components"]["schemas"]["ValidationError"]["properties"] == {
+        "loc": {"type": "array"},
+    }
+    assert runtime_schema["components"]["schemas"]["ValidationError"]["properties"]["ctx"]
 
 
 def test_openapi_contract_documents_cross_client_surface():

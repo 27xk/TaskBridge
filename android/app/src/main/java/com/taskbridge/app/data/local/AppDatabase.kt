@@ -9,9 +9,11 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import java.util.concurrent.TimeUnit
 
+const val APP_DATABASE_VERSION = 7
+
 @Database(
     entities = [TaskEntity::class, SyncQueueEntity::class],
-    version = 6,
+    version = APP_DATABASE_VERSION,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -32,7 +34,14 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                     .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                     .setAutoCloseTimeout(5, TimeUnit.MINUTES)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7,
+                    )
                     .build()
                     .also { instance = it }
             }
@@ -108,6 +117,30 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE tasks ADD COLUMN conflictServerJson TEXT")
                 db.execSQL("ALTER TABLE tasks ADD COLUMN conflictLocalJson TEXT")
+            }
+        }
+
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN workspaceId TEXT NOT NULL DEFAULT 'legacy'")
+                db.execSQL("ALTER TABLE sync_queue ADD COLUMN workspaceId TEXT NOT NULL DEFAULT 'legacy'")
+                db.execSQL("UPDATE tasks SET workspaceId = 'legacy:' || ownerUserId")
+                db.execSQL("UPDATE sync_queue SET workspaceId = 'legacy:' || ownerUserId")
+                db.execSQL("DROP INDEX IF EXISTS index_tasks_ownerUserId_serverId")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_tasks_workspaceId_serverId " +
+                        "ON tasks(workspaceId, serverId)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_tasks_workspaceId_localId " +
+                        "ON tasks(workspaceId, localId)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tasks_workspaceId ON tasks(workspaceId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_queue_workspaceId ON sync_queue(workspaceId)")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_sync_queue_workspaceId_localId " +
+                        "ON sync_queue(workspaceId, localId)",
+                )
             }
         }
     }

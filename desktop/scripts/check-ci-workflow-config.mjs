@@ -5,12 +5,13 @@ import { workspacePaths } from "./script-helpers.mjs";
 
 const { desktopRoot, repoRoot } = workspacePaths(import.meta.url);
 
-const [packageSource, ciSource, releaseSource, nodeVersionSource, rootPackageSource] = await Promise.all([
+const [packageSource, ciSource, releaseSource, nodeVersionSource, rootPackageSource, localCheckSource] = await Promise.all([
   readFile(resolve(desktopRoot, "package.json"), "utf8"),
   readFile(resolve(repoRoot, ".github/workflows/ci.yml"), "utf8"),
   readFile(resolve(repoRoot, ".github/workflows/release.yml"), "utf8"),
   readFile(resolve(repoRoot, ".node-version"), "utf8"),
   readFile(resolve(repoRoot, "package.json"), "utf8"),
+  readFile(resolve(repoRoot, "scripts/check-local.ps1"), "utf8"),
 ]);
 
 const packageJson = JSON.parse(packageSource);
@@ -30,6 +31,7 @@ const requiredDesktopChecks = [
   "check:sync-recovery-center",
   "check:desktop-backup",
   "check:desktop-theme",
+  "check:desktop-efficiency",
   "check:desktop-docs",
   "check:local-bootstrap",
   "check:release-readiness",
@@ -52,6 +54,8 @@ const requiredDesktopChecks = [
   "check:desktop-auto-update",
   "check:android-data-extraction",
   "check:security-governance",
+  "check:ux-priority-polish",
+  "check:user-experience",
 ];
 
 for (const script of requiredDesktopChecks) {
@@ -60,6 +64,10 @@ for (const script of requiredDesktopChecks) {
     "string",
     `desktop/package.json must define ${script}`,
   );
+}
+
+for (const script of ["check:desktop-efficiency", "check:ux-priority-polish", "check:user-experience"]) {
+  assert.ok(localCheckSource.includes(`"${script}"`), `local verification must run ${script}`);
 }
 
 for (const [workflowName, source] of [
@@ -99,6 +107,16 @@ assert.match(
   releaseSource,
   /TASKBRIDGE_SKIP_NATIVE_REBUILD:\s*"1"/,
   "release desktop npm ci must skip Electron native rebuild",
+);
+assert.match(
+  ciSource,
+  /- name: Rebuild Electron native dependencies[\s\S]{0,160}run: npm run rebuild:native/,
+  "CI must rebuild native dependencies for Electron after npm ci",
+);
+assert.match(
+  releaseSource,
+  /- name: Rebuild Electron native dependencies[\s\S]{0,160}run: npm run rebuild:native/,
+  "release must rebuild native dependencies for Electron after npm ci",
 );
 assert.match(releaseSource, /Release version must match VERSION/, "release workflow must reject tags that do not match VERSION");
 assert.match(ciSource, /^\s+android:\s*$/m, "CI workflow must include an Android job");
@@ -151,9 +169,15 @@ console.log("CI workflow desktop check coverage passed");
 
 function assertDesktopCheckOrder(workflowName, source, terminalCommand) {
   const installIndex = source.indexOf("npm ci");
+  const nativeRebuildIndex = source.indexOf("npm run rebuild:native");
+  const unitTestIndex = source.indexOf("npm run test:unit");
   const terminalIndex = source.indexOf(terminalCommand);
   const webUnitTestIndex = source.indexOf("npm --prefix .. run test:web");
   assert.ok(installIndex >= 0, `${workflowName} workflow desktop job must install dependencies with npm ci`);
+  assert.ok(
+    nativeRebuildIndex > installIndex && nativeRebuildIndex < unitTestIndex,
+    `${workflowName} workflow must rebuild Electron native dependencies before desktop unit tests`,
+  );
   assert.ok(terminalIndex > installIndex, `${workflowName} workflow must run ${terminalCommand} after npm ci`);
   assert.ok(
     webUnitTestIndex > installIndex && webUnitTestIndex < terminalIndex,

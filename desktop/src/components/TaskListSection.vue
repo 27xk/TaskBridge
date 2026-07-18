@@ -7,12 +7,14 @@ withDefaults(defineProps<{
   tone?: "default" | "overdue" | "completed";
   trash?: boolean;
   selectable?: boolean;
+  selectionMode?: boolean;
   selectedTaskIds: Set<string>;
 }>(), {
   title: "",
   tone: "default",
   trash: false,
   selectable: false,
+  selectionMode: false,
   selectedTaskIds: () => new Set<string>(),
 });
 
@@ -48,7 +50,7 @@ defineEmits<{
       :key="task.localId"
       :task="task"
       :trash="trash"
-      :selectable="selectable"
+      :selectable="selectionMode && selectable"
       :selected="selectedTaskIds.has(task.localId)"
       @edit="$emit('edit', $event)"
       @selection-change="(selectedTask, selected) => $emit('selection-change', selectedTask, selected)"

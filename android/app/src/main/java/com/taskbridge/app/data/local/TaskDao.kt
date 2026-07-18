@@ -32,7 +32,7 @@ interface TaskDao {
     @Query(
         """
         SELECT * FROM tasks
-        WHERE ownerUserId = :ownerUserId
+        WHERE workspaceId = :workspaceId
           AND isDeleted = 0
         ORDER BY
             CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
@@ -53,23 +53,23 @@ interface TaskDao {
         LIMIT :limit
         """,
     )
-    fun observeActiveTasks(ownerUserId: String, limit: Int, nowTime: String): Flow<List<TaskEntity>>
+    fun observeActiveTasks(workspaceId: String, limit: Int, nowTime: String): Flow<List<TaskEntity>>
 
     @Query(
         """
         SELECT * FROM tasks
-        WHERE ownerUserId = :ownerUserId
+        WHERE workspaceId = :workspaceId
           AND isDeleted = 1
         ORDER BY updatedAt DESC
         LIMIT :limit
         """,
     )
-    fun observeDeletedTasks(ownerUserId: String, limit: Int): Flow<List<TaskEntity>>
+    fun observeDeletedTasks(workspaceId: String, limit: Int): Flow<List<TaskEntity>>
 
     @Query(
         """
         SELECT * FROM tasks
-        WHERE ownerUserId = :ownerUserId
+        WHERE workspaceId = :workspaceId
           AND isDeleted = 0
           AND (
               (dueTime IS NOT NULL AND datetime(dueTime) >= datetime(:startTime) AND datetime(dueTime) < datetime(:endTime))
@@ -98,7 +98,7 @@ interface TaskDao {
         """,
     )
     fun observeTodayTasks(
-        ownerUserId: String,
+        workspaceId: String,
         today: String,
         startTime: String,
         endTime: String,
@@ -109,7 +109,7 @@ interface TaskDao {
     @Query(
         """
         SELECT * FROM tasks
-        WHERE ownerUserId = :ownerUserId
+        WHERE workspaceId = :workspaceId
           AND isDeleted = 0
           AND (
               title LIKE '%' || :keyword || '%'
@@ -121,26 +121,32 @@ interface TaskDao {
         LIMIT :limit
         """,
     )
-    fun observeSearchTasks(ownerUserId: String, keyword: String, limit: Int): Flow<List<TaskEntity>>
+    fun observeSearchTasks(workspaceId: String, keyword: String, limit: Int): Flow<List<TaskEntity>>
 
-    @Query("SELECT * FROM tasks WHERE ownerUserId = :ownerUserId AND localId = :localId LIMIT 1")
-    suspend fun getByLocalId(ownerUserId: String, localId: String): TaskEntity?
+    @Query("SELECT * FROM tasks WHERE workspaceId = :workspaceId AND localId = :localId LIMIT 1")
+    suspend fun getByLocalId(workspaceId: String, localId: String): TaskEntity?
 
     @Query(
         """
         SELECT * FROM tasks
-        WHERE ownerUserId = :ownerUserId
+        WHERE workspaceId = :workspaceId
           AND isDeleted = 0
         ORDER BY updatedAt DESC
         LIMIT :limit
         """,
     )
-    suspend fun getBackupTasks(ownerUserId: String, limit: Int): List<TaskEntity>
+    suspend fun getBackupTasks(workspaceId: String, limit: Int): List<TaskEntity>
+
+    @Query(
+        "SELECT * FROM tasks WHERE workspaceId = :workspaceId " +
+            "ORDER BY updatedAt DESC LIMIT :limit",
+    )
+    suspend fun getTasksForReminderRebuild(workspaceId: String, limit: Int): List<TaskEntity>
 
     @Query(
         """
         SELECT localId, title, status, priority, dueTime, remindTime, plannedDate, completedAt, sortOrder, updatedAt FROM tasks
-        WHERE ownerUserId = :ownerUserId
+        WHERE workspaceId = :workspaceId
           AND isDeleted = 0
           AND (
               (dueTime IS NOT NULL AND datetime(dueTime) >= datetime(:startTime) AND datetime(dueTime) < datetime(:endTime))
@@ -169,7 +175,7 @@ interface TaskDao {
         """,
     )
     suspend fun getTodayWidgetTasks(
-        ownerUserId: String,
+        workspaceId: String,
         today: String,
         startTime: String,
         endTime: String,
@@ -180,7 +186,7 @@ interface TaskDao {
     @Query(
         """
         SELECT localId, title, status, priority, dueTime, remindTime, plannedDate, completedAt, sortOrder, updatedAt FROM tasks
-        WHERE ownerUserId = :ownerUserId
+        WHERE workspaceId = :workspaceId
           AND isDeleted = 0
         ORDER BY
             CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
@@ -201,33 +207,33 @@ interface TaskDao {
         LIMIT :limit
         """,
     )
-    suspend fun getAllWidgetTasks(ownerUserId: String, limit: Int, nowTime: String): List<TodayWidgetTaskProjection>
+    suspend fun getAllWidgetTasks(workspaceId: String, limit: Int, nowTime: String): List<TodayWidgetTaskProjection>
 
-    @Query("SELECT * FROM tasks WHERE ownerUserId = :ownerUserId AND serverId IN (:serverIds)")
-    suspend fun getByServerIds(ownerUserId: String, serverIds: List<Int>): List<TaskEntity>
+    @Query("SELECT * FROM tasks WHERE workspaceId = :workspaceId AND serverId IN (:serverIds)")
+    suspend fun getByServerIds(workspaceId: String, serverIds: List<Int>): List<TaskEntity>
 
-    @Query("SELECT * FROM tasks WHERE ownerUserId = :ownerUserId AND syncStatus != 'synced'")
-    suspend fun getPendingTasks(ownerUserId: String): List<TaskEntity>
+    @Query("SELECT * FROM tasks WHERE workspaceId = :workspaceId AND syncStatus != 'synced'")
+    suspend fun getPendingTasks(workspaceId: String): List<TaskEntity>
 
     @Query(
         """
         SELECT COUNT(*) FROM tasks
-        WHERE ownerUserId = :ownerUserId
+        WHERE workspaceId = :workspaceId
           AND isDeleted = 0
           AND syncStatus = 'conflict'
         """,
     )
-    suspend fun countConflictTasks(ownerUserId: String): Int
+    suspend fun countConflictTasks(workspaceId: String): Int
 
     @Query(
         """
         SELECT COUNT(*) FROM tasks
-        WHERE ownerUserId = :ownerUserId
+        WHERE workspaceId = :workspaceId
           AND isDeleted = 0
           AND syncStatus = 'sync_failed'
         """,
     )
-    suspend fun countFailedSyncTasks(ownerUserId: String): Int
+    suspend fun countFailedSyncTasks(workspaceId: String): Int
 
     @Upsert
     suspend fun upsert(task: TaskEntity)
@@ -245,11 +251,11 @@ interface TaskDao {
             conflictLocalJson = NULL,
             updatedAt = :updatedAt,
             lastSyncAt = :syncedAt
-        WHERE ownerUserId = :ownerUserId AND localId = :localId
+        WHERE workspaceId = :workspaceId AND localId = :localId
         """,
     )
     suspend fun markSynced(
-        ownerUserId: String,
+        workspaceId: String,
         localId: String,
         serverId: Int?,
         version: Int,
@@ -257,20 +263,26 @@ interface TaskDao {
         syncedAt: String,
     )
 
-    @Query("UPDATE tasks SET syncStatus = :syncStatus WHERE ownerUserId = :ownerUserId AND localId = :localId")
-    suspend fun updateSyncStatus(ownerUserId: String, localId: String, syncStatus: String)
+    @Query("UPDATE tasks SET syncStatus = :syncStatus WHERE workspaceId = :workspaceId AND localId = :localId")
+    suspend fun updateSyncStatus(workspaceId: String, localId: String, syncStatus: String)
 
-    @Query("DELETE FROM tasks WHERE ownerUserId = :ownerUserId AND localId = :localId")
-    suspend fun deleteByLocalId(ownerUserId: String, localId: String)
+    @Query("DELETE FROM tasks WHERE workspaceId = :workspaceId AND localId = :localId")
+    suspend fun deleteByLocalId(workspaceId: String, localId: String)
 
-    @Query("DELETE FROM tasks WHERE ownerUserId = :ownerUserId")
-    suspend fun deleteAllForOwner(ownerUserId: String)
+    @Query("DELETE FROM tasks WHERE workspaceId = :workspaceId")
+    suspend fun deleteAllForWorkspace(workspaceId: String)
+
+    @Query(
+        "UPDATE OR IGNORE tasks SET workspaceId = :workspaceId, ownerUserId = :ownerUserId " +
+            "WHERE workspaceId = :legacyWorkspaceId",
+    )
+    suspend fun claimLegacyWorkspace(legacyWorkspaceId: String, workspaceId: String, ownerUserId: String): Int
 }
 
 @Dao
 interface SyncQueueDao {
-    @Query("SELECT * FROM sync_queue WHERE ownerUserId = :ownerUserId AND attemptCount < 8 ORDER BY attemptCount ASC, id ASC LIMIT :limit")
-    suspend fun pendingChanges(ownerUserId: String, limit: Int): List<SyncQueueEntity>
+    @Query("SELECT * FROM sync_queue WHERE workspaceId = :workspaceId AND attemptCount < 8 ORDER BY attemptCount ASC, id ASC LIMIT :limit")
+    suspend fun pendingChanges(workspaceId: String, limit: Int): List<SyncQueueEntity>
 
     @Query(
         """
@@ -279,32 +291,40 @@ interface SyncQueueDao {
             COALESCE(SUM(CASE WHEN attemptCount < 8 THEN 1 ELSE 0 END), 0) AS pending,
             COALESCE(SUM(CASE WHEN attemptCount >= 8 THEN 1 ELSE 0 END), 0) AS exhausted
         FROM sync_queue
-        WHERE ownerUserId = :ownerUserId
+        WHERE workspaceId = :workspaceId
         """,
     )
-    suspend fun queueCounts(ownerUserId: String): SyncQueueCounts
+    suspend fun queueCounts(workspaceId: String): SyncQueueCounts
 
-    @Query("SELECT * FROM sync_queue WHERE ownerUserId = :ownerUserId AND attemptCount >= 8 ORDER BY attemptCount DESC, id ASC LIMIT :limit")
-    suspend fun exhaustedChanges(ownerUserId: String, limit: Int): List<SyncQueueEntity>
+    @Query("SELECT * FROM sync_queue WHERE workspaceId = :workspaceId AND attemptCount >= 8 ORDER BY attemptCount DESC, id ASC LIMIT :limit")
+    suspend fun exhaustedChanges(workspaceId: String, limit: Int): List<SyncQueueEntity>
 
-    @Query("UPDATE sync_queue SET attemptCount = 0 WHERE ownerUserId = :ownerUserId AND attemptCount >= 8")
-    suspend fun resetExhaustedAttempts(ownerUserId: String): Int
+    @Query("UPDATE sync_queue SET attemptCount = 0 WHERE workspaceId = :workspaceId AND attemptCount >= 8")
+    suspend fun resetExhaustedAttempts(workspaceId: String): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun enqueue(change: SyncQueueEntity): Long
 
-    @Query("DELETE FROM sync_queue WHERE ownerUserId = :ownerUserId AND id = :id")
-    suspend fun deleteById(ownerUserId: String, id: Long)
+    @Query("DELETE FROM sync_queue WHERE workspaceId = :workspaceId AND id = :id")
+    suspend fun deleteById(workspaceId: String, id: Long)
 
-    @Query("DELETE FROM sync_queue WHERE ownerUserId = :ownerUserId AND localId = :localId")
-    suspend fun deleteByLocalId(ownerUserId: String, localId: String)
+    @Query("DELETE FROM sync_queue WHERE workspaceId = :workspaceId AND localId = :localId")
+    suspend fun deleteByLocalId(workspaceId: String, localId: String)
 
-    @Query("DELETE FROM sync_queue WHERE ownerUserId = :ownerUserId")
-    suspend fun deleteAllForOwner(ownerUserId: String)
+    @Query("DELETE FROM sync_queue WHERE workspaceId = :workspaceId")
+    suspend fun deleteAllForWorkspace(workspaceId: String)
 
     @Delete
     suspend fun delete(change: SyncQueueEntity)
 
-    @Query("UPDATE sync_queue SET attemptCount = attemptCount + 1 WHERE ownerUserId = :ownerUserId AND id = :id")
-    suspend fun incrementAttempt(ownerUserId: String, id: Long)
+    @Query("UPDATE sync_queue SET attemptCount = attemptCount + 1 WHERE workspaceId = :workspaceId AND id = :id")
+    suspend fun incrementAttempt(workspaceId: String, id: Long)
+
+    @Query(
+        "UPDATE sync_queue SET workspaceId = :workspaceId, ownerUserId = :ownerUserId " +
+            "WHERE workspaceId = :legacyWorkspaceId " +
+            "AND EXISTS (SELECT 1 FROM tasks WHERE tasks.workspaceId = :workspaceId " +
+            "AND tasks.localId = sync_queue.localId)",
+    )
+    suspend fun claimLegacyWorkspace(legacyWorkspaceId: String, workspaceId: String, ownerUserId: String): Int
 }

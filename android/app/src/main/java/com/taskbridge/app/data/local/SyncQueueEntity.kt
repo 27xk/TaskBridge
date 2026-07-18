@@ -7,6 +7,8 @@ import androidx.room.PrimaryKey
 @Entity(
     tableName = "sync_queue",
     indices = [
+        Index(value = ["workspaceId"]),
+        Index(value = ["workspaceId", "localId"]),
         Index(value = ["ownerUserId"]),
         Index(value = ["ownerUserId", "localId"]),
         Index(value = ["localId"]),
@@ -17,6 +19,7 @@ import androidx.room.PrimaryKey
 )
 data class SyncQueueEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val workspaceId: String,
     val ownerUserId: String,
     val localId: String,
     val serverId: Int?,

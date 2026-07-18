@@ -1,11 +1,12 @@
 {
   "name": "taskbridge",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
   "description": "TaskBridge workspace toolchain constraints",
   "packageManager": "npm@10.9.0",
   "scripts": {
+    "check:user-experience": "npm --prefix desktop run check:user-experience",
     "test:web": "node --test \"web/tests/**/*.test.mjs\""
   },
   "engines": {

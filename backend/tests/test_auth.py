@@ -54,6 +54,86 @@ def test_register_login_refresh_and_me(client: TestClient) -> None:
     assert me_response.json()["data"]["email"] == "alice@example.com"
 
 
+def test_current_user_can_change_password_and_revoke_other_sessions(client: TestClient) -> None:
+    register_response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "password-change",
+            "email": "password-change@example.com",
+            "password": "password123",
+            "device_id": "password-change-desktop",
+        },
+    )
+    desktop_pair = register_response.json()["data"]
+    desktop_headers = {"Authorization": f"Bearer {desktop_pair['access_token']}"}
+    phone_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "username_or_email": "password-change",
+            "password": "password123",
+            "device_id": "password-change-phone",
+        },
+    )
+    phone_pair = phone_response.json()["data"]
+
+    change_response = client.put(
+        "/api/v1/auth/password",
+        headers=desktop_headers,
+        json={"current_password": "password123", "new_password": "new-password-456"},
+    )
+
+    assert change_response.status_code == 200
+    assert change_response.json()["data"] == {"revoked": 1}
+    assert client.get("/api/v1/auth/me", headers=desktop_headers).status_code == 200
+    assert client.post(
+        "/api/v1/auth/refresh",
+        json={
+            "refresh_token": phone_pair["refresh_token"],
+            "device_id": "password-change-phone",
+        },
+    ).status_code == 401
+    assert client.post(
+        "/api/v1/auth/login",
+        json={
+            "username_or_email": "password-change",
+            "password": "password123",
+            "device_id": "password-change-old-password",
+        },
+    ).status_code == 401
+    assert client.post(
+        "/api/v1/auth/login",
+        json={
+            "username_or_email": "password-change",
+            "password": "new-password-456",
+            "device_id": "password-change-new-password",
+        },
+    ).status_code == 200
+
+
+def test_change_password_rejects_wrong_current_password(client: TestClient) -> None:
+    register_response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "password-change-wrong",
+            "email": "password-change-wrong@example.com",
+            "password": "password123",
+            "device_id": "password-change-wrong-device",
+        },
+    )
+    headers = {
+        "Authorization": f"Bearer {register_response.json()['data']['access_token']}"
+    }
+
+    response = client.put(
+        "/api/v1/auth/password",
+        headers=headers,
+        json={"current_password": "not-the-password", "new_password": "new-password-456"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["message"] == "current password is incorrect"
+
+
 def test_duplicate_registration_returns_uniform_error(client: TestClient) -> None:
     payload = {
         "username": "duplicate",

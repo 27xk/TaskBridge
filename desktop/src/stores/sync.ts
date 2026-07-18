@@ -63,6 +63,22 @@ export const useSyncStore = defineStore("sync", () => {
     manager.value = null;
   }
 
+  function resetWorkspace(): void {
+    stop();
+    status.value = "idle";
+    message.value = "已同步";
+    diagnostics.value = {
+      pendingQueueCount: 0,
+      exhaustedQueueCount: 0,
+      failedCount: 0,
+      recoverableSyncIssueCount: 0,
+      conflictCount: 0,
+      lastSyncTime: "",
+      updatedAt: "",
+      exhaustedQueueItems: [],
+    };
+  }
+
   async function syncNow(forceRetry = false): Promise<void> {
     await manager.value?.syncNow(forceRetry);
     await refreshDiagnostics();
@@ -108,6 +124,7 @@ export const useSyncStore = defineStore("sync", () => {
     init,
     start,
     stop,
+    resetWorkspace,
     syncNow,
     retryExhaustedQueue,
     refreshDiagnostics,

@@ -10,6 +10,7 @@ import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.notification.ReminderManager
 import com.taskbridge.app.ui.components.SyncStatusMessage
 import com.taskbridge.app.sync.SyncManager
+import com.taskbridge.app.sync.SyncRunState
 import com.taskbridge.app.utils.ShanghaiTime
 import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -83,6 +84,20 @@ class TaskListViewModel(
     val uiState: StateFlow<TaskListUiState> = _uiState
 
     init {
+        viewModelScope.launch {
+            syncManager.syncState.collect { syncState ->
+                val message = when (syncState) {
+                    SyncRunState.Idle -> null
+                    SyncRunState.Syncing -> SyncStatusMessage.Syncing
+                    SyncRunState.Success -> SyncStatusMessage.SyncSucceeded
+                    SyncRunState.Offline -> SyncStatusMessage.Offline
+                    is SyncRunState.Failure -> SyncStatusMessage.SyncFailed
+                }
+                if (message != null) {
+                    _uiState.update { it.copy(syncMessage = message) }
+                }
+            }
+        }
         syncManager.enqueueNetworkSync()
         syncManager.syncNow()
         viewModelScope.launch {

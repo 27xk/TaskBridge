@@ -9,6 +9,7 @@ import {
   type UserDto,
 } from "../api/auth";
 import { bridge } from "../db/sqlite";
+import { tryCreateWorkspaceKey } from "../../shared/workspace";
 
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<UserDto | null>(null);
@@ -17,21 +18,54 @@ export const useAuthStore = defineStore("auth", () => {
   const error = ref<string | null>(null);
   const registrationEnabled = ref(false);
   const registrationStatusKnown = ref(false);
+  const sessionExpired = ref(false);
+  const sessionExpiredReason = ref<"refresh-rejected" | "server-changed" | null>(null);
+  const workspaceKey = ref<string | null>(null);
 
   const isAuthenticated = computed(() => authenticated.value);
 
   async function loadSession(): Promise<void> {
+    const settings = await bridge().app.getSettings();
+    if (!settings.baseUrl.trim() || !settings.wsUrl.trim()) {
+      authenticated.value = false;
+      user.value = null;
+      workspaceKey.value = null;
+      sessionExpired.value = false;
+      sessionExpiredReason.value = null;
+      return;
+    }
+    const cachedWorkspaceKey = tryCreateWorkspaceKey(settings.baseUrl, settings.currentUserId);
     authenticated.value = await bridge().auth.hasTokens();
     if (!authenticated.value) {
       user.value = null;
+      if (cachedWorkspaceKey) {
+        sessionExpired.value = true;
+        sessionExpiredReason.value = "refresh-rejected";
+        workspaceKey.value = cachedWorkspaceKey;
+      } else {
+        sessionExpired.value = false;
+        sessionExpiredReason.value = null;
+        workspaceKey.value = null;
+      }
       return;
     }
+    workspaceKey.value = cachedWorkspaceKey;
+    if (!workspaceKey.value) {
+      await bridge().auth.clearTokens();
+      authenticated.value = false;
+      user.value = null;
+      return;
+    }
+    sessionExpired.value = false;
+    sessionExpiredReason.value = null;
     try {
       user.value = await getMe();
     } catch {
       authenticated.value = await bridge().auth.hasTokens();
       if (!authenticated.value) {
-        user.value = null;
+        sessionExpired.value = true;
+        sessionExpiredReason.value = "refresh-rejected";
+        workspaceKey.value = cachedWorkspaceKey;
       }
     }
   }
@@ -46,8 +80,11 @@ export const useAuthStore = defineStore("auth", () => {
         password,
         device_id: deviceId,
       });
-      authenticated.value = true;
+      workspaceKey.value = await resolveWorkspaceKey(response.user.id);
       user.value = response.user;
+      authenticated.value = true;
+      sessionExpired.value = false;
+      sessionExpiredReason.value = null;
     } catch (err) {
       error.value = normalizeAuthErrorMessage(err, "登录失败");
       throw err;
@@ -70,8 +107,11 @@ export const useAuthStore = defineStore("auth", () => {
     try {
       const deviceId = await currentDeviceId();
       const response = await registerApi({ username, email, password, device_id: deviceId });
-      authenticated.value = true;
+      workspaceKey.value = await resolveWorkspaceKey(response.user.id);
       user.value = response.user;
+      authenticated.value = true;
+      sessionExpired.value = false;
+      sessionExpiredReason.value = null;
     } catch (err) {
       error.value = normalizeAuthErrorMessage(err, "注册失败");
       throw err;
@@ -85,10 +125,31 @@ export const useAuthStore = defineStore("auth", () => {
     return settings.deviceId;
   }
 
+  async function resolveWorkspaceKey(userId: number): Promise<string> {
+    const settings = await bridge().app.getSettings();
+    const key = tryCreateWorkspaceKey(settings.baseUrl, userId);
+    if (!key) {
+      await bridge().auth.clearTokens();
+      throw new Error("Authenticated workspace is unavailable");
+    }
+    return key;
+  }
+
   async function logout(): Promise<void> {
     authenticated.value = false;
     user.value = null;
+    sessionExpired.value = false;
+    sessionExpiredReason.value = null;
+    workspaceKey.value = null;
     await bridge().auth.clearTokens();
+  }
+
+  function expireSession(reason: "refresh-rejected" | "server-changed"): void {
+    authenticated.value = false;
+    loading.value = false;
+    error.value = null;
+    sessionExpired.value = true;
+    sessionExpiredReason.value = reason;
   }
 
   async function loadRegistrationStatus(): Promise<void> {
@@ -108,12 +169,16 @@ export const useAuthStore = defineStore("auth", () => {
     error,
     registrationEnabled,
     registrationStatusKnown,
+    sessionExpired,
+    sessionExpiredReason,
+    workspaceKey,
     isAuthenticated,
     loadSession,
     loadRegistrationStatus,
     login,
     register,
     logout,
+    expireSession,
   };
 });
 

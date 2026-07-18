@@ -23,6 +23,15 @@ declare global {
     floatingHeight: number;
   }
 
+  type TaskBridgeMutableSettingKey =
+    | "language"
+    | "desktopTheme"
+    | "displayTimeZone"
+    | "lastSyncTime"
+    | "autoStart"
+    | "floatingOpacity"
+    | "floatingVisibleOnStart";
+
   interface TaskRecord {
     localId: string;
     serverId: number | null;
@@ -89,6 +98,11 @@ declare global {
     exhausted: number;
   }
 
+  interface FloatingTaskSummary {
+    tasks: TaskRecord[];
+    totalOpen: number;
+  }
+
   interface BackupImportError {
     code: "file_too_large" | "invalid_json" | "unsupported_format" | "missing_tasks" | "too_many_tasks";
     message: string;
@@ -146,9 +160,10 @@ declare global {
       };
       app: {
         getSettings: () => Promise<TaskBridgeSettings>;
-        setSetting: (key: keyof TaskBridgeSettings, value: TaskBridgeSettings[keyof TaskBridgeSettings]) => Promise<TaskBridgeSettings>;
+        setSetting: <Key extends TaskBridgeMutableSettingKey>(key: Key, value: TaskBridgeSettings[Key]) => Promise<TaskBridgeSettings>;
+        setConnection: (baseUrl: string, wsUrl: string) => Promise<TaskBridgeSettings>;
         setSyncStatus: (status: string) => Promise<void>;
-        notify: (title: string, body: string) => Promise<void>;
+        notify: (title: string, body: string, localId?: string) => Promise<void>;
         toggleFloating: () => Promise<boolean>;
         showFloating: () => Promise<boolean>;
         openExternal: (url: string) => Promise<boolean>;
@@ -160,6 +175,7 @@ declare global {
       auth: {
         hasTokens: () => Promise<boolean>;
         clearTokens: () => Promise<void>;
+        onSessionExpired: (callback: (reason: "refresh-rejected" | "server-changed") => void) => () => void;
       };
       api: {
         request: <T = unknown>(payload: {
@@ -215,6 +231,7 @@ declare global {
       };
       task: {
         listToday: (limit?: number) => Promise<TaskRecord[]>;
+        getTodaySummary: (limit?: number) => Promise<FloatingTaskSummary>;
         quickAdd: (title: string) => Promise<TaskRecord | null>;
         complete: (localId: string) => Promise<TaskRecord | null>;
         openDetail: (localId: string) => Promise<void>;

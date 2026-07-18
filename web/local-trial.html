@@ -3,53 +3,90 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TaskBridge Docker 本机试用说明</title>
+    <title>TaskBridge 本机试用说明</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
-    <main class="startup-fallback local-trial-page">
+  <body data-language="zh-CN">
+    <main class="startup-fallback local-trial-page" data-language="zh-CN" data-guide-language-page>
       <p class="eyebrow">TaskBridge</p>
-      <h1>Docker 本机试用说明</h1>
-      <p>在运行后端的电脑上执行这些命令。服务启动后，回到登录页填写服务器地址并登录，客户端会自动检查连接。</p>
+      <label class="language-select local-trial-language-row">
+        <span>语言 / Language</span>
+        <select id="localTrialLanguageSelect" aria-label="Language" data-guide-language-select>
+          <option value="zh-CN">中文</option>
+          <option value="en-US">English</option>
+        </select>
+      </label>
 
-      <ol class="local-trial-steps">
-        <li>
-          <span>下载或解压源码/部署包，并进入部署目录</span>
-          <p>如果你拿到的是 Release 部署包，先解压到 <code>TaskBridge</code> 目录；如果使用源码包，也只需要进入其中的 <code>deploy</code> 目录。</p>
-          <p>macOS / Linux</p>
-          <pre class="command-snippet"><code>cd TaskBridge/deploy</code></pre>
-          <p>Windows PowerShell</p>
-          <pre class="command-snippet"><code>cd TaskBridge\deploy</code></pre>
-        </li>
-        <li>
-          <span>复制 Docker 本机试用环境</span>
-          <p>macOS / Linux</p>
-          <pre class="command-snippet"><code>cp .env.local.example .env</code></pre>
-          <p>Windows PowerShell</p>
-          <pre class="command-snippet"><code>Copy-Item .env.local.example .env</code></pre>
-        </li>
-        <li>
-          <span>启动后端</span>
-          <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml up -d</code></pre>
-        </li>
-        <li>
-          <span>确认服务可用</span>
-          <pre class="command-snippet"><code>curl http://127.0.0.1:8000/ready</code></pre>
-          <p><code>/ready</code> 会检查数据库和 Redis；如果这里不可用，客户端登录通常也不会成功。</p>
-        </li>
-        <li>
-          <span>填写地址</span>
-          <p>同一台电脑使用 <code>http://127.0.0.1:8000</code>。Android 模拟器使用 <code>http://10.0.2.2:8000</code>。手机或另一台电脑使用后端电脑的局域网 IP。</p>
-        </li>
-      </ol>
+      <h1 data-lang="zh-CN">本机试用说明</h1>
+      <p data-lang="zh-CN">这页适合想自己在一台电脑上运行完整 TaskBridge 服务的人。启动后可直接打开 Web，也可以让 Windows 或 Android 客户端连接后端。</p>
 
-      <section lang="en">
-        <h2>Docker Local Trial</h2>
-        <p>Run these commands on the backend computer, then return to sign-in and save/test the server address.</p>
+      <section class="local-trial-intro" data-lang="zh-CN">
+        <h2>第一步：先确认你是不是普通使用者</h2>
+        <p>如果只是使用别人部署好的 TaskBridge，请先找管理员或部署者要服务器地址、账号和 Web/PWA 入口，不需要在自己电脑上运行下面的命令。</p>
+        <p>只有你想先在本机试用，或者你就是负责部署的人，才继续准备后端服务。</p>
+      </section>
+
+      <section class="local-trial-intro" data-lang="zh-CN">
+        <h2>登录页应该填写哪个地址</h2>
+        <p>Release Compose 提供统一的 8080 入口；手机或另一台电脑访问时，只需把回环地址换成运行服务电脑的局域网 IP。</p>
+        <ul class="local-trial-addresses">
+          <li><strong>Web/PWA：</strong>打开 <code>http://127.0.0.1:8080</code>，登录页也填写 <code>http://127.0.0.1:8080</code>。</li>
+          <li><strong>Windows 桌面端：</strong>如果服务运行在同一台电脑，填写 <code>http://127.0.0.1:8080</code>。</li>
+          <li><strong>Android 真机：</strong>填写运行服务电脑的局域网 IP，例如 <code>http://192.168.1.23:8080</code>。</li>
+          <li><strong>Android 模拟器：</strong>如果服务运行在宿主电脑，填写 <code>http://10.0.2.2:8080</code>。</li>
+        </ul>
+      </section>
+
+      <section class="local-trial-intro" data-lang="zh-CN">
+        <h2>需要自己启动服务时</h2>
         <ol class="local-trial-steps">
           <li>
-            <span>Download or extract the source or deployment package, then enter the deployment directory</span>
-            <p>If you already have a release or deployment package, extract it to the <code>TaskBridge</code> directory first. Git is not required for the local trial.</p>
+            <span>进入部署目录</span>
+            <p>准备好 TaskBridge 源码/部署包。如果拿到的是 Release 部署包，先解压到 <code>TaskBridge</code> 目录；如果使用源码包，进入其中的 <code>deploy</code> 目录。</p>
+            <p>macOS / Linux</p>
+            <pre class="command-snippet"><code>cd TaskBridge/deploy</code></pre>
+            <p>Windows PowerShell</p>
+            <pre class="command-snippet"><code>cd TaskBridge\deploy</code></pre>
+          </li>
+          <li>
+            <span>复制本机试用环境</span>
+            <p>macOS / Linux</p>
+            <pre class="command-snippet"><code>cp .env.local.example .env</code></pre>
+            <p>Windows PowerShell</p>
+            <pre class="command-snippet"><code>Copy-Item .env.local.example .env</code></pre>
+          </li>
+          <li>
+            <span>启动完整服务</span>
+            <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml up -d</code></pre>
+          </li>
+          <li>
+            <span>确认服务可用</span>
+            <pre class="command-snippet"><code>curl http://127.0.0.1:8080/ready</code></pre>
+            <p><code>/ready</code> 返回可用后，打开 <code>http://127.0.0.1:8080</code> 使用 Web；已安装客户端也填写同一个统一入口。</p>
+          </li>
+        </ol>
+      </section>
+
+      <section lang="en">
+        <h2>Local Trial</h2>
+        <p>This page is for people who want to run the complete TaskBridge service on their own computer. Compose serves the Web client and the backend together.</p>
+
+        <h3>Step 1: check whether you are a regular user</h3>
+        <p>If you are using someone else's TaskBridge service, ask the administrator or deployer for the server address, account, and Web/PWA entry first. You do not need to run the commands below.</p>
+
+        <h3>Which address to enter</h3>
+        <ul class="local-trial-addresses">
+          <li><strong>Web/PWA:</strong> open <code>http://127.0.0.1:8080</code> and use the same address on its sign-in page.</li>
+          <li><strong>Windows desktop:</strong> use <code>http://127.0.0.1:8080</code> when the service runs on the same computer.</li>
+          <li><strong>Android phone:</strong> use the LAN IP of the computer running the service, for example <code>http://192.168.1.23:8080</code>.</li>
+          <li><strong>Android emulator:</strong> use <code>http://10.0.2.2:8080</code> when the service runs on the host computer.</li>
+        </ul>
+
+        <h3>Start the backend yourself</h3>
+        <ol class="local-trial-steps">
+          <li>
+            <span>Enter the deployment directory</span>
+            <p>Prepare the TaskBridge source or deployment package. If you already have a release package, extract it to the <code>TaskBridge</code> directory first. Git is not required for a local trial.</p>
             <p>macOS / Linux</p>
             <pre class="command-snippet"><code>cd TaskBridge/deploy</code></pre>
             <p>Windows PowerShell</p>
@@ -63,18 +100,19 @@
             <pre class="command-snippet"><code>Copy-Item .env.local.example .env</code></pre>
           </li>
           <li>
-            <span>Start the backend</span>
+            <span>Start all services</span>
             <pre class="command-snippet"><code>docker compose -f docker-compose.release.yml up -d</code></pre>
           </li>
           <li>
             <span>Check readiness</span>
-            <pre class="command-snippet"><code>curl http://127.0.0.1:8000/ready</code></pre>
+            <pre class="command-snippet"><code>curl http://127.0.0.1:8080/ready</code></pre>
+            <p>Then open <code>http://127.0.0.1:8080</code> for the Web client.</p>
           </li>
         </ol>
-        <p>Use <code>http://127.0.0.1:8000</code> on the same computer, <code>http://10.0.2.2:8000</code> from an Android emulator, or the backend computer's LAN IP from a phone or another computer.</p>
       </section>
 
       <a class="primary-button" href="./index.html">返回登录页 / Back to sign-in</a>
     </main>
+    <script src="./guide-language.js?v=0.1.8"></script>
   </body>
 </html>

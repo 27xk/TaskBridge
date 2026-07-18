@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { MoreHorizontal } from "lucide-vue-next";
+
 import { useSettingsStore } from "../stores/settings";
 import { useTaskStore } from "../stores/task";
 import { formatShanghaiDateTime } from "../../shared/quick-add-parser";
@@ -30,6 +32,10 @@ const emit = defineEmits<{
 }>();
 const settingsStore = useSettingsStore();
 const taskStore = useTaskStore();
+
+function taskMenuLabel(action: string, title: string): string {
+  return `${action}: ${title}`;
+}
 
 function toggleCompletion(task: TaskRecord): void {
   if (isCompletedStatus(task.status)) {
@@ -172,7 +178,7 @@ function isOverdue(task: TaskRecord): boolean {
     </label>
 
     <button
-      v-if="!trash"
+      v-if="!trash && !selectable"
       class="check-button"
       type="button"
       :title="isCompletedStatus(task.status) ? settingsStore.t('task.restore') : settingsStore.t('task.complete')"
@@ -183,7 +189,7 @@ function isOverdue(task: TaskRecord): boolean {
 
     <div class="task-body" @dblclick="$emit('edit', task)">
       <div class="task-title-line">
-        <h3>{{ task.title }}</h3>
+        <h3 class="task-title">{{ task.title }}</h3>
         <span v-if="task.syncStatus !== 'synced'" class="sync-pill">{{ syncStatusText(task.syncStatus) }}</span>
       </div>
       <p v-if="task.content">{{ task.content }}</p>
@@ -251,7 +257,13 @@ function isOverdue(task: TaskRecord): boolean {
         {{ settingsStore.t("task.restore") }}
       </button>
       <details v-if="!trash" class="task-menu">
-        <summary>{{ settingsStore.t("task.moreActions") }}</summary>
+        <summary
+          class="task-menu-trigger"
+          :title="taskMenuLabel(settingsStore.t('task.moreActions'), task.title)"
+          :aria-label="taskMenuLabel(settingsStore.t('task.moreActions'), task.title)"
+        >
+          <MoreHorizontal aria-hidden="true" :size="18" />
+        </summary>
         <div class="task-menu-panel">
           <button type="button" @click="$emit('edit', task)">{{ settingsStore.t("task.editAction") }}</button>
           <button v-if="!isCompletedStatus(task.status)" type="button" @click="$emit('planToday', task)">{{ settingsStore.t("task.today") }}</button>
@@ -265,3 +277,12 @@ function isOverdue(task: TaskRecord): boolean {
     </div>
   </article>
 </template>
+
+<style scoped>
+.task-title {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+</style>

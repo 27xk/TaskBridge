@@ -10,8 +10,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -284,18 +286,6 @@ fun TaskDetailScreen(
 
                     AppPanel {
                         Button(
-                            onClick = { onEditClick(current.localId) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(strings.edit)
-                        }
-                        Button(
-                            onClick = { pendingTaskDelete = true },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(strings.delete)
-                        }
-                        Button(
                             onClick = {
                                 scope.launch {
                                     if (current.status == TaskStatus.Completed) {
@@ -311,7 +301,13 @@ fun TaskDetailScreen(
                         ) {
                             Text(if (current.status == TaskStatus.Completed) strings.restore else strings.complete)
                         }
-                        Button(
+                        OutlinedButton(
+                            onClick = { onEditClick(current.localId) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(strings.edit)
+                        }
+                        OutlinedButton(
                             onClick = {
                                 scope.launch {
                                     val tomorrow = ShanghaiTime.todayDate(displayTimeZone).plusDays(1)
@@ -329,7 +325,7 @@ fun TaskDetailScreen(
                         ) {
                             Text(strings.postponeTomorrow)
                         }
-                        Button(
+                        OutlinedButton(
                             onClick = {
                                 scope.launch {
                                     taskRepository.snoozeTask(
@@ -345,7 +341,7 @@ fun TaskDetailScreen(
                             Text(strings.snoozeOneHour)
                         }
                         if (!current.repeatRule.isNullOrBlank()) {
-                            Button(
+                            OutlinedButton(
                                 onClick = {
                                     scope.launch {
                                         taskRepository.createNextOccurrence(current.localId)
@@ -358,7 +354,7 @@ fun TaskDetailScreen(
                             }
                         }
                         if (current.isTemplate) {
-                            Button(
+                            OutlinedButton(
                                 onClick = {
                                     scope.launch {
                                         taskRepository.instantiateTemplate(current.localId)
@@ -369,6 +365,15 @@ fun TaskDetailScreen(
                             ) {
                                 Text(strings.useTemplate)
                             }
+                        }
+                        TextButton(
+                            onClick = { pendingTaskDelete = true },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(strings.delete, color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }

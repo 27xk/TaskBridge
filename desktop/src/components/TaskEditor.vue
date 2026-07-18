@@ -10,10 +10,15 @@ const props = defineProps<{
   task?: TaskRecord | null;
   createPreset?: "default" | "today";
   title?: string;
+  isSaving?: boolean;
+  errorMessage?: string;
+  errorId?: string;
 }>();
 type ChecklistDraftViewItem = ChecklistDraftItem & { id: string; title: string; done: boolean };
 
 const settingsStore = useSettingsStore();
+const bodyOpen = ref(false);
+const arrangeOpen = ref(false);
 const detailsOpen = ref(false);
 const checklistDraftItems = ref<ChecklistDraftViewItem[]>([]);
 let syncingChecklistTextFromItems = false;
@@ -159,12 +164,15 @@ watch(
     form.checklistText = checklistItemsToText(checklistDraftItems.value);
     form.isTemplate = task?.isTemplate ?? false;
     form.templateName = task?.templateName ?? "";
-    detailsOpen.value = Boolean(task && hasAdvancedFields(task));
+    bodyOpen.value = Boolean(task && hasTaskBodyFields(task));
+    arrangeOpen.value = Boolean(task && hasArrangementFields(task));
+    detailsOpen.value = Boolean(task && hasAdvancedMetadataFields(task));
   },
   { immediate: true },
 );
 
 function submit(): void {
+  if (props.isSaving) return;
   const title = form.title.trim();
   if (!title) return;
   emit("save", {
@@ -274,28 +282,39 @@ function deleteChecklistDraftItem(id: string): void {
   syncChecklistTextFromItems();
 }
 
-function hasAdvancedFields(task: TaskRecord): boolean {
+function hasTaskBodyFields(task: TaskRecord): boolean {
+  return Boolean(task.content || checklistJsonToItems(task.checklistJson).length > 0);
+}
+
+function hasArrangementFields(task: TaskRecord): boolean {
   return Boolean(
     task.priority ||
       task.plannedDate ||
       task.dueTime ||
       task.remindTime ||
-      task.tag ||
+      task.listType !== "inbox",
+  );
+}
+
+function hasAdvancedMetadataFields(task: TaskRecord): boolean {
+  return Boolean(
+    task.tag ||
       task.project ||
       task.repeatRule ||
-      (task.checklistJson && task.checklistJson !== "[]") ||
-      task.isTemplate,
+      task.isTemplate ||
+      task.templateName,
   );
 }
 </script>
 
 <template>
-  <form class="task-editor" @submit.prevent="submit">
+  <form class="task-editor" :aria-busy="isSaving || undefined" :aria-describedby="errorMessage ? errorId : undefined" @submit.prevent="submit">
     <header class="panel-header">
       <h2>{{ title ?? (task ? settingsStore.t("task.edit") : settingsStore.t("task.add")) }}</h2>
-      <button type="button" class="ghost-button" @click="$emit('cancel')">{{ settingsStore.t("task.close") }}</button>
+      <button type="button" class="ghost-button" :disabled="isSaving" @click="$emit('cancel')">{{ settingsStore.t("task.close") }}</button>
     </header>
 
+    <fieldset class="task-editor-fields" :disabled="isSaving">
     <label>
       <span>{{ settingsStore.t("task.title") }}</span>
       <input
@@ -313,16 +332,48 @@ function hasAdvancedFields(task: TaskRecord): boolean {
       <span v-for="chip in quickPreview" :key="chip" class="quick-preview-chip">{{ chip }}</span>
     </div>
 
-    <label>
-      <span>{{ settingsStore.t("task.content") }}</span>
-      <textarea v-model="form.content" rows="3"></textarea>
-    </label>
-
-    <button type="button" class="ghost-button advanced-toggle" @click="detailsOpen = !detailsOpen">
-      {{ detailsOpen ? settingsStore.t("task.hideSettings") : settingsStore.t("task.moreSettings") }}
+    <button
+      type="button"
+      class="ghost-button advanced-toggle"
+      :aria-expanded="bodyOpen"
+      aria-controls="task-editor-body-fields"
+      @click="bodyOpen = !bodyOpen"
+    >
+      {{ settingsStore.t("task.bodyDetails") }}
     </button>
 
-    <section v-if="detailsOpen" class="advanced-fields">
+    <section v-if="bodyOpen" id="task-editor-body-fields" class="task-body-fields">
+      <label>
+        <span>{{ settingsStore.t("task.content") }}</span>
+        <textarea v-model="form.content" rows="3"></textarea>
+      </label>
+
+      <label>
+        <span>{{ settingsStore.t("task.checklist") }}</span>
+        <textarea v-model="form.checklistText" rows="4" :placeholder="settingsStore.t('task.checklistPlaceholder')"></textarea>
+      </label>
+      <div v-if="checklistDraftItems.length" class="checklist-draft-items">
+        <label v-for="item in checklistDraftItems" :key="item.id" class="checklist-draft-item">
+          <input type="checkbox" :checked="item.done" @change="toggleChecklistDraftItem(item.id)" />
+          <span :class="{ done: item.done }">{{ item.title }}</span>
+          <button type="button" class="text-button" @click="deleteChecklistDraftItem(item.id)">
+            {{ settingsStore.t("task.delete") }}
+          </button>
+        </label>
+      </div>
+    </section>
+
+    <button
+      type="button"
+      class="ghost-button advanced-toggle"
+      :aria-expanded="arrangeOpen"
+      aria-controls="task-editor-arrangement-fields"
+      @click="arrangeOpen = !arrangeOpen"
+    >
+      {{ arrangeOpen ? settingsStore.t("task.hideSettings") : settingsStore.t("task.arrangementSettings") }}
+    </button>
+
+    <section v-if="arrangeOpen" id="task-editor-arrangement-fields" class="advanced-fields task-arrangement-fields">
       <div class="task-editor-plan-fields">
         <label>
           <span>{{ settingsStore.t("task.list") }}</span>
@@ -353,7 +404,19 @@ function hasAdvancedFields(task: TaskRecord): boolean {
         </label>
       </div>
       <p class="editor-hint">{{ settingsStore.t("task.scheduleHelp") }}</p>
+    </section>
 
+    <button
+      type="button"
+      class="ghost-button advanced-toggle"
+      :aria-expanded="detailsOpen"
+      aria-controls="task-editor-more-fields"
+      @click="detailsOpen = !detailsOpen"
+    >
+      {{ detailsOpen ? settingsStore.t("task.hideSettings") : settingsStore.t("task.moreSettings") }}
+    </button>
+
+    <section v-if="detailsOpen" id="task-editor-more-fields" class="advanced-fields">
       <div class="editor-grid">
         <label>
           <span>{{ settingsStore.t("task.tag") }}</span>
@@ -374,20 +437,6 @@ function hasAdvancedFields(task: TaskRecord): boolean {
         </select>
       </label>
 
-      <label>
-        <span>{{ settingsStore.t("task.checklist") }}</span>
-        <textarea v-model="form.checklistText" rows="4" :placeholder="settingsStore.t('task.checklistPlaceholder')"></textarea>
-      </label>
-      <div v-if="checklistDraftItems.length" class="checklist-draft-items">
-        <label v-for="item in checklistDraftItems" :key="item.id" class="checklist-draft-item">
-          <input type="checkbox" :checked="item.done" @change="toggleChecklistDraftItem(item.id)" />
-          <span :class="{ done: item.done }">{{ item.title }}</span>
-          <button type="button" class="text-button" @click="deleteChecklistDraftItem(item.id)">
-            {{ settingsStore.t("task.delete") }}
-          </button>
-        </label>
-      </div>
-
       <label class="checkbox-line">
         <input v-model="form.isTemplate" type="checkbox" />
         <span>{{ settingsStore.t("task.saveTemplate") }}</span>
@@ -398,10 +447,31 @@ function hasAdvancedFields(task: TaskRecord): boolean {
         <input v-model="form.templateName" type="text" maxlength="128" />
       </label>
     </section>
+    </fieldset>
 
     <div class="form-actions">
-      <button type="button" class="secondary-button" @click="$emit('cancel')">{{ settingsStore.t("task.cancel") }}</button>
-      <button type="submit" class="primary-button">{{ settingsStore.t("task.save") }}</button>
+      <p
+        v-if="errorMessage"
+        :id="errorId"
+        class="form-message form-message-error task-editor-save-error"
+        role="alert"
+        aria-live="assertive"
+      >
+        {{ errorMessage }}
+      </p>
+      <button type="button" class="secondary-button" :disabled="isSaving" @click="$emit('cancel')">{{ settingsStore.t("task.cancel") }}</button>
+      <button type="submit" class="primary-button" :disabled="isSaving" :aria-describedby="errorMessage ? errorId : undefined">{{ settingsStore.t("task.save") }}</button>
     </div>
   </form>
 </template>
+
+<style scoped>
+fieldset.task-editor-fields {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+</style>

@@ -7,13 +7,25 @@ import { createFloatingWindow, showFloatingWindow } from "./floating-window";
 import { registerIpcHandlers } from "./ipc";
 import { showTaskNotification } from "./notification";
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "./shortcut";
-import { consumeSettingsRecoveryNotice, getSettings, windows } from "./state";
+import { consumeSettingsRecoveryNotice, getSettings, hasTokens, windows } from "./state";
 import { createAppTray } from "./tray";
 import { initializeAutoUpdater } from "./updater";
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu");
 app.commandLine.appendSwitch("disable-gpu-compositing");
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+let closeToTrayNoticeShown = false;
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!app.isReady()) return;
+    restoreMainWindow();
+  });
+}
 
 function createMainWindow(showOnReady = true): BrowserWindow {
   if (windows.mainWindow && !windows.mainWindow.isDestroyed()) {
@@ -51,6 +63,7 @@ function createMainWindow(showOnReady = true): BrowserWindow {
     if (!windows.isQuitting) {
       event.preventDefault();
       mainWindow.hide();
+      showCloseToTrayNotice();
     }
   });
 
@@ -98,7 +111,7 @@ app.on("before-quit", () => {
   windows.isQuitting = true;
 });
 
-app.whenReady().then(() => {
+if (hasSingleInstanceLock) app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
 
   if (process.platform === "win32") {
@@ -106,7 +119,7 @@ app.whenReady().then(() => {
   }
 
   registerIpcHandlers();
-  const launchedHidden = app.getLoginItemSettings().wasOpenedAsHidden;
+  const launchedHidden = process.argv.includes("--hidden") || app.getLoginItemSettings().wasOpenedAsHidden;
   const mainWindow = createMainWindow(!launchedHidden);
   initializeAutoUpdater(mainWindow);
   showSettingsRecoveryNotice();
@@ -125,7 +138,7 @@ app.whenReady().then(() => {
     return;
   }
 
-  if (!launchedHidden && getSettings().floatingVisibleOnStart) {
+  if (!launchedHidden && hasTokens() && getSettings().floatingVisibleOnStart) {
     showFloatingWindow();
   }
   createAppTray();
@@ -135,6 +148,25 @@ app.whenReady().then(() => {
     createMainWindow().show();
   });
 });
+
+function restoreMainWindow(): void {
+  const mainWindow = createMainWindow(false);
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function showCloseToTrayNotice(): void {
+  if (closeToTrayNoticeShown) return;
+  closeToTrayNoticeShown = true;
+  const english = getSettings().language === "en-US";
+  showTaskNotification(
+    "TaskBridge",
+    english
+      ? "TaskBridge is still running in the notification area. Use the tray menu to reopen or quit it."
+      : "TaskBridge 仍在通知区域运行，可从托盘菜单重新打开或彻底退出。",
+  );
+}
 
 async function assertBridgeAvailable(window: BrowserWindow, name: string): Promise<void> {
   await waitForRendererLoad(window);

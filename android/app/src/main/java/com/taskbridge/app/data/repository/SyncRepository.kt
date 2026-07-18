@@ -2,10 +2,12 @@ package com.taskbridge.app.data.repository
 
 import androidx.room.withTransaction
 import com.taskbridge.app.data.datastore.TokenDataStore
+import com.taskbridge.app.data.datastore.WorkspaceIdentity
 import com.taskbridge.app.data.local.AppDatabase
 import com.taskbridge.app.data.local.SyncQueueDao
 import com.taskbridge.app.data.local.TaskDao
 import com.taskbridge.app.data.local.TaskEntity
+import com.taskbridge.app.data.local.WorkspaceMigrationCoordinator
 import com.taskbridge.app.data.remote.ApiService
 import com.taskbridge.app.data.remote.dto.DeviceRegisterRequestDto
 import com.taskbridge.app.data.remote.dto.SyncPushRequestDto
@@ -23,6 +25,12 @@ class SyncRepository(
     private val taskDao: TaskDao,
     private val syncQueueDao: SyncQueueDao,
     private val tokenDataStore: TokenDataStore,
+    private val workspaceMigration: WorkspaceMigrationCoordinator = WorkspaceMigrationCoordinator(
+        database,
+        taskDao,
+        syncQueueDao,
+        tokenDataStore,
+    ),
 ) {
     private companion object {
         const val PUSH_BATCH_SIZE = 100
@@ -32,40 +40,42 @@ class SyncRepository(
 
     suspend fun syncNow(deviceId: String): Result<Unit> {
         return runCatching {
-            val ownerUserId = ownerUserId() ?: return@runCatching
-            ensureDeviceRegistered(deviceId)
-            pushPendingChanges(deviceId, ownerUserId)
-            pullChanges(ownerUserId)
+            val workspace = activeWorkspace() ?: return@runCatching
+            ensureDeviceRegistered(deviceId, workspace)
+            pushPendingChanges(deviceId, workspace)
+            pullChanges(workspace)
         }
     }
 
     suspend fun createWebSocketTicket(deviceId: String): Result<String> {
         return runCatching {
-            ensureDeviceRegistered(deviceId)
-            apiService.createWebSocketTicket(WebSocketTicketRequestDto(deviceId))
+            val workspace = activeWorkspace() ?: error("active workspace required")
+            ensureDeviceRegistered(deviceId, workspace)
+            apiService.createWebSocketTicket(WebSocketTicketRequestDto(deviceId), workspace.id)
                 .data
                 ?.ticket
                 ?: error("missing websocket ticket")
         }
     }
 
-    private suspend fun ensureDeviceRegistered(deviceId: String) {
+    private suspend fun ensureDeviceRegistered(deviceId: String, workspace: WorkspaceIdentity) {
         apiService.registerDevice(
             DeviceRegisterRequestDto(
                 deviceId = deviceId,
                 deviceName = "Android phone",
                 deviceType = "android",
             ),
+            workspace.id,
         )
     }
 
     suspend fun pullChanges() {
-        val ownerUserId = ownerUserId() ?: return
-        pullChanges(ownerUserId)
+        val workspace = activeWorkspace() ?: return
+        pullChanges(workspace)
     }
 
-    private suspend fun pullChanges(ownerUserId: String) {
-        val lastSyncTime = tokenDataStore.lastSyncTime.first() ?: "1970-01-01T00:00:00Z"
+    private suspend fun pullChanges(workspace: WorkspaceIdentity) {
+        val lastSyncTime = tokenDataStore.lastSyncTimeFor(workspace) ?: "1970-01-01T00:00:00Z"
         var cursorUpdatedAt: String? = null
         var cursorId: Int? = null
 
@@ -75,20 +85,22 @@ class SyncRepository(
                 limit = PULL_PAGE_SIZE,
                 cursorUpdatedAt = cursorUpdatedAt,
                 cursorId = cursorId,
+                expectedWorkspaceId = workspace.id,
             ).data ?: return
 
             val remoteTasks = data.changedTasks + data.deletedTasks
             val existingByServerId: Map<Int, TaskEntity> = if (remoteTasks.isEmpty()) {
                 emptyMap()
             } else {
-                taskDao.getByServerIds(ownerUserId, remoteTasks.map { it.id })
+                taskDao.getByServerIds(workspace.id, remoteTasks.map { it.id })
                     .mapNotNull { entity -> entity.serverId?.let { serverId -> serverId to entity } }
                     .toMap()
             }
             val entities = remoteTasks.map { remoteTask ->
                 remoteTask.toEntity(
-                    ownerUserId = ownerUserId,
-                    localId = existingByServerId[remoteTask.id]?.localId ?: "server-${remoteTask.id}",
+                    workspaceId = workspace.id,
+                    ownerUserId = workspace.userId,
+                    localId = existingByServerId[remoteTask.id]?.localId ?: remoteTaskLocalId(workspace, remoteTask.id),
                     syncStatus = SyncStatus.Synced,
                     lastSyncAt = data.serverTime,
                 )
@@ -100,7 +112,8 @@ class SyncRepository(
             }
 
             if (!data.hasMore) {
-                tokenDataStore.saveLastSyncTime(data.serverTime)
+                ensureWorkspaceUnchanged(workspace)
+                tokenDataStore.saveLastSyncTime(workspace, data.serverTime)
                 return
             }
             cursorUpdatedAt = data.nextCursorUpdatedAt
@@ -110,11 +123,11 @@ class SyncRepository(
         }
     }
 
-    private suspend fun pushPendingChanges(deviceId: String, ownerUserId: String) {
+    private suspend fun pushPendingChanges(deviceId: String, workspace: WorkspaceIdentity) {
         var processedBatches = 0
 
         while (processedBatches < MAX_PUSH_BATCHES) {
-            val pending = syncQueueDao.pendingChanges(ownerUserId, PUSH_BATCH_SIZE)
+            val pending = syncQueueDao.pendingChanges(workspace.id, PUSH_BATCH_SIZE)
             if (pending.isEmpty()) return
 
             val data = apiService.pushSync(
@@ -122,7 +135,10 @@ class SyncRepository(
                     deviceId = deviceId,
                     changes = pending.map { it.toDto() },
                 ),
+                workspace.id,
             ).data ?: return
+
+            ensureWorkspaceUnchanged(workspace)
 
             val pendingByLocalId = pending.associateBy { it.localId }
             database.withTransaction {
@@ -133,25 +149,26 @@ class SyncRepository(
                             result.task?.let { task ->
                                 taskDao.upsert(
                                     task.toEntity(
-                                        ownerUserId = ownerUserId,
+                                        workspaceId = workspace.id,
+                                        ownerUserId = workspace.userId,
                                         localId = result.localId,
                                         syncStatus = SyncStatus.Synced,
                                         lastSyncAt = data.serverTime,
                                     ),
                                 )
                             } ?: taskDao.markSynced(
-                                ownerUserId = ownerUserId,
+                                workspaceId = workspace.id,
                                 localId = result.localId,
                                 serverId = result.serverId,
                                 version = result.version ?: queued.version,
                                 updatedAt = Instant.now().toString(),
                                 syncedAt = data.serverTime,
                             )
-                            syncQueueDao.deleteById(ownerUserId, queued.id)
+                            syncQueueDao.deleteById(workspace.id, queued.id)
                         }
 
                         "conflict" -> {
-                            val localTask = taskDao.getByLocalId(ownerUserId, result.localId)
+                            val localTask = taskDao.getByLocalId(workspace.id, result.localId)
                             if (localTask != null) {
                                 taskDao.upsert(
                                     localTask.copy(
@@ -167,7 +184,8 @@ class SyncRepository(
                                 result.serverTask?.let { task ->
                                     taskDao.upsert(
                                         task.toEntity(
-                                            ownerUserId = ownerUserId,
+                                            workspaceId = workspace.id,
+                                            ownerUserId = workspace.userId,
                                             localId = result.localId,
                                             syncStatus = SyncStatus.Conflict,
                                             lastSyncAt = data.serverTime,
@@ -175,13 +193,13 @@ class SyncRepository(
                                             conflictLocalJson = null,
                                         ),
                                     )
-                                } ?: taskDao.updateSyncStatus(ownerUserId, result.localId, SyncStatus.Conflict.wireName)
+                                } ?: taskDao.updateSyncStatus(workspace.id, result.localId, SyncStatus.Conflict.wireName)
                             }
-                            syncQueueDao.deleteById(ownerUserId, queued.id)
+                            syncQueueDao.deleteById(workspace.id, queued.id)
                         }
 
                         "failed" -> {
-                            val localTask = taskDao.getByLocalId(ownerUserId, result.localId)
+                            val localTask = taskDao.getByLocalId(workspace.id, result.localId)
                             if (localTask != null) {
                                 taskDao.upsert(
                                     localTask.copy(
@@ -191,12 +209,12 @@ class SyncRepository(
                                     ),
                                 )
                             } else {
-                                taskDao.updateSyncStatus(ownerUserId, result.localId, SyncStatus.Failed.wireName)
+                                taskDao.updateSyncStatus(workspace.id, result.localId, SyncStatus.Failed.wireName)
                             }
-                            syncQueueDao.incrementAttempt(ownerUserId, queued.id)
+                            syncQueueDao.incrementAttempt(workspace.id, queued.id)
                         }
 
-                        else -> syncQueueDao.incrementAttempt(ownerUserId, queued.id)
+                        else -> syncQueueDao.incrementAttempt(workspace.id, queued.id)
                     }
                 }
             }
@@ -206,7 +224,17 @@ class SyncRepository(
         }
     }
 
-    private suspend fun ownerUserId(): String? {
-        return tokenDataStore.currentUserId.first()?.takeIf { it.isNotBlank() }
+    private suspend fun activeWorkspace(): WorkspaceIdentity? {
+        val workspace = tokenDataStore.currentWorkspace.first() ?: return null
+        workspaceMigration.ensureWorkspace(workspace)
+        return workspace
     }
+
+    private suspend fun ensureWorkspaceUnchanged(expected: WorkspaceIdentity) {
+        check(tokenDataStore.currentWorkspace.first() == expected) { "workspace changed during sync" }
+    }
+}
+
+fun remoteTaskLocalId(workspace: WorkspaceIdentity, serverId: Int): String {
+    return "${workspace.preferenceSuffix}-server-$serverId"
 }

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example v0.1.6"
+        description: "Release version, for example v0.1.8"
         required: true
         type: string
       publish_latest:
@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           if [[ ! "${RELEASE_VERSION}" =~ ^v[0-9]+(\.[0-9]+){0,2}([-.][0-9A-Za-z.]+)?$ ]]; then
-            echo "::error::Release version must start with v, for example v0.1.6."
+            echo "::error::Release version must start with v, for example v0.1.8."
             exit 1
           fi
           expected_version="$(tr -d '[:space:]' < VERSION)"
@@ -154,6 +154,60 @@ jobs:
             git push origin "refs/tags/${RELEASE_VERSION}"
           fi
 
+  deployment:
+    name: Build self-hosting bundle
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build deployment bundle
+        shell: bash
+        run: |
+          mkdir -p artifacts release-staging
+          artifact="$(pwd)/artifacts/TaskBridge-${RELEASE_VERSION}-deployment.zip"
+          bundle_root="release-staging/TaskBridge-${RELEASE_VERSION}"
+          mkdir -p "$bundle_root"
+          git archive --format=tar HEAD deploy web README.md VERSION | tar -xf - -C "$bundle_root"
+
+          release_image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/taskbridge:${RELEASE_VERSION}"
+          release_number="${RELEASE_VERSION#v}"
+          for env_file in \
+            "$bundle_root/deploy/.env.example" \
+            "$bundle_root/deploy/.env.local.example"; do
+            sed -i "s#^TASKBRIDGE_BACKEND_IMAGE=.*#TASKBRIDGE_BACKEND_IMAGE=${release_image}#" "$env_file"
+            sed -i "s#^APP_VERSION=.*#APP_VERSION=${release_number}#" "$env_file"
+          done
+          sed -i \
+            "s#ghcr.io/27xk/taskbridge:latest#${release_image}#g" \
+            "$bundle_root/deploy/docker-compose.release.yml"
+
+          (
+            cd release-staging
+            zip -qr "$artifact" "TaskBridge-${RELEASE_VERSION}"
+          )
+          unzip -l "$artifact" | tee deployment-files.txt
+          for required in \
+            "deploy/docker-compose.release.yml" \
+            "deploy/.env.example" \
+            "deploy/nginx.web.conf" \
+            "deploy/start-local.cmd" \
+            "deploy/start-local.sh" \
+            "web/index.html"; do
+            if ! grep -Fq "$required" deployment-files.txt; then
+              echo "::error::Deployment bundle is missing ${required}."
+              exit 1
+            fi
+          done
+
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskbridge-deployment
+          path: artifacts/*.zip
+          if-no-files-found: error
+
   android:
     name: Build Android APK
     runs-on: ubuntu-latest
@@ -198,13 +252,13 @@ jobs:
             fi
           done
           if [ "$configured" -eq 0 ]; then
-            echo "::notice::Android signing secrets are not configured; building an unsigned release APK."
+            echo "::notice::Skipping public Android APK because signing secrets are not configured."
             echo "TASKBRIDGE_ANDROID_SIGNED_RELEASE=false" >> "$GITHUB_ENV"
             exit 0
           fi
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::Incomplete Android signing secrets: ${missing[*]}."
-            echo "Configure all Android signing secrets or leave all of them empty for an unsigned APK." >&2
+            echo "Configure all Android signing secrets, or remove all of them to omit the APK from the public release." >&2
             exit 1
           fi
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
@@ -226,6 +280,7 @@ jobs:
         run: ./gradlew testReleaseUnitTest -PTASKBRIDGE_USE_CHINA_MIRRORS=false -PTASKBRIDGE_BASE_URL="${TASKBRIDGE_BASE_URL}" -PTASKBRIDGE_WS_URL="${TASKBRIDGE_WS_URL}" --stacktrace
 
       - name: Build release APK
+        if: env.TASKBRIDGE_ANDROID_SIGNED_RELEASE == 'true'
         run: ./gradlew :app:assembleRelease -PTASKBRIDGE_USE_CHINA_MIRRORS=false -PTASKBRIDGE_BASE_URL="${TASKBRIDGE_BASE_URL}" -PTASKBRIDGE_WS_URL="${TASKBRIDGE_WS_URL}" --stacktrace
         env:
           ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android/release.keystore
@@ -234,12 +289,9 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Verify Android APK signature
+        if: env.TASKBRIDGE_ANDROID_SIGNED_RELEASE == 'true'
         shell: bash
         run: |
-          if [ "$TASKBRIDGE_ANDROID_SIGNED_RELEASE" != "true" ]; then
-            echo "::notice::Skipping Android APK signature verification because this release is unsigned."
-            exit 0
-          fi
           apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release.apk' | head -n 1)"
           if [ -z "$apk_path" ]; then
             echo "No release APK was produced." >&2
@@ -258,17 +310,13 @@ jobs:
           "$apksigner" verify --verbose --print-certs "$apk_path"
 
       - name: Prepare Android artifact
+        if: env.TASKBRIDGE_ANDROID_SIGNED_RELEASE == 'true'
         shell: bash
         run: |
           mkdir -p ../artifacts
           find app/build/outputs/apk -maxdepth 3 -type f -print
-          if [ "$TASKBRIDGE_ANDROID_SIGNED_RELEASE" = "true" ]; then
-            apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release.apk' | head -n 1)"
-            artifact_name="TaskBridge-${RELEASE_VERSION}-android.apk"
-          else
-            apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release-unsigned.apk' | head -n 1)"
-            artifact_name="TaskBridge-${RELEASE_VERSION}-android-unsigned.apk"
-          fi
+          apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release.apk' | head -n 1)"
+          artifact_name="TaskBridge-${RELEASE_VERSION}-android.apk"
           if [ -z "$apk_path" ]; then
             echo "No release APK was produced." >&2
             exit 1
@@ -276,6 +324,7 @@ jobs:
           cp "$apk_path" "../artifacts/${artifact_name}"
 
       - name: Upload Android artifact
+        if: env.TASKBRIDGE_ANDROID_SIGNED_RELEASE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: taskbridge-android
@@ -313,6 +362,9 @@ jobs:
 
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
+
+      - name: Rebuild Electron native dependencies
+        run: npm run rebuild:native
 
       - name: Verify desktop endpoint config
         run: npm run check:desktop-endpoint-config
@@ -352,6 +404,9 @@ jobs:
 
       - name: Verify desktop theme config
         run: npm run check:desktop-theme
+
+      - name: Verify desktop efficiency config
+        run: npm run check:desktop-efficiency
 
       - name: Verify desktop docs consistency
         run: npm run check:desktop-docs
@@ -419,6 +474,12 @@ jobs:
       - name: Verify security governance config
         run: npm run check:security-governance
 
+      - name: Verify priority UX polish
+        run: npm run check:ux-priority-polish
+
+      - name: Verify cross-client user experience
+        run: npm run check:user-experience
+
       - name: Verify Web client shell
         run: node ..\scripts\check-web-client.mjs
 
@@ -434,6 +495,9 @@ jobs:
       - name: Smoke test Web client shell
         run: node ..\scripts\smoke-web-client.mjs
 
+      - name: Build desktop application
+        run: npm run build
+
       - name: Prepare Windows signing certificate
         shell: pwsh
         run: |
@@ -442,11 +506,11 @@ jobs:
           if (-not $hasCertificate -and -not $hasPassword) {
             "TASKBRIDGE_WINDOWS_SIGNED_RELEASE=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             "CSC_IDENTITY_AUTO_DISCOVERY=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-            Write-Host "::notice::Windows signing certificate is not configured; building an unsigned installer."
+            Write-Host "::notice::Skipping public Windows installer because signing secrets are not configured."
             exit 0
           }
           if (-not $hasCertificate -or -not $hasPassword) {
-            throw "Incomplete Windows signing secrets. Configure both WINDOWS_CERTIFICATE_BASE64 and WINDOWS_CERTIFICATE_PASSWORD, or leave both empty for an unsigned installer."
+            throw "Incomplete Windows signing secrets. Configure both values, or remove both to omit the installer from the public release."
           }
           $certificatePath = Join-Path $env:RUNNER_TEMP "taskbridge-codesign.pfx"
           [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
@@ -461,6 +525,7 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
       - name: Build Windows installer
+        if: env.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'
         run: npm run dist
         env:
           TASKBRIDGE_BASE_URL: ${{ env.TASKBRIDGE_BASE_URL }}
@@ -469,12 +534,9 @@ jobs:
           ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.cache\\electron-builder
 
       - name: Verify Windows installer signatures
+        if: env.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'
         shell: pwsh
         run: |
-          if ($env:TASKBRIDGE_WINDOWS_SIGNED_RELEASE -ne "true") {
-            Write-Host "::notice::Skipping Windows installer signature verification because this release is unsigned."
-            exit 0
-          }
           $installers = @(Get-ChildItem -Path release -File | Where-Object { $_.Extension -eq '.exe' })
           if ($installers.Count -eq 0) {
             throw "No Windows installer .exe was produced."
@@ -487,17 +549,19 @@ jobs:
           }
 
       - name: Prepare desktop artifacts
+        if: env.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path ..\artifacts | Out-Null
           Get-ChildItem -Path release -Recurse -File | Select-Object FullName, Length
           Get-ChildItem -Path release -File | Where-Object {
-            $_.Extension -in @('.exe', '.yml', '.blockmap') -or $_.Name -eq 'latest.yml'
+            $_.Extension -in @('.exe', '.blockmap') -or $_.Name -eq 'latest.yml'
           } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination ..\artifacts\$($_.Name)
           }
 
       - name: Validate desktop update artifacts
+        if: env.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'
         shell: pwsh
         run: |
           # Desktop auto-update publishes to the stable latest channel.
@@ -513,6 +577,7 @@ jobs:
           }
 
       - name: Upload Windows artifacts
+        if: env.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: taskbridge-desktop
@@ -617,6 +682,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - android
+      - deployment
       - desktop
       - docker
     steps:
@@ -642,6 +708,18 @@ jobs:
         with:
           subject-path: release-artifacts/*
 
+      - name: Delete assets from an existing release
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release view "$RELEASE_VERSION" --json assets --jq '.assets[].name' |
+              while IFS= read -r asset_name; do
+                [ -z "$asset_name" ] || gh release delete-asset "$RELEASE_VERSION" "$asset_name" --yes
+              done
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -652,6 +730,11 @@ jobs:
           files: release-artifacts/*
           fail_on_unmatched_files: true
           body: |
+            The deployment bundle is ready for Docker Compose self-hosting. Android and
+            Windows downloads are attached only when their signing secrets were configured
+            and the generated files passed signature verification. Unsigned client files are
+            never attached to a public release.
+
             Backend Docker images:
 
             - `${{ needs.docker.outputs.ghcr_image }}:${{ env.RELEASE_VERSION }}`
@@ -663,3 +746,27 @@ jobs:
             - `${{ needs.docker.outputs.dockerhub_image }}:latest`
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify published release assets
+        shell: bash
+        run: |
+          asset_names="$(gh release view "$RELEASE_VERSION" --json assets --jq '.assets[].name')"
+          required_assets=("TaskBridge-${RELEASE_VERSION}-deployment.zip" "SHA256SUMS.txt")
+          for required_asset in "${required_assets[@]}"; do
+            if ! grep -Fxq "$required_asset" <<<"$asset_names"; then
+              echo "::error::Published release is missing ${required_asset}."
+              exit 1
+            fi
+          done
+
+          forbidden_assets=("*unsigned*" "builder-debug.yml")
+          while IFS= read -r asset_name; do
+            for forbidden_pattern in "${forbidden_assets[@]}"; do
+              if [[ "$asset_name" == $forbidden_pattern ]]; then
+                echo "::error::Published release contains forbidden asset ${asset_name}."
+                exit 1
+              fi
+            done
+          done <<<"$asset_names"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

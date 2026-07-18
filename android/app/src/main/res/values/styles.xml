@@ -34,8 +34,8 @@
     </style>
 
     <style name="WidgetTaskStatus">
-        <item name="android:layout_width">16dp</item>
-        <item name="android:layout_height">32dp</item>
+        <item name="android:layout_width">48dp</item>
+        <item name="android:layout_height">48dp</item>
         <item name="android:gravity">center</item>
         <item name="android:textColor">#137C6B</item>
         <item name="android:textSize">14sp</item>

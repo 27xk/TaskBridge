@@ -13,6 +13,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.taskbridge.app.MainActivity
 import com.taskbridge.app.data.datastore.TokenDataStore
+import com.taskbridge.app.data.repository.TaskRepository
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
 import com.taskbridge.app.ui.i18n.AppLanguage
@@ -26,6 +27,7 @@ import java.time.Instant
 class ReminderManager(
     private val context: Context,
     private val tokenDataStore: TokenDataStore,
+    private val taskRepository: TaskRepository? = null,
 ) {
     fun ensureChannel() {
         val copy = reminderCopy()
@@ -41,17 +43,25 @@ class ReminderManager(
     }
 
     fun schedule(task: Task) {
-        val remindAt = task.remindTime ?: task.dueTime ?: return
-        if (task.status == TaskStatus.Completed || task.isDeleted) return
+        val remindAt = reminderTrigger(task.remindTime, task.dueTime)
+        if (remindAt == null || task.status == TaskStatus.Completed || task.isDeleted) {
+            cancel(task)
+            return
+        }
         val triggerAt = runCatching { Instant.parse(remindAt).toEpochMilli() }.getOrNull() ?: return
-        if (triggerAt <= System.currentTimeMillis()) return
+        if (triggerAt <= System.currentTimeMillis()) {
+            cancel(task)
+            return
+        }
+        val workspaceId = currentWorkspaceId() ?: return
 
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             putExtra(EXTRA_TASK_LOCAL_ID, task.localId)
+            putExtra(EXTRA_WORKSPACE_ID, workspaceId)
         }
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            task.localId.hashCode(),
+            reminderRequestCode(workspaceId, task.localId),
             intent,
             pendingIntentFlags(),
         )
@@ -60,10 +70,11 @@ class ReminderManager(
     }
 
     fun cancel(task: Task) {
+        val workspaceId = currentWorkspaceId() ?: return
         val intent = Intent(context, ReminderReceiver::class.java)
         val pendingIntent = PendingIntent.getBroadcast(
             context,
-            task.localId.hashCode(),
+            reminderRequestCode(workspaceId, task.localId),
             intent,
             pendingIntentFlags(),
         )
@@ -71,6 +82,7 @@ class ReminderManager(
     }
 
     fun showReminder(task: Task) {
+        if (task.status == TaskStatus.Completed || task.isDeleted) return
         TodayTaskWidgetUpdateWorker.enqueue(context)
 
         if (ContextCompat.checkSelfPermission(
@@ -95,6 +107,11 @@ class ReminderManager(
 
         NotificationManagerCompat.from(context)
             .notify(task.localId.hashCode(), notification)
+    }
+
+    suspend fun rebuildAll() {
+        val repository = taskRepository ?: return
+        repository.getTasksForReminderRebuild().forEach(::schedule)
     }
 
     private fun openTaskIntent(localId: String): PendingIntent {
@@ -123,6 +140,14 @@ class ReminderManager(
         return PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     }
 
+    private fun currentWorkspaceId(): String? {
+        return runBlocking { tokenDataStore.currentWorkspace.first()?.id }
+    }
+
+    private fun reminderRequestCode(workspaceId: String, localId: String): Int {
+        return "$workspaceId|$localId".hashCode()
+    }
+
     private fun reminderCopy(): ReminderCopy {
         val language = runBlocking { tokenDataStore.language.first() }
         val appLanguage = AppLanguage.fromCode(language)
@@ -148,5 +173,6 @@ class ReminderManager(
     companion object {
         const val CHANNEL_ID = "taskbridge_reminders"
         const val EXTRA_TASK_LOCAL_ID = "taskbridge.reminder.extra.TASK_LOCAL_ID"
+        const val EXTRA_WORKSPACE_ID = "taskbridge.reminder.extra.WORKSPACE_ID"
     }
 }

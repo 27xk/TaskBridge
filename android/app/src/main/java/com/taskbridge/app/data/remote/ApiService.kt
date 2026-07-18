@@ -6,15 +6,20 @@ import com.taskbridge.app.data.remote.dto.ChecklistItemUpdateDto
 import com.taskbridge.app.data.remote.dto.DeviceDto
 import com.taskbridge.app.data.remote.dto.DeviceRegisterRequestDto
 import com.taskbridge.app.data.remote.dto.LoginRequestDto
+import com.taskbridge.app.data.remote.dto.PasswordChangeRequestDto
 import com.taskbridge.app.data.remote.dto.RefreshTokenRequestDto
 import com.taskbridge.app.data.remote.dto.RegisterRequestDto
 import com.taskbridge.app.data.remote.dto.RegistrationStatusDto
+import com.taskbridge.app.data.remote.dto.AuthSessionDto
+import com.taskbridge.app.data.remote.dto.RevokeOtherSessionsRequestDto
+import com.taskbridge.app.data.remote.dto.RevokeSessionsResponseDto
 import com.taskbridge.app.data.remote.dto.SyncPullResponseDto
 import com.taskbridge.app.data.remote.dto.SyncPushRequestDto
 import com.taskbridge.app.data.remote.dto.SyncPushResponseDto
 import com.taskbridge.app.data.remote.dto.TaskCreateRequestDto
 import com.taskbridge.app.data.remote.dto.TaskDto
 import com.taskbridge.app.data.remote.dto.TaskHistoryDto
+import com.taskbridge.app.data.remote.dto.TaskMetaDto
 import com.taskbridge.app.data.remote.dto.TaskTemplateInstantiateRequestDto
 import com.taskbridge.app.data.remote.dto.TaskUpdateRequestDto
 import com.taskbridge.app.data.remote.dto.TokenPairDto
@@ -25,6 +30,7 @@ import retrofit2.Call
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
@@ -46,16 +52,31 @@ interface ApiService {
     @GET("auth/me")
     suspend fun me(): ApiEnvelope<UserDto>
 
+    @PUT("auth/password")
+    suspend fun changePassword(
+        @Body request: PasswordChangeRequestDto,
+    ): ApiEnvelope<RevokeSessionsResponseDto>
+
+    @GET("auth/sessions")
+    suspend fun getSessions(): ApiEnvelope<List<AuthSessionDto>>
+
+    @POST("auth/sessions/revoke-other-devices")
+    suspend fun revokeOtherSessions(
+        @Body request: RevokeOtherSessionsRequestDto,
+    ): ApiEnvelope<RevokeSessionsResponseDto>
+
     @GET("sync/status")
     suspend fun syncStatus(): ApiEnvelope<Map<String, Any?>>
 
     @POST("auth/ws-ticket")
     suspend fun createWebSocketTicket(
         @Body request: WebSocketTicketRequestDto,
+        @Header(INTERNAL_WORKSPACE_HEADER) expectedWorkspaceId: String? = null,
     ): ApiEnvelope<WebSocketTicketDto>
 
     @GET("tasks")
     suspend fun getTasks(
+        @Query("timezone") timezone: String,
         @Query("q") q: String? = null,
         @Query("view") view: String? = null,
         @Query("now") now: String? = null,
@@ -71,6 +92,12 @@ interface ApiService {
         @Query("offset") offset: Int? = null,
         @Query("limit") limit: Int? = null,
     ): ApiEnvelope<List<TaskDto>>
+
+    @GET("tasks/meta")
+    suspend fun getTaskMeta(
+        @Query("timezone") timezone: String,
+        @Query("now") now: String? = null,
+    ): ApiEnvelope<TaskMetaDto>
 
     @POST("tasks")
     suspend fun createTask(@Body request: TaskCreateRequestDto): ApiEnvelope<TaskDto>
@@ -137,7 +164,10 @@ interface ApiService {
     ): ApiEnvelope<TaskDto>
 
     @POST("devices/register")
-    suspend fun registerDevice(@Body request: DeviceRegisterRequestDto): ApiEnvelope<DeviceDto>
+    suspend fun registerDevice(
+        @Body request: DeviceRegisterRequestDto,
+        @Header(INTERNAL_WORKSPACE_HEADER) expectedWorkspaceId: String? = null,
+    ): ApiEnvelope<DeviceDto>
 
     @GET("sync/pull")
     suspend fun pullSync(
@@ -145,13 +175,20 @@ interface ApiService {
         @Query("limit") limit: Int? = null,
         @Query("cursor_updated_at") cursorUpdatedAt: String? = null,
         @Query("cursor_id") cursorId: Int? = null,
+        @Header(INTERNAL_WORKSPACE_HEADER) expectedWorkspaceId: String? = null,
     ): ApiEnvelope<SyncPullResponseDto>
 
     @POST("sync/push")
-    suspend fun pushSync(@Body request: SyncPushRequestDto): ApiEnvelope<SyncPushResponseDto>
+    suspend fun pushSync(
+        @Body request: SyncPushRequestDto,
+        @Header(INTERNAL_WORKSPACE_HEADER) expectedWorkspaceId: String? = null,
+    ): ApiEnvelope<SyncPushResponseDto>
 }
 
 interface TokenRefreshApi {
     @POST("auth/refresh")
-    fun refresh(@Body request: RefreshTokenRequestDto): Call<ApiEnvelope<TokenPairDto>>
+    fun refresh(
+        @Body request: RefreshTokenRequestDto,
+        @Header(INTERNAL_WORKSPACE_HEADER) expectedWorkspaceId: String,
+    ): Call<ApiEnvelope<TokenPairDto>>
 }

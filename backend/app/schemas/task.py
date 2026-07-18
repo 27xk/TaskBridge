@@ -3,6 +3,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+TaskView = Literal[
+    "inbox",
+    "today",
+    "overdue",
+    "week",
+    "high_priority",
+    "completed",
+    "templates",
+    "trash",
+]
+
 
 class ChecklistItem(BaseModel):
     id: str = Field(min_length=1, max_length=128)
@@ -16,6 +27,7 @@ class ChecklistItemUpdate(BaseModel):
 
 
 class TaskCreate(BaseModel):
+    client_request_id: str | None = Field(default=None, min_length=1, max_length=128)
     title: str = Field(min_length=1, max_length=255)
     content: str | None = Field(default=None, max_length=10000)
     priority: int = Field(default=0, ge=0, le=5)
@@ -32,6 +44,16 @@ class TaskCreate(BaseModel):
     is_template: bool = False
     template_name: str | None = Field(default=None, max_length=128)
     sort_order: int = Field(default=0, ge=0, le=10_000)
+
+    @field_validator("client_request_id")
+    @classmethod
+    def normalize_client_request_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("invalid client_request_id")
+        return normalized
 
 
 class TaskUpdate(BaseModel):
@@ -161,6 +183,7 @@ class TaskRead(BaseModel):
 
     id: int
     user_id: int
+    client_request_id: str | None
     title: str
     content: str | None
     status: str

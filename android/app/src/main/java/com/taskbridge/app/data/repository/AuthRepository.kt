@@ -3,7 +3,10 @@ package com.taskbridge.app.data.repository
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.remote.ApiService
 import com.taskbridge.app.data.remote.dto.LoginRequestDto
+import com.taskbridge.app.data.remote.dto.PasswordChangeRequestDto
 import com.taskbridge.app.data.remote.dto.RegisterRequestDto
+import com.taskbridge.app.data.remote.dto.AuthSessionDto
+import com.taskbridge.app.data.remote.dto.RevokeOtherSessionsRequestDto
 import com.taskbridge.app.data.remote.dto.UserDto
 import com.taskbridge.app.sync.DeviceIdProvider
 
@@ -43,6 +46,29 @@ class AuthRepository(
     suspend fun currentUser(): Result<UserDto> {
         return runCatching {
             apiService.me().data ?: error("Not authenticated")
+        }
+    }
+
+    suspend fun changePassword(currentPassword: String, newPassword: String): Result<Int> {
+        return runCatching {
+            apiService.changePassword(PasswordChangeRequestDto(currentPassword, newPassword))
+                .data
+                ?.revoked
+                ?: error("Password change failed")
+        }
+    }
+
+    suspend fun sessions(): Result<List<AuthSessionDto>> {
+        return runCatching {
+            apiService.getSessions().data ?: error("Session list unavailable")
+        }
+    }
+
+    suspend fun revokeOtherSessions(): Result<Int> {
+        return runCatching {
+            apiService.revokeOtherSessions(
+                RevokeOtherSessionsRequestDto(deviceIdProvider.getDeviceId()),
+            ).data?.revoked ?: error("Session revocation failed")
         }
     }
 

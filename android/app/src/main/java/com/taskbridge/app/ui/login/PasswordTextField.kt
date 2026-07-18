@@ -22,6 +22,8 @@ fun PasswordTextField(
     strings: TaskBridgeStrings,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    label: String = strings.password,
+    isError: Boolean = false,
 ) {
     var passwordVisible by remember { mutableStateOf(false) }
     val toggleLabel = if (passwordVisible) strings.hidePassword else strings.showPassword
@@ -29,8 +31,9 @@ fun PasswordTextField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(strings.password) },
+        label = { Text(label) },
         enabled = enabled,
+        isError = isError,
         visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         trailingIcon = {

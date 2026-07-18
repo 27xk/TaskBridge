@@ -1,8 +1,11 @@
+import json
 from copy import deepcopy
 from datetime import date, datetime, timedelta
+from hashlib import sha256
 from typing import Any
 
 from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -27,9 +30,11 @@ from app.schemas.task import (
 )
 from app.services.sync_service import append_sync_log
 from app.utils.time import (
+    DEFAULT_TIMEZONE,
+    day_utc_bounds,
+    local_date,
     normalize_to_utc_naive,
-    shanghai_day_utc_bounds,
-    shanghai_local_date,
+    resolve_timezone,
     utc_now,
 )
 
@@ -143,6 +148,7 @@ def list_tasks(
     planned_date: date | None = None,
     view: str | None = None,
     now: datetime | None = None,
+    timezone_name: str = DEFAULT_TIMEZONE,
     include_deleted: bool = False,
     templates_only: bool = False,
     cursor_id: int | None = None,
@@ -150,6 +156,10 @@ def list_tasks(
     offset: int = 0,
     limit: int = 100,
 ) -> list[Task]:
+    try:
+        resolved_timezone = resolve_timezone(timezone_name).key
+    except ValueError as error:
+        raise AppException(status_code=400, message="invalid timezone") from error
     if (cursor_id is None) != (cursor_updated_at is None):
         raise AppException(
             status_code=400, message="cursor_id and cursor_updated_at must be provided together"
@@ -178,7 +188,12 @@ def list_tasks(
         conditions.append(Task.planned_date == planned_date)
     if templates_only:
         conditions.append(Task.is_template.is_(True))
-    _apply_view_conditions(conditions, view=view, now=now)
+    _apply_view_conditions(
+        conditions,
+        view=view,
+        now=now,
+        timezone_name=resolved_timezone,
+    )
     current = normalize_to_utc_naive(now) if now else utc_now()
     order_specs = _task_order_specs(current, search_query)
     if cursor_id is not None:
@@ -463,10 +478,20 @@ def _open_status_condition() -> Any:
     return Task.status.not_in(COMPLETED_STATUSES)
 
 
-def get_task_meta(db: Session, current_user: User) -> dict[str, Any]:
-    now = utc_now()
-    today = shanghai_local_date(now)
-    today_start, today_end = shanghai_day_utc_bounds(today)
+def get_task_meta(
+    db: Session,
+    current_user: User,
+    *,
+    timezone_name: str = DEFAULT_TIMEZONE,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current = normalize_to_utc_naive(now) if now else utc_now()
+    try:
+        resolved_timezone = resolve_timezone(timezone_name).key
+    except ValueError as error:
+        raise AppException(status_code=400, message="invalid timezone") from error
+    today = local_date(current, resolved_timezone)
+    today_start, today_end = day_utc_bounds(today, resolved_timezone)
     base = [Task.user_id == current_user.id]
     active = base + [Task.is_deleted.is_(False)]
 
@@ -513,12 +538,12 @@ def get_task_meta(db: Session, current_user: User) -> dict[str, Any]:
                             Task.remind_time >= today_start,
                             Task.remind_time < today_end,
                         ),
-                        and_(Task.due_time.is_not(None), Task.due_time < now),
+                        and_(Task.due_time.is_not(None), Task.due_time < current),
                     ),
                 ],
             ).label("today"),
             _count_tasks_expression(
-                active + [_open_status_condition(), Task.due_time < now]
+                active + [_open_status_condition(), Task.due_time < current]
             ).label("overdue"),
             _count_tasks_expression(active + [Task.is_template.is_(True)]).label("templates"),
             _count_tasks_expression(base + [Task.is_deleted.is_(True)]).label("trash"),
@@ -748,13 +773,14 @@ def _apply_view_conditions(
     *,
     view: str | None,
     now: datetime | None,
+    timezone_name: str = DEFAULT_TIMEZONE,
 ) -> None:
     if not view:
         return
     normalized = view.strip().lower()
     current = normalize_to_utc_naive(now) if now else utc_now()
-    today = shanghai_local_date(current)
-    today_start, today_end = shanghai_day_utc_bounds(today)
+    today = local_date(current, timezone_name)
+    today_start, today_end = day_utc_bounds(today, timezone_name)
 
     if normalized == "inbox":
         conditions.extend([Task.list_type == "inbox", _open_status_condition()])
@@ -786,7 +812,7 @@ def _apply_view_conditions(
     elif normalized == "week":
         end_date = today + timedelta(days=7)
         week_start = today_start
-        _, week_end = shanghai_day_utc_bounds(end_date)
+        _, week_end = day_utc_bounds(end_date, timezone_name)
         conditions.append(
             or_(
                 Task.planned_date.between(today, end_date),
@@ -810,14 +836,31 @@ def _apply_view_conditions(
         conditions.append(Task.is_template.is_(True))
     elif normalized == "trash":
         conditions.append(Task.is_deleted.is_(True))
+    else:
+        raise AppException(status_code=400, message="invalid task view")
 
 
 def create_task(db: Session, current_user: User, payload: TaskCreate) -> Task:
     data = _task_payload_dump(payload)
+    client_request_id = data.get("client_request_id")
+    payload_hash = _create_task_payload_hash(data) if client_request_id else None
+    if client_request_id:
+        existing = _find_task_by_client_request_id(db, current_user, client_request_id)
+        if existing is not None:
+            return _resolve_idempotent_create(existing, payload_hash)
     _ensure_owned_parent_task(db, current_user, data.get("parent_task_id"))
-    task = Task(user_id=current_user.id, **data)
+    task = Task(user_id=current_user.id, create_payload_hash=payload_hash, **data)
     db.add(task)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        if not client_request_id:
+            raise
+        existing = _find_task_by_client_request_id(db, current_user, client_request_id)
+        if existing is None:
+            raise
+        return _resolve_idempotent_create(existing, payload_hash)
     append_sync_log(
         db,
         user_id=current_user.id,
@@ -829,6 +872,40 @@ def create_task(db: Session, current_user: User, payload: TaskCreate) -> Task:
     db.commit()
     db.refresh(task)
     return task
+
+
+def _find_task_by_client_request_id(
+    db: Session,
+    current_user: User,
+    client_request_id: str,
+) -> Task | None:
+    return db.scalar(
+        select(Task).where(
+            Task.user_id == current_user.id,
+            Task.client_request_id == client_request_id,
+        ),
+    )
+
+
+def _resolve_idempotent_create(task: Task, payload_hash: str | None) -> Task:
+    if task.create_payload_hash != payload_hash:
+        raise AppException(
+            status_code=409,
+            message="client_request_id already used with different task data",
+        )
+    return task
+
+
+def _create_task_payload_hash(data: dict[str, Any]) -> str:
+    payload = {key: value for key, value in data.items() if key != "client_request_id"}
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=lambda value: value.isoformat(),
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()
 
 
 def get_task(db: Session, current_user: User, task_id: int) -> Task:

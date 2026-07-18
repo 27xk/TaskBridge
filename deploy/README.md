@@ -9,25 +9,33 @@
 先确认要走哪条路径：
 
 - **本机试用：** 只在当前电脑或同一局域网里体验同步流程，使用下面的本机试用步骤。
-- **长期自托管：** 准备长期使用、多人使用或公网访问，完成试用验证后继续看“配置”，替换密码、密钥、域名和 HTTPS 反向代理。
+- **长期自托管：** 准备长期使用、多人使用或公网访问，完成试用验证后继续看“配置”，替换密码、密钥、域名和反向代理；公网建议使用 HTTPS / WSS。
 
 ### 本机试用
 
-如果只是先在本机体验完整同步流程，请先确认这条路径需要 Docker：
+如果只是先在本机体验完整同步流程，请先确认这条路径需要 Docker。推荐从 [GitHub Releases](https://github.com/27xk/TaskBridge/releases) 下载 `TaskBridge-<version>-deployment.zip`，解压后使用内置启动入口，不需要先安装 Git：
+
+- **Windows：** 启动 Docker Desktop 后，双击 `deploy/start-local.cmd`。
+- **Linux / macOS：** 启动 Docker 后，在解压目录运行 `sh deploy/start-local.sh`。
+
+启动入口只会在 `.env` 不存在时复制本机试用模板，不会覆盖已有配置。它会启动容器并等待 `http://127.0.0.1:8080/ready`，确认就绪后才报告成功；Windows 会随后打开 Web 页面。
+
+完整步骤：
 
 1. 确认已安装 Docker Desktop。
-2. 复制 `.env.local.example` 为 `.env`，先不用改域名或反向代理。
-3. 执行下面的启动命令。
-4. 看到 `http://127.0.0.1:8000/ready` 返回可用后，在桌面端或 Web/PWA 中填写服务器根地址 `http://127.0.0.1:8000`。
-5. 如果 Android 模拟器连接本机后端，服务器地址使用 `http://10.0.2.2:8000`；真机或另一台电脑请填写后端所在电脑的局域网 IP。
+2. 下载并解压 Release 部署包，或准备完整项目源码。
+3. 使用上面的启动入口；需要手动控制时再复制 `.env.local.example` 为 `.env` 并执行下面的 Compose 命令。
+4. 打开 `http://127.0.0.1:8080/ready` 确认服务可用，再访问 `http://127.0.0.1:8080` 打开 Web/PWA。
+5. Web 登录页和本机 Windows 桌面端都填写 `http://127.0.0.1:8080`；Android 模拟器填写 `http://10.0.2.2:8080`。真机或另一台电脑填写 `http://<运行服务电脑的局域网 IP>:8080`。
 
 环境要求：
 
 - 已安装 Docker Engine 或 Docker Desktop。
 - `docker compose version` 可以正常执行。
-- 服务器防火墙允许访问 API 端口 `8000`，或由 Nginx / Caddy 反向代理到该端口。
+- 服务器防火墙允许访问统一入口 `8080`。普通客户端不需要访问 `8000`；只有开发或高级 API 直连时才单独开放该端口。
 
 ```bash
+# 源码方式；使用 Release 部署包时直接进入解压目录
 git clone https://github.com/27xk/TaskBridge.git
 cd TaskBridge/deploy
 cp .env.local.example .env
@@ -37,33 +45,35 @@ docker compose -f docker-compose.release.yml up -d
 Windows PowerShell：
 
 ```powershell
+# 源码方式；使用 Release 部署包时直接进入解压目录
 git clone https://github.com/27xk/TaskBridge.git
 cd TaskBridge\deploy
 Copy-Item .env.local.example .env
 docker compose -f docker-compose.release.yml up -d
 ```
 
-本机试用示例使用 `ENVIRONMENT=development`，并设置 `WEB_CORS_ORIGINS=*`，方便手机、局域网电脑和 Web/PWA 同时访问开发后端。如果要部署到公网或共享服务器，请改用下面“配置”章节的生产示例，替换密码、密钥和域名，并把 `WEB_CORS_ORIGINS` 改为明确的 HTTPS Web 客户端来源，例如 `WEB_CORS_ORIGINS=https://taskbridge.example.com`。
+本机试用示例使用 `ENVIRONMENT=development`，并设置 `WEB_CORS_ORIGINS=*`，方便手机、局域网电脑和 Web/PWA 同时访问开发后端。如果要部署到公网或共享服务器，请改用下面“配置”章节的生产示例，替换密码、密钥和域名，并把 `WEB_CORS_ORIGINS` 改为明确的 Web 客户端来源，例如 `WEB_CORS_ORIGINS=http://taskbridge.example.com` 或 `WEB_CORS_ORIGINS=https://taskbridge.example.com`。
 
 启动后访问：
 
 ```text
-http://127.0.0.1:8000/health
-http://127.0.0.1:8000/ready
+http://127.0.0.1:8080
+http://127.0.0.1:8080/health
+http://127.0.0.1:8080/ready
 ```
 
-`/health` 只表示 API 进程存活，`/ready` 会检查数据库和 Redis 连通性。Redis 不可用时 `/ready` 返回 503，并在响应体中标记 `degraded`。
+`web` 容器直接提供静态客户端，并把 `/api/`、`/ws/`、`/health`、`/ready` 和 `/status` 转发到 `api` 容器。`/health` 只表示 API 进程存活，`/ready` 会检查数据库和 Redis 连通性。
 
 ### 验证客户端能登录
 
-1. 打开 Web/PWA、桌面端或 Android 端。
-2. 在登录页填写服务器根地址：本机桌面/Web 使用 `http://127.0.0.1:8000`；Android 模拟器使用 `http://10.0.2.2:8000`；手机或另一台电脑使用后端所在电脑的局域网 IP 或域名。
+1. Web/PWA 访问 `http://127.0.0.1:8080`；桌面端或 Android 端从安装包打开。
+2. 在登录页填写统一服务器根地址：本机 Web 和 Windows 使用 `http://127.0.0.1:8080`；Android 模拟器使用 `http://10.0.2.2:8080`；手机或另一台电脑使用 `http://<服务器局域网 IP>:8080`。
 3. 直接登录或注册。登录会自动检查连接；“检查连接”只用于排查服务器地址。
 4. 新建一条待办，刷新或切换到另一端确认能看到同一条任务。
 
 ## 镜像来源
 
-默认后端镜像：
+源码部署默认跟随最新后端镜像：
 
 ```text
 ghcr.io/27xk/taskbridge:latest
@@ -75,13 +85,18 @@ ghcr.io/27xk/taskbridge:latest
 TASKBRIDGE_BACKEND_IMAGE=27xk/taskbridge:latest
 ```
 
+GitHub Release 的 `TaskBridge-<version>-deployment.zip` 会把 `.env.example`、`.env.local.example` 和 Compose fallback 中的后端镜像固定为同一发布标签，例如 `ghcr.io/27xk/taskbridge:v0.1.8`。因此重新解压同一版本不会意外拉取未来的 `latest`。升级时请下载新版本部署包，或主动修改镜像标签。
+
 ## 服务
 
 | 服务 | 端口 | 说明 |
 | --- | --- | --- |
+| `web` | `8080` | Web/PWA 静态页面，并同源代理 API 和 WebSocket |
 | `api` | `8000` | TaskBridge 后端 API，对宿主机开放 |
 | `mysql` | 内部网络 | MySQL 数据库，默认不对宿主机开放 |
 | `redis` | 内部网络 | Redis，默认不对宿主机开放 |
+
+Release Compose 使用固定内部网段 `172.30.27.0/24`，其中 Web 反向代理固定为 `172.30.27.10`。默认 `TRUSTED_PROXY_IPS=172.30.27.10` 只信任这一个代理出口，避免其他容器伪造客户端转发地址。
 
 ## 配置
 
@@ -99,11 +114,12 @@ cp .env.example .env
 - `METRICS_TOKEN`
 - `REGISTRATION_ENABLED`
 - `TASKBRIDGE_API_BIND`
+- `TASKBRIDGE_WEB_BIND`
 - `WEB_CORS_ORIGINS`
 
 如果 `ENVIRONMENT=production`，`JWT_SECRET` 必须是至少 32 位的随机字符串，且数据库密码不能使用默认值。
 
-生产示例默认 `REGISTRATION_ENABLED=false`，避免部署后开放陌生账号注册；本机试用示例会打开注册，方便创建第一个账号。生产示例默认 `TASKBRIDGE_API_BIND=127.0.0.1:8000`，建议通过 Nginx / Caddy 对外提供 HTTPS；如果确实要直接暴露 API 端口，再改成 `8000` 或指定公网监听地址。
+生产示例默认 `REGISTRATION_ENABLED=false`，避免部署后开放陌生账号注册；本机试用示例会打开注册，方便创建第一个账号。生产示例把 Web 和 API 分别绑定到 `127.0.0.1:8080`、`127.0.0.1:8000`，建议让 Nginx / Caddy 对外代理 Web 入口 `8080`；公网建议使用 HTTPS / WSS。如果确实要直接提供明文入口，再把 `TASKBRIDGE_WEB_BIND` 改成 `8080`。
 生成 `JWT_SECRET`：
 
 ```bash
@@ -127,6 +143,22 @@ printf '%s\n' 'replace-with-a-strong-password' | docker compose -f docker-compos
 
 确认第一个账号能登录后，再保持 `REGISTRATION_ENABLED=false`。需要新增用户时，重复执行该命令或临时打开注册后再关闭。
 
+### 忘记密码
+
+已登录用户可在客户端的账号安全入口修改密码。无法登录时，自托管管理员可以在后端容器内重置密码；命令执行后会同时撤销该账号全部登录会话：
+
+```bash
+docker compose -f docker-compose.release.yml exec api \
+  python -m tools.reset_password --username-or-email owner@example.com
+```
+
+自动化环境可通过标准输入提供新密码，避免写入命令历史：
+
+```bash
+printf '%s\n' 'replace-with-a-strong-password' | docker compose -f docker-compose.release.yml exec -T api \
+  python -m tools.reset_password --username-or-email owner@example.com --password-stdin
+```
+
 `.env` 中的 `DATABASE_URL` 密码需要和 `MYSQL_PASSWORD` 保持一致。默认文件写法如下：
 
 ```text
@@ -138,30 +170,41 @@ DATABASE_URL=mysql+pymysql://taskbridge:change-this-password@mysql:3306/taskbrid
 
 ## 客户端连接地址
 
-客户端填写服务器根地址，例如：
+Release Compose 下，Web/PWA、Windows 和 Android 都填写同一个入口：
 
 ```text
-http://<服务器 IP 或域名>:8000
+http://<服务器 IP 或域名>:8080
 ```
+
+该入口已经代理 `/api/` 和 `/ws/`。普通用户不需要知道后端端口，也不需要分别配置 HTTP 和 WebSocket 地址。
 
 桌面端可以在设置页修改服务器地址，登录页也会保留首次连接入口。Android 端可以在登录 / 注册页直接填写服务器地址，也可以在设置页修改。客户端会自动派生请求地址和同步连接地址，保存后新的请求和同步连接会使用用户填写的服务器根地址。
 
 构建时注入的地址会作为首次启动默认值，用户保存自己的服务器地址后会覆盖该默认值。
 
-高级端点通常不需要手动填写。只有在反向代理把请求路径或同步路径分流到不同位置时，才需要展开高级端点并分别填写：
+高级端点通常不需要手动填写。只有开发直连后端，或反向代理把请求路径和同步路径分流到不同位置时，才需要展开并分别填写：
 
 ```text
 http://<服务器 IP 或域名>:8000/api/v1/
 ws://<服务器 IP 或域名>:8000/ws/sync
 ```
 
-## HTTPS / WSS 反向代理
+## HTTP / WS 与 HTTPS / WSS 反向代理
 
-公网部署不要直接让客户端用明文 HTTP / WS 登录。建议在后端容器前放 Nginx 或 Caddy。客户端填写服务器根地址：`https://<域名>`。
+客户端支持 HTTP / WS，也支持 HTTPS / WSS。公网部署建议在后端容器前放 Nginx 或 Caddy，并使用 HTTPS / WSS；本机试用、内网或明确接受明文传输的部署可以继续使用 HTTP / WS。
+
+客户端填写服务器根地址，例如：
+
+```text
+http://<服务器 IP 或域名>:8080
+https://<域名>
+```
 
 客户端会自动派生请求地址和同步连接地址。只有需要手动配置高级端点时，才分别填写：
 
 ```text
+http://<服务器 IP 或域名>:8000/api/v1/
+ws://<服务器 IP 或域名>:8000/ws/sync
 https://<域名>/api/v1/
 wss://<域名>/ws/sync
 ```
@@ -171,7 +214,9 @@ wss://<域名>/ws/sync
 - [Nginx 示例](./nginx.taskbridge.conf.example)
 - [Caddy 示例](./Caddyfile.taskbridge.example)
 
-替换示例中的 `taskbridge.example.com` 和证书路径后，再把客户端默认服务器根地址改成对应的 HTTPS 域名。
+示例反向代理把外部域名转发到 Compose Web 入口 `127.0.0.1:8080`，再由内层 Nginx 分发静态资源、API 和 WebSocket。替换域名和证书路径后，客户端填写该统一域名。使用明文 HTTP / WS 时，不需要证书文件，但仍应确认网络边界和访问控制。
+
+浏览器通常只允许 HTTPS、`localhost` 或 `127.0.0.1` 注册 Service Worker。通过 `http://192.168.x.x:8080` 访问时普通 Web、HTTP 和 WS 可以工作，但“安装为应用”和离线页面缓存可能被浏览器禁用；这是浏览器安全限制，不能由 TaskBridge 绕过。
 
 ## 生产运维
 
@@ -196,20 +241,34 @@ Authorization: Bearer <METRICS_TOKEN>
 
 ### 可信代理
 
-如果后端部署在 Nginx / Caddy 等反向代理之后，只有把代理出口 IP 或 CIDR 写入 `TRUSTED_PROXY_IPS` 后，后端才会信任 `X-Forwarded-For` / `X-Real-IP` 并用于限流。不要把它设置成开放网段，除非你明确知道入口链路只有可信代理。
+如果后端部署在 Nginx / Caddy 等反向代理之后，只有把代理出口 IP 或 CIDR 写入 `TRUSTED_PROXY_IPS` 后，后端才会信任 `X-Forwarded-For` / `X-Real-IP` 并用于限流。Release Compose 的内层 Web 代理固定使用 `172.30.27.10`，所以示例环境变量只信任该地址；内层 Nginx 会用实际连接地址重写转发头，不接受客户端自行提供的 `X-Forwarded-For`。不要把它设置成开放网段，除非你明确知道入口链路只有可信代理。
+
+如果宿主机已有网络与 `172.30.27.0/24` 冲突，需要同时修改 `docker-compose.release.yml` 中的子网、各服务静态地址和 `.env` 中的 `TRUSTED_PROXY_IPS`，然后重新创建容器。不要只改其中一处。
 
 ## 更新
 
+使用 Git 源码部署时，先更新仓库。Web 容器通过 bind mount 直接读取仓库中的 `web/`，只执行 `docker compose pull` 不会更新 Web/PWA 文件。
+
 ```bash
+cd TaskBridge
+git pull --ff-only
 cd deploy
 docker compose -f docker-compose.release.yml pull
 docker compose -f docker-compose.release.yml up -d
 ```
 
+如果使用 GitHub Release 中的部署包，请先下载并解压新版部署包，再把原部署目录中的 `.env` 复制到新版 `deploy/` 目录，最后在新版目录中执行上面的两条 `docker compose` 命令。不要直接覆盖数据库备份；更新前建议先运行 `backup-mysql.sh`。
+
 ## 查看日志
 
 ```bash
 docker compose -f docker-compose.release.yml logs -f api
+```
+
+查看 Web 入口和代理日志：
+
+```bash
+docker compose -f docker-compose.release.yml logs -f web
 ```
 
 ## 数据库迁移
@@ -284,8 +343,14 @@ ports:
 docker compose -f docker-compose.release.yml down
 ```
 
-如需删除数据卷：
+## 永久删除服务器数据
+
+`down -v` 不是普通停止命令。它会删除 Compose 的 MySQL 和 Redis 数据卷，包括所有账号、服务器任务、会话和同步状态；客户端尚未同步的本机数据也不会自动恢复这些服务器记录。
+
+执行前先运行 `./backup-mysql.sh`，并确认备份文件可读取。只有明确要重建空白服务器时才执行：
 
 ```bash
 docker compose -f docker-compose.release.yml down -v
 ```
+
+普通停止或重启只使用 `docker compose -f docker-compose.release.yml down` / `up -d`，不要附加 `-v`。
