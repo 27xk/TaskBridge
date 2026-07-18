@@ -87,14 +87,21 @@ test("desktop task drawers implement modal keyboard and focus behavior once", as
   assert.doesNotMatch(todayView, /class="drawer-layer"/);
 });
 
-test("desktop settings metadata disclosure opens before targeted navigation", async () => {
+test("desktop settings requests select a persistent category without anchor scrolling", async () => {
   const [settingsView, metadataPanel] = await Promise.all([
     source("desktop/src/views/SettingsView.vue"),
     source("desktop/src/components/settings/SettingsMetadataPanel.vue"),
   ]);
 
-  assert.match(settingsView, /if \(sectionId === "metadata"\)[\s\S]{0,100}metadataOpen\.value = true/);
+  assert.match(settingsView, /const activeSettingsSection = ref<SettingsSectionId>\("account-display"\)/);
+  assert.match(settingsView, /function showSettingsSection\(sectionId: string\): void/);
+  assert.match(settingsView, /activeSettingsSection\.value = target\.sectionId/);
+  assert.match(settingsView, /if \(target\.sectionId === "metadata"\) metadataOpen\.value = false/);
+  assert.match(settingsView, /if \(!request\) return;\s*showSettingsSection\(request\.sectionId\)/);
+  assert.match(settingsView, /if \(request\.sectionId === "sync-recovery"\) syncDiagnosticsOpen\.value = true/);
+  assert.match(settingsView, /v-show="activeSettingsSection === 'metadata'"/);
   assert.match(settingsView, /v-model:open="metadataOpen"/);
+  assert.doesNotMatch(settingsView, /scrollIntoView|scrollToSettingsSection/);
   assert.match(metadataPanel, /defineModel<boolean>\("open"/);
   assert.match(metadataPanel, /:open="open"/);
 });
@@ -188,8 +195,8 @@ test("responsive task workspaces place tasks before secondary diagnostics", asyn
   assert.doesNotMatch(responsiveWorkspaceCss, /\.(?:main-panel|sidebar)\s*\{[^}]*\border\s*:/);
   assert.doesNotMatch(desktopToday, /class="today-overview"/);
   assert.doesNotMatch(desktopToday, /TaskSyncHealthBar/);
-  assert.match(await source("desktop/src/App.vue"), /<WorkspaceStatusBanner[\s\S]{0,160}v-if="workspaceStatus\.banner !== 'none'"/);
-  assert.match(androidTaskList, /if \(syncHealth\.needsAttention\)[\s\S]{0,180}TaskListSyncHealthBar/);
+  assert.match(await source("desktop/src/App.vue"), /<WorkspaceStatusBanner[\s\S]{0,160}v-if="auth\.isAuthenticated && workspaceStatus\.banner !== 'none'"/);
+  assert.match(androidTaskList, /if \(!localWorkspaceMode && syncHealth\.needsAttention\)[\s\S]{0,180}TaskListSyncHealthBar/);
 });
 
 test("Android top-level navigation, task actions and dropdowns use platform conventions", async () => {
@@ -234,7 +241,7 @@ test("Android authentication initialization does not flash an interactive login 
   assert.match(mainActivity, /TaskBridgeNavHost\([\s\S]{0,320}startDestination = startDestination/);
   assert.match(mainActivity, /NavHost\(navController = navController, startDestination = startDestination\)/);
   assert.match(mainActivity, /currentRoute == Routes\.Login \|\| currentRoute == Routes\.Register/);
-  assert.match(mainActivity, /if \(token\.isNullOrBlank\(\)\)[\s\S]{0,220}navigateToAuthentication\(\)/);
+  assert.match(mainActivity, /else if \(!localWorkspaceMode\)[\s\S]{0,220}navigateToAuthentication\(\)/);
 });
 
 test("Android restored editor drafts are not overwritten by replayed share intents", async () => {

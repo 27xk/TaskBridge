@@ -18,19 +18,20 @@
 
 ```bash
 cd deploy
-cp .env.example .env
+cp .env.local.example .env
 docker compose -f docker-compose.release.yml up -d
 ```
 
 展示健康检查：
 
 ```text
-http://127.0.0.1:8000/health
+http://127.0.0.1:8080/health
+http://127.0.0.1:8080
 ```
 
 ### 2. 登录同一账号
 
-在 Android App 和 Windows 桌面端分别登录同一个账号。
+在 Web、Android App 和 Windows 桌面端分别登录同一个账号。Web 打开 `http://127.0.0.1:8080`，并使用同一地址作为服务器地址。
 
 ### 3. 在桌面端创建任务
 
@@ -57,24 +58,20 @@ http://127.0.0.1:8000/health
 
 断开网络后，在 Android 完成一个任务。恢复网络后，在 Windows 桌面端查看状态同步。
 
+再依次演示会话自然失效后的本机工作区：
+
+1. Windows 和 Android 在登录页选择“进入本机工作区”，Web 选择“继续离线使用”。
+2. 分别打开已缓存任务并新增一条任务，确认界面明确显示当前不会同步。
+3. 点击“登录并同步”，使用同一服务器上的原账号登录，确认本机修改上传并出现在另外两端。
+4. 主动退出或切换服务器，确认旧工作区入口不再保留，说明该行为与会话自然失效不同。
+
 ### 7. 展示 Windows 悬浮窗
 
 打开悬浮窗，展示今日任务和快速查看体验。
 
-## 已有截图
-
-仓库已包含以下截图，可用于 README、Release 说明和宣传图制作：
-
-- `docs/assets/screenshots/PC的今日.png`
-- `docs/assets/screenshots/PC的全部.png`
-- `docs/assets/screenshots/PC的设置.png`
-- `docs/assets/screenshots/PC悬浮窗.png`
-- `docs/assets/screenshots/APP首页.jpg`
-- `docs/assets/screenshots/APP设置页.jpg`
-- `docs/assets/screenshots/APP两组件UI.jpg`
-
 ## 发布前建议补充
 
+- 从本次构建重新生成 Web、Android 和 Windows 当前界面截图，不复用旧版本截图。
 - 一段 60-120 秒的同步演示视频。
 - GitHub Release 下载页面截图。
 - Docker 一键部署后的健康检查结果截图。

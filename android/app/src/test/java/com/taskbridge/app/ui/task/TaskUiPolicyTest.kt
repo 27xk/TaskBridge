@@ -87,7 +87,19 @@ class TaskUiPolicyTest {
     }
 
     @Test
-    fun taskListSyncHealthPointsToDetailsWhenTasksNeedAttention() {
+    fun pendingTasksUseAnInformationalSyncState() {
+        val health = taskListSyncHealthText(
+            tasks = listOf(taskWithSyncStatus(SyncStatus.PendingUpdate)),
+            languageCode = "en-US",
+        )
+
+        assertEquals(false, health.needsAttention)
+        assertEquals("Waiting to sync", health.title)
+        assertEquals("1 task will sync automatically when a connection is available.", health.body)
+    }
+
+    @Test
+    fun onlyFailedOrConflictedTasksNeedAttention() {
         val health = taskListSyncHealthText(
             tasks = listOf(
                 taskWithSyncStatus(SyncStatus.PendingUpdate),
@@ -99,7 +111,7 @@ class TaskUiPolicyTest {
 
         assertEquals(true, health.needsAttention)
         assertEquals("Sync needs attention", health.title)
-        assertEquals("3 tasks are pending, failed, or conflicted. Open sync details before clearing this device.", health.body)
+        assertEquals("2 tasks failed or conflicted. Open sync details to resolve them.", health.body)
     }
 
     @Test

@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "electron-vite";
 
-const FALLBACK_BASE_URL = "http://127.0.0.1:8000/api/v1";
-const FALLBACK_WS_URL = "ws://127.0.0.1:8000/ws/sync";
+const FALLBACK_BASE_URL = "";
+const FALLBACK_WS_URL = "";
 const taskBridgeBaseUrl = readEndpointEnv("TASKBRIDGE_BASE_URL", FALLBACK_BASE_URL, ["http:", "https:"]);
 const taskBridgeWsUrl = readEndpointEnv("TASKBRIDGE_WS_URL", FALLBACK_WS_URL, ["ws:", "wss:"]);
 

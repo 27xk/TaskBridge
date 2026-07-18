@@ -3,6 +3,7 @@ package com.taskbridge.app.data.datastore
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -13,6 +14,7 @@ import com.taskbridge.app.utils.ShanghaiTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -22,14 +24,17 @@ import java.time.ZoneId
 private val Context.syncPreferences by preferencesDataStore(name = "taskbridge_sync")
 private val Context.legacyTokenPreferences by preferencesDataStore(name = "taskbridge_tokens")
 
+data class RequestAuthContext(
+    val workspace: WorkspaceIdentity?,
+    val apiBaseUrl: String,
+    val accessToken: String?,
+)
+
 class TokenDataStore(context: Context) {
     private val appContext = context.applicationContext
     private val securePreferences = createSecurePreferences(appContext)
-    private val accessTokenState = MutableStateFlow(securePreferences.getString(ACCESS_TOKEN, null))
-    private val refreshTokenState = MutableStateFlow(securePreferences.getString(REFRESH_TOKEN, null))
+    private val tokenRevision = MutableStateFlow(0L)
 
-    val accessToken: Flow<String?> = accessTokenState
-    val refreshToken: Flow<String?> = refreshTokenState
     val currentUserId: Flow<String?> = appContext.syncPreferences.data.map { preferences ->
         preferences[CURRENT_USER_ID]
     }
@@ -46,8 +51,21 @@ class TokenDataStore(context: Context) {
         normalizeWebSocketUrl(preferences[WEB_SOCKET_URL])
     }
 
+    val currentWorkspace: Flow<WorkspaceIdentity?> = appContext.syncPreferences.data.map { preferences ->
+        workspaceFromPreferences(preferences)
+    }
+
+    val accessToken: Flow<String?> = combine(currentWorkspace, tokenRevision) { workspace, _ ->
+        workspace?.let { scopedToken(ACCESS_TOKEN, it) }
+    }
+
+    val refreshToken: Flow<String?> = combine(currentWorkspace, tokenRevision) { workspace, _ ->
+        workspace?.let { scopedToken(REFRESH_TOKEN, it) }
+    }
+
     val lastSyncTime: Flow<String?> = appContext.syncPreferences.data.map { preferences ->
-        preferences[LAST_SYNC_TIME]
+        val workspace = workspaceFromPreferences(preferences)
+        workspace?.let { preferences[lastSyncTimeKey(it)] }
     }
 
     val language: Flow<String> = appContext.syncPreferences.data.map { preferences ->
@@ -55,7 +73,7 @@ class TokenDataStore(context: Context) {
     }
 
     val widgetOpacityPercent: Flow<Int> = appContext.syncPreferences.data.map { preferences ->
-        preferences[WIDGET_OPACITY_PERCENT] ?: DEFAULT_WIDGET_OPACITY_PERCENT
+        (preferences[WIDGET_OPACITY_PERCENT] ?: DEFAULT_WIDGET_OPACITY_PERCENT).coerceIn(60, 100)
     }
 
     val widgetTaskScope: Flow<String> = appContext.syncPreferences.data.map { preferences ->
@@ -71,40 +89,129 @@ class TokenDataStore(context: Context) {
     }
 
     val displayTimeZone: Flow<String> = appContext.syncPreferences.data.map { preferences ->
-        val userId = preferences[CURRENT_USER_ID]
-        val userTimeZone = userId?.let { preferences[userDisplayTimeZoneKey(it)] }
-        normalizeTimeZone(userTimeZone ?: preferences[DISPLAY_TIME_ZONE] ?: DEFAULT_DISPLAY_TIME_ZONE)
+        val workspace = workspaceFromPreferences(preferences)
+        val workspaceTimeZone = workspace?.let { preferences[workspaceDisplayTimeZoneKey(it)] }
+        val legacyUserTimeZone = workspace?.userId?.let { preferences[userDisplayTimeZoneKey(it)] }
+        effectiveDisplayTimeZone(
+            workspaceTimeZone ?: legacyUserTimeZone ?: preferences[DISPLAY_TIME_ZONE] ?: DEFAULT_DISPLAY_TIME_ZONE,
+        )
     }
 
     val lastBackupImportUndoItems: Flow<String?> = appContext.syncPreferences.data.map { preferences ->
-        preferences[LAST_BACKUP_IMPORT_UNDO_ITEMS]
+        val workspace = workspaceFromPreferences(preferences)
+        workspace?.let {
+            preferences[lastBackupImportUndoItemsKey(it)] ?: preferences[LAST_BACKUP_IMPORT_UNDO_ITEMS]
+        }
     }
 
     suspend fun hasAccessToken(): Boolean {
         return accessToken.first().isNullOrBlank().not()
     }
 
+    suspend fun requestAuthContext(): RequestAuthContext {
+        val preferences = appContext.syncPreferences.data.first()
+        val workspace = workspaceFromPreferences(preferences)
+        return RequestAuthContext(
+            workspace = workspace,
+            apiBaseUrl = normalizeApiBaseUrl(preferences[API_BASE_URL]),
+            accessToken = workspace?.let { scopedToken(ACCESS_TOKEN, it) },
+        )
+    }
+
+    suspend fun initializeLegacyWorkspaceOwnership() {
+        appContext.syncPreferences.edit { preferences ->
+            if (preferences[LEGACY_WORKSPACE_OWNERSHIP_INITIALIZED] == true) return@edit
+            workspaceFromPreferences(preferences)?.let { workspace ->
+                val userOwnerKey = legacyWorkspaceOwnerKey(workspace.userId)
+                if (preferences[userOwnerKey].isNullOrBlank()) {
+                    preferences[userOwnerKey] = workspace.id
+                }
+                val globalOwnerKey = legacyWorkspaceOwnerKey("legacy")
+                if (preferences[globalOwnerKey].isNullOrBlank()) {
+                    preferences[globalOwnerKey] = workspace.id
+                }
+                if (
+                    preferences[LAST_SYNC_TIME] != null &&
+                    preferences[LEGACY_SYNC_CURSOR_CLAIMED_WORKSPACE].isNullOrBlank()
+                ) {
+                    preferences[LEGACY_SYNC_CURSOR_CLAIMED_WORKSPACE] = workspace.id
+                }
+            }
+            preferences[LEGACY_WORKSPACE_OWNERSHIP_INITIALIZED] = true
+        }
+    }
+
+    suspend fun canClaimLegacyWorkspace(
+        ownerUserId: String,
+        workspace: WorkspaceIdentity,
+    ): Boolean {
+        val claimedWorkspaceId = appContext.syncPreferences.data.first()[
+            legacyWorkspaceOwnerKey(ownerUserId)
+        ]
+        return com.taskbridge.app.data.datastore.canClaimLegacyWorkspace(
+            claimedWorkspaceId,
+            workspace,
+        )
+    }
+
     suspend fun saveTokens(accessToken: String, refreshToken: String, userId: Int? = null) {
+        currentWorkspace.first()?.let { claimLegacySyncCursor(it) }
+        val resolvedUserId = userId?.toString()
+            ?: currentUserId.first()?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("active user required")
+        val workspace = WorkspaceIdentity.create(serverBaseUrl.first(), resolvedUserId)
         withContext(Dispatchers.IO) {
             securePreferences.edit()
-                .putString(ACCESS_TOKEN, accessToken)
-                .putString(REFRESH_TOKEN, refreshToken)
+                .putString(scopedSecureKey(ACCESS_TOKEN, workspace), accessToken)
+                .putString(scopedSecureKey(REFRESH_TOKEN, workspace), refreshToken)
+                .remove(ACCESS_TOKEN)
+                .remove(REFRESH_TOKEN)
                 .apply()
         }
-        userId?.let { id ->
-            appContext.syncPreferences.edit { preferences ->
-                preferences[CURRENT_USER_ID] = id.toString()
-            }
+        appContext.syncPreferences.edit { preferences ->
+            preferences[CURRENT_USER_ID] = resolvedUserId
         }
-        accessTokenState.value = accessToken
-        refreshTokenState.value = refreshToken
+        tokenRevision.value += 1
         clearLegacyTokenPreferences()
     }
 
     suspend fun saveLastSyncTime(serverTime: String) {
+        val workspace = currentWorkspace.first() ?: return
+        saveLastSyncTime(workspace, serverTime)
+    }
+
+    suspend fun saveLastSyncTime(workspace: WorkspaceIdentity, serverTime: String) {
         appContext.syncPreferences.edit { preferences ->
-            preferences[LAST_SYNC_TIME] = serverTime
+            preferences[lastSyncTimeKey(workspace)] = serverTime
+            val legacyClaim = preferences[LEGACY_SYNC_CURSOR_CLAIMED_WORKSPACE]
+            if (legacyClaim == null || legacyClaim == workspace.id) {
+                preferences[LEGACY_SYNC_CURSOR_CLAIMED_WORKSPACE] = workspace.id
+                preferences.remove(LAST_SYNC_TIME)
+            }
         }
+    }
+
+    suspend fun lastSyncTimeFor(workspace: WorkspaceIdentity): String? {
+        var resolvedCursor: String? = null
+        appContext.syncPreferences.edit { preferences ->
+            val resolution = resolveWorkspaceSyncCursor(
+                scopedCursor = preferences[lastSyncTimeKey(workspace)],
+                legacyCursor = preferences[LAST_SYNC_TIME],
+                legacyClaimedWorkspaceId = preferences[LEGACY_SYNC_CURSOR_CLAIMED_WORKSPACE],
+                activeWorkspaceId = workspace.id,
+            )
+            resolvedCursor = resolution.cursor
+            if (resolution.shouldClaimLegacyCursor) {
+                resolution.cursor?.let { cursor ->
+                    if (preferences[lastSyncTimeKey(workspace)] == null) {
+                        preferences[lastSyncTimeKey(workspace)] = cursor
+                    }
+                }
+                preferences[LEGACY_SYNC_CURSOR_CLAIMED_WORKSPACE] = workspace.id
+                preferences.remove(LAST_SYNC_TIME)
+            }
+        }
+        return resolvedCursor
     }
 
     suspend fun saveLanguage(language: String) {
@@ -114,42 +221,44 @@ class TokenDataStore(context: Context) {
     }
 
     suspend fun saveNetworkEndpoints(apiBaseUrl: String, webSocketUrl: String) {
-        appContext.syncPreferences.edit { preferences ->
-            preferences[API_BASE_URL] = validateApiBaseUrl(apiBaseUrl)
-            preferences[WEB_SOCKET_URL] = validateWebSocketUrl(webSocketUrl)
-            preferences[SERVER_BASE_URL] = inferServerBaseUrlFromApi(validateApiBaseUrl(apiBaseUrl))
-        }
+        val normalizedApiBaseUrl = validateApiBaseUrl(apiBaseUrl)
+        saveNetworkEndpoints(
+            NetworkEndpoints(
+                serverBaseUrl = inferServerBaseUrlFromApi(normalizedApiBaseUrl),
+                apiBaseUrl = normalizedApiBaseUrl,
+                webSocketUrl = validateWebSocketUrl(webSocketUrl),
+            ),
+        )
     }
 
     suspend fun saveLastBackupImportUndoItems(raw: String) {
+        val workspace = currentWorkspace.first() ?: return
         appContext.syncPreferences.edit { preferences ->
             val value = raw.trim()
             if (value.isBlank() || value == "[]") {
-                preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
+                preferences.remove(lastBackupImportUndoItemsKey(workspace))
             } else {
-                preferences[LAST_BACKUP_IMPORT_UNDO_ITEMS] = value
+                preferences[lastBackupImportUndoItemsKey(workspace)] = value
             }
+            preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
         }
     }
 
     suspend fun clearLastBackupImportUndoItems() {
+        val workspace = currentWorkspace.first()
         appContext.syncPreferences.edit { preferences ->
+            workspace?.let { preferences.remove(lastBackupImportUndoItemsKey(it)) }
             preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
         }
     }
 
     suspend fun saveServerBaseUrl(serverBaseUrl: String) {
-        val endpoints = deriveNetworkEndpoints(serverBaseUrl)
-        appContext.syncPreferences.edit { preferences ->
-            preferences[SERVER_BASE_URL] = endpoints.serverBaseUrl
-            preferences[API_BASE_URL] = endpoints.apiBaseUrl
-            preferences[WEB_SOCKET_URL] = endpoints.webSocketUrl
-        }
+        saveNetworkEndpoints(deriveNetworkEndpoints(serverBaseUrl))
     }
 
     suspend fun saveWidgetOpacityPercent(opacityPercent: Int) {
         appContext.syncPreferences.edit { preferences ->
-            preferences[WIDGET_OPACITY_PERCENT] = opacityPercent.coerceIn(0, 100)
+            preferences[WIDGET_OPACITY_PERCENT] = opacityPercent.coerceIn(60, 100)
         }
     }
 
@@ -172,31 +281,78 @@ class TokenDataStore(context: Context) {
     }
 
     suspend fun saveDisplayTimeZone(timeZoneId: String) {
-        val userId = appContext.syncPreferences.data.first()[CURRENT_USER_ID]
-        val normalized = normalizeTimeZone(timeZoneId)
+        val workspace = currentWorkspace.first()
+        val normalized = effectiveDisplayTimeZone(timeZoneId)
         appContext.syncPreferences.edit { preferences ->
-            if (userId.isNullOrBlank()) {
+            if (workspace == null) {
                 preferences[DISPLAY_TIME_ZONE] = normalized
             } else {
-                preferences[userDisplayTimeZoneKey(userId)] = normalized
+                preferences[workspaceDisplayTimeZoneKey(workspace)] = normalized
             }
         }
     }
 
-    suspend fun clear() {
+    suspend fun expireSession() {
+        val workspace = currentWorkspace.first()
         withContext(Dispatchers.IO) {
-            securePreferences.edit()
-                .remove(ACCESS_TOKEN)
-                .remove(REFRESH_TOKEN)
-                .apply()
+            securePreferences.edit().apply {
+                workspace?.let {
+                    remove(scopedSecureKey(ACCESS_TOKEN, it))
+                    remove(scopedSecureKey(REFRESH_TOKEN, it))
+                }
+                remove(ACCESS_TOKEN)
+                remove(REFRESH_TOKEN)
+            }.apply()
         }
-        accessTokenState.value = null
-        refreshTokenState.value = null
+        tokenRevision.value += 1
+        clearLegacyTokenPreferences()
+    }
+
+    suspend fun clear() {
+        val workspace = currentWorkspace.first()
+        workspace?.let { claimLegacySyncCursor(it) }
+        withContext(Dispatchers.IO) {
+            securePreferences.edit().apply {
+                workspace?.let {
+                    remove(scopedSecureKey(ACCESS_TOKEN, it))
+                    remove(scopedSecureKey(REFRESH_TOKEN, it))
+                }
+                remove(ACCESS_TOKEN)
+                remove(REFRESH_TOKEN)
+            }.apply()
+        }
         appContext.syncPreferences.edit { preferences ->
             preferences.remove(LAST_SYNC_TIME)
             preferences.remove(CURRENT_USER_ID)
         }
+        tokenRevision.value += 1
         clearLegacyTokenPreferences()
+    }
+
+    private suspend fun saveNetworkEndpoints(endpoints: NetworkEndpoints) {
+        val currentServerUrl = serverBaseUrl.first()
+        val resetSession = shouldResetSessionForServerChange(currentServerUrl, endpoints.serverBaseUrl)
+        if (resetSession) currentWorkspace.first()?.let { claimLegacySyncCursor(it) }
+        appContext.syncPreferences.edit { preferences ->
+            preferences[SERVER_BASE_URL] = endpoints.serverBaseUrl
+            preferences[API_BASE_URL] = endpoints.apiBaseUrl
+            preferences[WEB_SOCKET_URL] = endpoints.webSocketUrl
+            if (resetSession) {
+                preferences.remove(CURRENT_USER_ID)
+                preferences.remove(LAST_SYNC_TIME)
+                preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
+            }
+        }
+        if (resetSession) tokenRevision.value += 1
+    }
+
+    private fun scopedToken(baseKey: String, workspace: WorkspaceIdentity): String? {
+        return securePreferences.getString(scopedSecureKey(baseKey, workspace), null)
+            ?: securePreferences.getString(baseKey, null)
+    }
+
+    private suspend fun claimLegacySyncCursor(workspace: WorkspaceIdentity) {
+        lastSyncTimeFor(workspace)
     }
 
     private suspend fun clearLegacyTokenPreferences() {
@@ -221,6 +377,8 @@ class TokenDataStore(context: Context) {
         val WIDGET_STYLE = stringPreferencesKey("widget_style")
         val DISPLAY_TIME_ZONE = stringPreferencesKey("display_time_zone")
         val CURRENT_USER_ID = stringPreferencesKey("current_user_id")
+        val LEGACY_SYNC_CURSOR_CLAIMED_WORKSPACE = stringPreferencesKey("legacy_sync_cursor_claimed_workspace")
+        val LEGACY_WORKSPACE_OWNERSHIP_INITIALIZED = booleanPreferencesKey("legacy_workspace_ownership_initialized")
         val LAST_BACKUP_IMPORT_UNDO_ITEMS = stringPreferencesKey("last_backup_import_undo_items")
         const val DEFAULT_LANGUAGE = "zh-CN"
         const val DEFAULT_WIDGET_OPACITY_PERCENT = 78
@@ -339,8 +497,35 @@ private fun defaultServerBaseUrl(): String {
 
 private fun userDisplayTimeZoneKey(userId: String) = stringPreferencesKey("display_time_zone_user_$userId")
 
-private fun normalizeTimeZone(timeZoneId: String): String {
-    return runCatching { ZoneId.of(timeZoneId.trim()).id }
+private fun workspaceDisplayTimeZoneKey(workspace: WorkspaceIdentity) =
+    stringPreferencesKey("display_time_zone_workspace_${workspace.preferenceSuffix}")
+
+private fun lastSyncTimeKey(workspace: WorkspaceIdentity) =
+    stringPreferencesKey("last_sync_time_workspace_${workspace.preferenceSuffix}")
+
+private fun lastBackupImportUndoItemsKey(workspace: WorkspaceIdentity) =
+    stringPreferencesKey("last_backup_import_undo_items_workspace_${workspace.preferenceSuffix}")
+
+private fun scopedSecureKey(baseKey: String, workspace: WorkspaceIdentity): String =
+    "${baseKey}_workspace_${workspace.preferenceSuffix}"
+
+private fun legacyWorkspaceOwnerKey(ownerUserId: String) = stringPreferencesKey(
+    "legacy_workspace_owner_${ownerUserId.trim().ifBlank { "legacy" }}",
+)
+
+private fun workspaceFromPreferences(
+    preferences: androidx.datastore.preferences.core.Preferences,
+): WorkspaceIdentity? {
+    val userId = preferences[stringPreferencesKey("current_user_id")]?.takeIf { it.isNotBlank() } ?: return null
+    val serverBaseUrl = normalizeStoredServerBaseUrl(
+        preferences[stringPreferencesKey("server_base_url")]
+            ?: inferServerBaseUrlFromApi(preferences[stringPreferencesKey("api_base_url")]),
+    )
+    return runCatching { WorkspaceIdentity.create(serverBaseUrl, userId) }.getOrNull()
+}
+
+fun effectiveDisplayTimeZone(timeZoneId: String?): String {
+    return runCatching { ZoneId.of(timeZoneId.orEmpty().trim()).id }
         .getOrDefault(ShanghaiTime.DEFAULT_ZONE_ID)
 }
 

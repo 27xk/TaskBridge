@@ -1,4 +1,4 @@
-const WEB_VERSION = "0.1.7";
+const WEB_VERSION = "0.1.8";
 const CACHE_NAME = `taskbridge-web-shell-v${WEB_VERSION}`;
 const SHELL_ASSETS = [
   "./",
@@ -7,6 +7,8 @@ const SHELL_ASSETS = [
   "./self-hosting.html",
   "./styles.css",
   `./app.js?v=${WEB_VERSION}`,
+  `./startup.js?v=${WEB_VERSION}`,
+  `./guide-language.js?v=${WEB_VERSION}`,
   `./offline-core.js?v=${WEB_VERSION}`,
   "./icon.svg",
   "./icon-192.png",
@@ -42,7 +44,9 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   if (event.request.mode === "navigate") {
     event.respondWith(
-      fetch(request).catch(() => caches.match("./index.html")),
+      fetch(request).catch(async () => (
+        (await caches.match(request)) || caches.match("./index.html")
+      )),
     );
     return;
   }
@@ -57,11 +61,50 @@ self.addEventListener("fetch", (event) => {
   );
 });
 
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(openNotificationTarget(event.notification.data?.url));
+});
+
+async function openNotificationTarget(rawUrl) {
+  const fallbackUrl = new URL("./", self.registration.scope);
+  let targetUrl;
+  try {
+    targetUrl = new URL(rawUrl || fallbackUrl, self.registration.scope);
+  } catch {
+    targetUrl = fallbackUrl;
+  }
+  if (targetUrl.origin !== self.location.origin) {
+    targetUrl = fallbackUrl;
+  }
+
+  const windowClients = await self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true,
+  });
+  const existingClient = windowClients.find((client) => {
+    try {
+      return new URL(client.url).origin === targetUrl.origin;
+    } catch {
+      return false;
+    }
+  });
+  if (existingClient) {
+    if (typeof existingClient.navigate === "function") {
+      await existingClient.navigate(targetUrl.toString());
+    }
+    return existingClient.focus();
+  }
+  return self.clients.openWindow(targetUrl.toString());
+}
+
 function isVersionedShellAssetRequest(request) {
   const url = new URL(request.url);
   return (
     url.searchParams.get("v") === WEB_VERSION &&
-    (url.pathname.endsWith("/app.js") || url.pathname.endsWith("/offline-core.js"))
+    ["/app.js", "/startup.js", "/guide-language.js", "/offline-core.js"].some((path) =>
+      url.pathname.endsWith(path),
+    )
   );
 }
 

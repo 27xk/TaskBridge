@@ -5,12 +5,13 @@ import { workspacePaths } from "./script-helpers.mjs";
 
 const { desktopRoot, repoRoot } = workspacePaths(import.meta.url);
 
-const [packageSource, ciSource, releaseSource, nodeVersionSource, rootPackageSource] = await Promise.all([
+const [packageSource, ciSource, releaseSource, nodeVersionSource, rootPackageSource, localCheckSource] = await Promise.all([
   readFile(resolve(desktopRoot, "package.json"), "utf8"),
   readFile(resolve(repoRoot, ".github/workflows/ci.yml"), "utf8"),
   readFile(resolve(repoRoot, ".github/workflows/release.yml"), "utf8"),
   readFile(resolve(repoRoot, ".node-version"), "utf8"),
   readFile(resolve(repoRoot, "package.json"), "utf8"),
+  readFile(resolve(repoRoot, "scripts/check-local.ps1"), "utf8"),
 ]);
 
 const packageJson = JSON.parse(packageSource);
@@ -30,6 +31,7 @@ const requiredDesktopChecks = [
   "check:sync-recovery-center",
   "check:desktop-backup",
   "check:desktop-theme",
+  "check:desktop-efficiency",
   "check:desktop-docs",
   "check:local-bootstrap",
   "check:release-readiness",
@@ -52,6 +54,8 @@ const requiredDesktopChecks = [
   "check:desktop-auto-update",
   "check:android-data-extraction",
   "check:security-governance",
+  "check:ux-priority-polish",
+  "check:user-experience",
 ];
 
 for (const script of requiredDesktopChecks) {
@@ -60,6 +64,10 @@ for (const script of requiredDesktopChecks) {
     "string",
     `desktop/package.json must define ${script}`,
   );
+}
+
+for (const script of ["check:desktop-efficiency", "check:ux-priority-polish", "check:user-experience"]) {
+  assert.ok(localCheckSource.includes(`"${script}"`), `local verification must run ${script}`);
 }
 
 for (const [workflowName, source] of [

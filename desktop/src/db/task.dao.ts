@@ -30,6 +30,10 @@ export async function listFloatingTodayTasks(limit = 8): Promise<TaskRecord[]> {
   return bridge().task.listToday(limit);
 }
 
+export async function getFloatingTodayTaskSummary(limit = 8): Promise<FloatingTaskSummary> {
+  return bridge().task.getTodaySummary(limit);
+}
+
 export async function getTask(localId: string): Promise<TaskRecord | null> {
   return bridge().db.getTask(localId);
 }

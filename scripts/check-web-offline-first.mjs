@@ -42,9 +42,18 @@ for (const token of [
 
 assert.match(
   appSource,
-  /indexedDB\.open\(offlineDbName\(\)/,
-  "web app must open a per-user offline database",
+  /buildOfflineDatabaseName\(STORAGE_PREFIX, state\.apiBaseUrl, userId\)/,
+  "web app must isolate offline databases by server and user",
 );
+assert.match(appSource, /OFFLINE_CACHE_READY_META_KEY\s*=\s*"cache_ready"/, "web offline resume must require a durable ready marker");
+assert.match(appSource, /isOfflineCacheReadyForProfile/, "web offline resume must verify the cache before opening it");
+assert.match(
+  appSource,
+  /isOfflineCacheReadyForProfile[\s\S]{0,220}offlineDatabaseExists\(dbName\)[\s\S]{0,160}openOfflineDatabase\(dbName\)/,
+  "web offline resume checks must not create an empty database when the cache does not exist",
+);
+assert.match(appSource, /migrateLegacyOfflineDatabase/, "web offline storage must migrate the former per-user database");
+assert.match(appSource, /reconcileCachedTaskSnapshot/, "web remote refreshes must reconcile stale cached tasks");
 assert.match(
   appSource,
   /window\.addEventListener\("online",\s*\(\)\s*=>\s*\{[\s\S]*flushOfflineQueue/,
@@ -99,8 +108,9 @@ assert.match(
 
 assert.match(architectureSource, /IndexedDB/, "architecture docs must mention IndexedDB offline storage");
 assert.match(architectureSource, /离线队列|offline queue/i, "architecture docs must mention the offline queue");
-assert.match(readmeSource, /断网时可以继续查看和修改本机任务/, "README must describe offline use in user-facing language");
-assert.match(readmeSource, /网络恢复后会自动同步/, "README must describe automatic sync in user-facing language");
+assert.match(readmeSource, /离线状态下新增、编辑和完成任务/, "README must describe offline task use in user-facing language");
+assert.match(readmeSource, /继续离线使用/, "README must describe how Web users reopen cached tasks after the browser session ends");
+assert.match(readmeSource, /重新登录后同步|登录并同步/, "README must explain that Web queue upload requires signing in again");
 
 assert.match(localCheckSource, /check-web-offline-first\.mjs/, "check-local.ps1 must run the Web offline-first guard");
 assert.match(localCheckSource, /check-web-offline-core\.mjs/, "check-local.ps1 must run the Web offline core behavior guard");

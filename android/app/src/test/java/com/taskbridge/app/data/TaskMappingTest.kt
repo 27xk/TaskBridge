@@ -12,6 +12,7 @@ class TaskMappingTest {
     fun taskEntityMapsToDomainModel() {
         val entity = TaskEntity(
             localId = "local-1",
+            workspaceId = "https://example.com|1",
             ownerUserId = "1",
             serverId = 10,
             title = "Sync Android app",

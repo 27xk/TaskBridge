@@ -49,7 +49,8 @@ function onWsUrlInput(event: Event): void {
         <span>{{ settingsStore.t("settings.serverUrl") }}</span>
         <input
           :value="serverUrlDraft"
-          type="url"
+          type="text"
+          inputmode="url"
           autocomplete="off"
           spellcheck="false"
           @input="onServerUrlInput"
@@ -78,7 +79,8 @@ function onWsUrlInput(event: Event): void {
           <span>{{ settingsStore.t("settings.baseUrl") }}</span>
           <input
             :value="baseUrl"
-            type="url"
+            type="text"
+            inputmode="url"
             autocomplete="off"
             spellcheck="false"
             @input="onBaseUrlInput"
@@ -90,7 +92,8 @@ function onWsUrlInput(event: Event): void {
           <span>{{ settingsStore.t("settings.wsUrl") }}</span>
           <input
             :value="wsUrl"
-            type="url"
+            type="text"
+            inputmode="url"
             autocomplete="off"
             spellcheck="false"
             @input="onWsUrlInput"

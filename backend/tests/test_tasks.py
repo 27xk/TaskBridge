@@ -93,6 +93,64 @@ def test_task_crud_complete_restore_and_soft_delete(client: TestClient) -> None:
     assert hidden_response.json()["data"] == []
 
 
+def test_task_create_is_idempotent_per_user(client: TestClient, db_session) -> None:
+    headers = auth_headers(client, "idempotent-create", "idempotent-create@example.com")
+    payload = {
+        "title": "Create exactly once",
+        "content": "The response may be lost and retried.",
+        "client_request_id": "web-offline-4aef27d7",
+    }
+
+    first_response = client.post("/api/v1/tasks", headers=headers, json=payload)
+    retry_response = client.post("/api/v1/tasks", headers=headers, json=payload)
+
+    assert first_response.status_code == 201
+    assert retry_response.status_code == 201
+    assert retry_response.json()["data"]["id"] == first_response.json()["data"]["id"]
+    assert retry_response.json()["data"]["client_request_id"] == payload["client_request_id"]
+    assert len(list(db_session.scalars(select(Task)))) == 1
+    assert len(list(db_session.scalars(select(SyncLog)))) == 1
+
+
+def test_task_create_rejects_idempotency_key_reuse_with_different_payload(
+    client: TestClient,
+) -> None:
+    headers = auth_headers(client, "idempotency-conflict", "idempotency-conflict@example.com")
+    request_id = "web-offline-collision"
+
+    first_response = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"title": "Original title", "client_request_id": request_id},
+    )
+    conflict_response = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"title": "Different title", "client_request_id": request_id},
+    )
+
+    assert first_response.status_code == 201
+    assert conflict_response.status_code == 409
+    assert conflict_response.json() == {
+        "code": 409,
+        "message": "client_request_id already used with different task data",
+        "data": None,
+    }
+
+
+def test_task_create_idempotency_key_is_scoped_to_user(client: TestClient) -> None:
+    first_headers = auth_headers(client, "idempotency-user-a", "idempotency-a@example.com")
+    second_headers = auth_headers(client, "idempotency-user-b", "idempotency-b@example.com")
+    payload = {"title": "Independent task", "client_request_id": "shared-client-key"}
+
+    first_response = client.post("/api/v1/tasks", headers=first_headers, json=payload)
+    second_response = client.post("/api/v1/tasks", headers=second_headers, json=payload)
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
+    assert first_response.json()["data"]["id"] != second_response.json()["data"]["id"]
+
+
 def test_task_update_rejects_stale_expected_version(client: TestClient, db_session) -> None:
     headers = auth_headers(client, "stale-update", "stale-update@example.com")
 

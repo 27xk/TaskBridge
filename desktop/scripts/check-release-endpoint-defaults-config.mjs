@@ -20,21 +20,21 @@ for (const [name, source] of [
   assert.ok(!source.includes("192.168.10.30"), `${name} must not default to a developer LAN address`);
 }
 
-assert.match(desktopViteSource, /FALLBACK_BASE_URL = "http:\/\/127\.0\.0\.1:8000\/api\/v1"/, "desktop dev fallback must be loopback-only");
-assert.match(desktopViteSource, /FALLBACK_WS_URL = "ws:\/\/127\.0\.0\.1:8000\/ws\/sync"/, "desktop websocket fallback must be loopback-only");
-assert.match(desktopStateSource, /FALLBACK_BASE_URL = "http:\/\/127\.0\.0\.1:8000\/api\/v1"/, "desktop runtime fallback must be loopback-only");
+assert.match(desktopViteSource, /FALLBACK_BASE_URL = ""/, "desktop builds must not assume a server address when none is configured");
+assert.match(desktopViteSource, /FALLBACK_WS_URL = ""/, "desktop builds must not assume a websocket address when none is configured");
+assert.match(desktopStateSource, /FALLBACK_BASE_URL = ""/, "desktop runtime must prompt for an unconfigured server address");
+assert.match(desktopStateSource, /FALLBACK_WS_URL = ""/, "desktop runtime must prompt for an unconfigured websocket address");
 assert.match(androidBuildSource, /TASKBRIDGE_BASE_URL", "https:\/\/taskbridge\.example\.invalid\/api\/v1\/"/, "Android fallback must be a non-routable HTTPS placeholder");
 assert.match(androidBuildSource, /TASKBRIDGE_WS_URL", "wss:\/\/taskbridge\.example\.invalid\/ws\/sync"/, "Android websocket fallback must be a non-routable WSS placeholder");
 assert.match(androidBuildSource, /releaseEndpointLooksPlaceholder/, "Android release build must reject placeholder endpoints");
-assert.match(androidBuildSource, /taskBridgeUsesCleartext/, "Android build must derive cleartext manifest behavior from endpoint schemes");
 assert.match(
   androidBuildSource,
-  /manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*taskBridgeUsesCleartext/,
-  "Android build must allow cleartext traffic when configured HTTP or WS endpoints require it",
+  /manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*true/,
+  "Android builds must allow users to enter HTTP or WS endpoints at runtime",
 );
 assert.doesNotMatch(
   androidBuildSource,
-  /Release endpoints must use HTTPS and WSS|releaseUsesCleartext/,
+  /Release endpoints must use HTTPS and WSS|releaseUsesCleartext|taskBridgeUsesCleartext/,
   "Android release build must not reject configured HTTP or WS endpoints",
 );
 assert.match(releaseWorkflowSource, /validate_endpoint "TASKBRIDGE_BASE_URL"/, "release workflow must validate public API endpoint");

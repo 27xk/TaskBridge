@@ -1,11 +1,18 @@
 import { app } from "electron";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import { copyFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { parseQuickTask, shanghaiDayBounds, todayLocalDate } from "../shared/quick-add-parser";
-import { getSettings } from "./state";
+import { workspaceDatabaseFileName } from "../shared/workspace";
+import {
+  claimLegacyGlobalDatabaseWorkspace,
+  claimLegacyUserDatabaseWorkspace,
+  getActiveWorkspaceKey,
+  getSettings,
+} from "./state";
+import { migrateSqliteDatabase } from "./sqlite-migration";
 
 export type SyncStatus = "synced" | "pending_create" | "pending_update" | "pending_delete" | "sync_failed" | "conflict";
 export type SyncAction = "create" | "update" | "delete" | "complete" | "restore";
@@ -74,6 +81,11 @@ export interface SyncQueueCounts {
   total: number;
   pending: number;
   exhausted: number;
+}
+
+export interface FloatingTaskSummary {
+  tasks: TaskRecord[];
+  totalOpen: number;
 }
 
 export interface BackupImportUndoItem {
@@ -156,9 +168,6 @@ export function database(): Database.Database {
     db.close();
     db = null;
   }
-  if (nextUserKey.startsWith("user-")) {
-    migrateLegacyGlobalDatabase(dbPath);
-  }
   try {
     db = new Database(dbPath);
   } catch (error) {
@@ -238,12 +247,19 @@ export function database(): Database.Database {
 }
 
 function currentUserDatabaseKey(): { key: string; path: string } {
-  const currentUserId = getSettings().currentUserId;
+  const settings = getSettings();
+  const currentUserId = settings.currentUserId;
+  const workspaceKey = getActiveWorkspaceKey();
   if (typeof currentUserId === "number" && Number.isFinite(currentUserId) && currentUserId > 0) {
     const userId = Math.trunc(currentUserId);
+    if (!workspaceKey) {
+      throw new Error("Authenticated workspace is missing a valid server origin");
+    }
+    const dbPath = join(app.getPath("userData"), workspaceDatabaseFileName(settings.baseUrl, userId));
+    migrateLegacyWorkspaceDatabase(dbPath, userId, workspaceKey);
     return {
-      key: `user-${userId}`,
-      path: join(app.getPath("userData"), `taskbridge-user-${userId}.sqlite`),
+      key: workspaceKey,
+      path: dbPath,
     };
   }
   return {
@@ -252,15 +268,21 @@ function currentUserDatabaseKey(): { key: string; path: string } {
   };
 }
 
-function legacyGlobalDatabasePath(): string {
+function migrateLegacyWorkspaceDatabase(dbPath: string, userId: number, workspaceKey: string): void {
+  if (existsSync(dbPath)) return;
   const userDataPath = app.getPath("userData");
-  return join(userDataPath, "taskbridge.sqlite");
-}
-
-function migrateLegacyGlobalDatabase(dbPath: string): void {
-  const legacyPath = legacyGlobalDatabasePath();
-  if (existsSync(dbPath) || !existsSync(legacyPath)) return;
-  copyFileSync(legacyPath, dbPath);
+  const legacyUserPath = join(userDataPath, `taskbridge-user-${userId}.sqlite`);
+  if (
+    existsSync(legacyUserPath) &&
+    claimLegacyUserDatabaseWorkspace(userId, workspaceKey)
+  ) {
+    migrateSqliteDatabase(legacyUserPath, dbPath);
+    return;
+  }
+  const legacyGlobalPath = join(userDataPath, "taskbridge.sqlite");
+  if (existsSync(legacyGlobalPath) && claimLegacyGlobalDatabaseWorkspace(workspaceKey)) {
+    migrateSqliteDatabase(legacyGlobalPath, dbPath);
+  }
 }
 
 function normalizeDatabaseOpenError(error: unknown): Error {
@@ -426,6 +448,32 @@ export function listTodayFloatingTasks(limit = 8): TaskRecord[] {
     )
     .all({ startTime, endTime, plannedDate: today, limit: clampLimit(limit, 1, 30) }) as TaskRow[];
   return rows.map(taskFromRow);
+}
+
+export function getTodayFloatingTaskSummary(limit = 8): FloatingTaskSummary {
+  const timeZone = getSettings().displayTimeZone;
+  const today = todayLocalDate(new Date(), timeZone);
+  const { startTime, endTime } = shanghaiDayBounds(today, timeZone);
+  const row = database()
+    .prepare(
+      `
+      SELECT COUNT(*) AS total
+      FROM tasks
+      WHERE is_deleted = 0
+        AND status NOT IN ('completed', 'done')
+        AND (
+          (due_time IS NOT NULL AND datetime(due_time) >= datetime(@startTime) AND datetime(due_time) < datetime(@endTime))
+          OR (remind_time IS NOT NULL AND datetime(remind_time) >= datetime(@startTime) AND datetime(remind_time) < datetime(@endTime))
+          OR planned_date = @plannedDate
+          OR list_type = 'today'
+        )
+      `,
+    )
+    .get({ startTime, endTime, plannedDate: today }) as { total: number };
+  return {
+    tasks: listTodayFloatingTasks(limit),
+    totalOpen: row.total,
+  };
 }
 
 export function getTask(localId: string): TaskRecord | null {

@@ -76,12 +76,77 @@ fun syncRecoverySummaryText(
     pendingQueueCount: Int,
     exhaustedQueueCount: Int,
     failedTaskCount: Int,
+    conflictTaskCount: Int,
     isEnglish: Boolean,
 ): String {
     return if (isEnglish) {
-        "$pendingQueueCount tasks waiting to sync / $exhaustedQueueCount needs a retry / $failedTaskCount failed"
+        val secondaryIssues = englishSyncIssueParts(pendingQueueCount, exhaustedQueueCount, failedTaskCount)
+        when {
+            conflictTaskCount > 0 && secondaryIssues.isNotEmpty() -> {
+                val conflictNoun = if (conflictTaskCount == 1) "conflict" else "conflicts"
+                "Resolve $conflictTaskCount $conflictNoun first. Also check ${joinEnglishList(secondaryIssues)}."
+            }
+            conflictTaskCount > 0 -> {
+                val conflictNoun = if (conflictTaskCount == 1) "conflict" else "conflicts"
+                "Resolve $conflictTaskCount $conflictNoun first."
+            }
+            secondaryIssues.isNotEmpty() -> "Check ${joinEnglishList(secondaryIssues)}."
+            else -> "No pending, failed, or conflicting tasks."
+        }
     } else {
-        "$pendingQueueCount \u6761\u4efb\u52a1\u7b49\u5f85\u540c\u6b65 / $exhaustedQueueCount \u6761\u9700\u8981\u91cd\u8bd5 / $failedTaskCount \u6761\u540c\u6b65\u5931\u8d25"
+        val secondaryIssues = chineseSyncIssueParts(pendingQueueCount, exhaustedQueueCount, failedTaskCount)
+        when {
+            conflictTaskCount > 0 && secondaryIssues.isNotEmpty() ->
+                "\u5148\u5904\u7406 $conflictTaskCount \u6761\u51b2\u7a81\uff1b\u53e6\u6709${secondaryIssues.joinToString("\u3001")}\u3002"
+            conflictTaskCount > 0 -> "\u5148\u5904\u7406 $conflictTaskCount \u6761\u51b2\u7a81\u3002"
+            secondaryIssues.isNotEmpty() -> "\u8bf7\u68c0\u67e5${secondaryIssues.joinToString("\u3001")}\u3002"
+            else -> "\u6ca1\u6709\u5f85\u540c\u6b65\u3001\u5931\u8d25\u6216\u51b2\u7a81\u7684\u4efb\u52a1\u3002"
+        }
+    }
+}
+
+private fun englishSyncIssueParts(
+    pendingQueueCount: Int,
+    exhaustedQueueCount: Int,
+    failedTaskCount: Int,
+): List<String> {
+    return buildList {
+        if (failedTaskCount > 0) add("$failedTaskCount failed")
+        if (exhaustedQueueCount > 0) add("$exhaustedQueueCount ${if (exhaustedQueueCount == 1) "retry" else "retries"}")
+        if (pendingQueueCount > 0) add("$pendingQueueCount waiting to sync")
+    }
+}
+
+private fun chineseSyncIssueParts(
+    pendingQueueCount: Int,
+    exhaustedQueueCount: Int,
+    failedTaskCount: Int,
+): List<String> {
+    return buildList {
+        if (failedTaskCount > 0) add("$failedTaskCount \u6761\u540c\u6b65\u5931\u8d25")
+        if (exhaustedQueueCount > 0) add("$exhaustedQueueCount \u6761\u9700\u8981\u91cd\u8bd5")
+        if (pendingQueueCount > 0) add("$pendingQueueCount \u6761\u7b49\u5f85\u540c\u6b65")
+    }
+}
+
+private fun joinEnglishList(parts: List<String>): String {
+    return when (parts.size) {
+        0 -> ""
+        1 -> parts.single()
+        2 -> "${parts[0]} and ${parts[1]}"
+        else -> "${parts.dropLast(1).joinToString(", ")}, and ${parts.last()}"
+    }
+}
+
+fun syncRecoveryToolsTitle(isEnglish: Boolean): String {
+    return if (isEnglish) "Sync recovery tools" else "\u540c\u6b65\u6062\u590d\u5de5\u5177"
+}
+
+fun syncRecoveryToolsToggleText(isOpen: Boolean, isEnglish: Boolean): String {
+    return if (isOpen) {
+        if (isEnglish) "Hide sync recovery tools" else "\u6536\u8d77\u540c\u6b65\u6062\u590d\u5de5\u5177"
+    } else {
+        if (isEnglish) "Show sync recovery tools" else "\u67e5\u770b\u540c\u6b65\u6062\u590d\u5de5\u5177"
     }
 }
 
@@ -137,8 +202,36 @@ fun localDataTrustText(isEnglish: Boolean): String {
     }
 }
 
+fun clearLocalDataSafetyHint(isEnglish: Boolean): String {
+    return if (isEnglish) {
+        "No pending, failed, or conflicting changes are shown. Clearing signs you out and removes this account's local data from this device. Exporting first is optional and creates a backup you can import later."
+    } else {
+        "当前没有待同步、同步失败或冲突的修改。清除会退出登录并删除当前账号在这台设备上的本地数据；可选择先导出一份以后能重新导入的备份。"
+    }
+}
+
+fun clearLocalDataBlockedHint(isEnglish: Boolean): String {
+    return if (isEnglish) {
+        "This device has pending, failed, or conflicting changes. Exporting creates a local backup only; it does not sync or resolve them. Resolve the sync issues before clearing this device."
+    } else {
+        "这台设备仍有待同步、同步失败或冲突的修改。导出只会生成本地备份，不能完成同步，也不能解决这些问题。请先处理同步问题，再清除此设备数据。"
+    }
+}
+
+fun clearLocalDataConfirmationText(isEnglish: Boolean): String {
+    return if (isEnglish) {
+        "This signs you out and deletes this account's local tasks, queued changes, and backup undo records from this device. Server tasks are not deleted. An exported backup can be imported later, but export does not sync pending changes."
+    } else {
+        "这会退出登录，并删除当前账号在这台设备上的本地任务、队列中的修改和备份撤销记录。服务器任务不会被删除。已导出的备份以后可以重新导入，但导出不会同步待处理修改。"
+    }
+}
+
 fun syncRecoveryRetryButtonText(isEnglish: Boolean): String {
     return if (isEnglish) "Retry pending or failed sync" else "\u91cd\u8bd5\u5f85\u5904\u7406\u6216\u5931\u8d25\u540c\u6b65"
+}
+
+fun syncRecoveryConflictActionText(isEnglish: Boolean): String {
+    return if (isEnglish) "View and resolve conflicted tasks" else "\u67e5\u770b\u5e76\u5904\u7406\u51b2\u7a81\u4efb\u52a1"
 }
 
 fun syncRecoveryRetryAvailableText(isEnglish: Boolean): String {
@@ -151,14 +244,6 @@ fun syncRecoveryRetryAvailableText(isEnglish: Boolean): String {
 
 fun syncRecoveryNoManualRetryText(isEnglish: Boolean): String {
     return if (isEnglish) "No tasks need a manual retry." else "\u5f53\u524d\u6ca1\u6709\u9700\u8981\u624b\u52a8\u91cd\u8bd5\u7684\u4efb\u52a1\u3002"
-}
-
-fun syncRecoveryRetryStartedText(isEnglish: Boolean): String {
-    return if (isEnglish) {
-        "Retry for pending or failed sync has started."
-    } else {
-        "\u5df2\u91cd\u65b0\u53d1\u8d77\u5f85\u5904\u7406\u6216\u5931\u8d25\u7684\u540c\u6b65\u3002"
-    }
 }
 
 private fun hasSyncAttention(

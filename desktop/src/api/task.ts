@@ -68,6 +68,21 @@ export interface TaskListQuery {
   cursorUpdatedAt?: string;
   offset?: number;
   limit?: number;
+  timezone?: string;
+}
+
+export interface TaskMetaDto {
+  projects: string[];
+  tags: string[];
+  counts: {
+    open: number;
+    completed: number;
+    inbox: number;
+    today: number;
+    overdue: number;
+    templates: number;
+    trash: number;
+  };
 }
 
 export interface ChecklistItemPayload {
@@ -106,12 +121,19 @@ export interface TemplateInstantiatePayload {
 }
 
 export function fetchTasks(query: TaskListQuery = {}): Promise<ServerTaskDto[]> {
-  const params = taskListQueryString(query);
-  return unwrap(request.get(params ? `/tasks?${params}` : "/tasks"));
+  const params = taskListQueryParams(query);
+  return unwrap(request.get("/tasks", { params }));
 }
 
 export function fetchTask(taskId: number): Promise<ServerTaskDto> {
   return unwrap(request.get(`/tasks/${taskId}`));
+}
+
+export function fetchTaskMeta(timezone: string, now?: string): Promise<TaskMetaDto> {
+  const params = new URLSearchParams();
+  params.set("timezone", timezone.trim());
+  appendStringParam(params, "now", now);
+  return unwrap(request.get("/tasks/meta", { params: toRequestParams(params) }));
 }
 
 export function fetchTaskHistory(taskId: number): Promise<TaskHistoryDto[]> {
@@ -127,7 +149,7 @@ export function updateTask(taskId: number, payload: TaskUpdatePayload): Promise<
 }
 
 export function deleteTask(taskId: number, expectedVersion?: number): Promise<ServerTaskDto> {
-  return unwrap(request.delete(`/tasks/${taskId}${expectedVersionQuery(expectedVersion)}`));
+  return unwrap(request.delete(`/tasks/${taskId}`, { params: expectedVersionParams(expectedVersion) }));
 }
 
 export function purgeTask(taskId: number): Promise<ServerTaskDto> {
@@ -151,11 +173,11 @@ export function deleteChecklistItem(taskId: number, itemId: string): Promise<Ser
 }
 
 export function completeTask(taskId: number, expectedVersion?: number): Promise<ServerTaskDto> {
-  return unwrap(request.post(`/tasks/${taskId}/complete${expectedVersionQuery(expectedVersion)}`));
+  return unwrap(request.post(`/tasks/${taskId}/complete`, undefined, { params: expectedVersionParams(expectedVersion) }));
 }
 
 export function restoreTask(taskId: number, expectedVersion?: number): Promise<ServerTaskDto> {
-  return unwrap(request.post(`/tasks/${taskId}/restore${expectedVersionQuery(expectedVersion)}`));
+  return unwrap(request.post(`/tasks/${taskId}/restore`, undefined, { params: expectedVersionParams(expectedVersion) }));
 }
 
 export function createNextOccurrence(taskId: number): Promise<ServerTaskDto> {
@@ -169,11 +191,11 @@ export function instantiateTemplate(
   return unwrap(request.post(`/tasks/templates/${templateId}/instantiate`, payload));
 }
 
-function expectedVersionQuery(expectedVersion?: number): string {
-  return Number.isFinite(expectedVersion) ? `?expected_version=${encodeURIComponent(String(expectedVersion))}` : "";
+function expectedVersionParams(expectedVersion?: number): Record<string, unknown> {
+  return Number.isFinite(expectedVersion) ? { expected_version: expectedVersion } : {};
 }
 
-function taskListQueryString(query: TaskListQuery): string {
+function taskListQueryParams(query: TaskListQuery): Record<string, unknown> {
   const params = new URLSearchParams();
   appendStringParam(params, "q", query.q);
   appendStringParam(params, "view", query.view);
@@ -189,7 +211,12 @@ function taskListQueryString(query: TaskListQuery): string {
   appendStringParam(params, "cursor_updated_at", query.cursorUpdatedAt);
   appendNumberParam(params, "offset", query.offset);
   appendNumberParam(params, "limit", query.limit);
-  return params.toString();
+  if (query.timezone?.trim()) params.set("timezone", query.timezone.trim());
+  return toRequestParams(params);
+}
+
+function toRequestParams(params: URLSearchParams): Record<string, unknown> {
+  return Object.fromEntries(params.entries());
 }
 
 function appendStringParam(params: URLSearchParams, key: string, value: string | undefined): void {

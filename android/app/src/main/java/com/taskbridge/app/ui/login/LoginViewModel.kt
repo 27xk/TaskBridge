@@ -53,13 +53,6 @@ class LoginViewModel(
                     webSocketUrl = tokenDataStore.webSocketUrl.first(),
                 )
             }
-            authRepository.registrationEnabled()
-                .onSuccess { enabled ->
-                    _uiState.update { it.copy(registrationEnabled = enabled, registrationStatusKnown = true) }
-                }
-                .onFailure {
-                    _uiState.update { it.copy(registrationEnabled = false, registrationStatusKnown = false) }
-                }
         }
     }
 
@@ -171,10 +164,6 @@ class LoginViewModel(
                     return@launch
                 }
             if (!saveConnectionStateOrReport(connectionState)) {
-                _uiState.update { it.copy(isLoading = false) }
-                return@launch
-            }
-            if (!ensureConnectionReadyForAuth()) {
                 _uiState.update { it.copy(isLoading = false) }
                 return@launch
             }

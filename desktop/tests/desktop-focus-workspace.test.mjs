@@ -4,11 +4,25 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import {
+  extractBalancedBlock,
+  extractOpeningTag,
+  hasLiteralBooleanAttribute,
+} from "../scripts/script-helpers.mjs";
+
 const desktopRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const repoRoot = resolve(desktopRoot, "..");
 
 async function source(path) {
   return readFile(resolve(repoRoot, path), "utf8");
+}
+
+function sourceSection(value, startMarker, endMarker) {
+  const start = value.indexOf(startMarker);
+  const end = value.indexOf(endMarker, start + startMarker.length);
+  assert.ok(start >= 0, `missing source section start: ${startMarker}`);
+  assert.ok(end > start, `missing source section end: ${endMarker}`);
+  return value.slice(start, end);
 }
 
 test("desktop app composes the focus workspace shell", async () => {
@@ -20,8 +34,40 @@ test("desktop app composes the focus workspace shell", async () => {
   assert.match(app, /const workspaceStatus = computed\(\(\) =>[\s\S]{0,120}deriveWorkspaceStatus\(syncStore\.status, syncStore\.diagnostics\)/);
   assert.match(app, /<AppSidebar/);
   assert.match(app, /class="workspace-main"/);
-  assert.match(app, /v-if="workspaceStatus\.banner !== 'none'"/);
+  assert.match(app, /v-if="auth\.isAuthenticated && workspaceStatus\.banner !== 'none'"/);
   assert.doesNotMatch(app, /<SyncStatus|sidebar-sync-button/);
+});
+
+test("desktop services follow authenticated workspace state instead of a disappearing login event", async () => {
+  const app = await source("desktop/src/App.vue");
+
+  assert.match(app, /import \{[^}]*\bwatch\b[^}]*\} from "vue"/);
+  assert.match(app, /watch\(\s*\(\) => \[auth\.isAuthenticated, auth\.workspaceKey\] as const/);
+  assert.match(app, /function activateAuthenticatedWorkspace\(/);
+  assert.match(app, /void activateAuthenticatedWorkspace\(workspaceKey\)/);
+  assert.match(
+    app,
+    /onBeforeUnmount\(\(\) => \{[\s\S]{0,500}desktopServicesActivationId \+= 1;[\s\S]{0,160}desktopServicesWorkspaceKey = null;/,
+  );
+  const startupBlock = extractBalancedBlock(app, "async function startDesktopServices");
+  assert.match(
+    app,
+    /async function startDesktopServices\(\s*workspaceKey: string,\s*activationId: number,\s*\)/,
+  );
+  assert.match(
+    startupBlock,
+    /await reloadTasksAndPruneReminders\(\);\s*if \(!isCurrentWorkspaceActivation\(workspaceKey, activationId\)\) return;\s*await syncStore\.start\(reloadTasksAndPruneReminders\);\s*if \(!isCurrentWorkspaceActivation\(workspaceKey, activationId\)\) return;\s*startReminderLoop\(\);/,
+  );
+  const activationBlock = extractBalancedBlock(
+    app,
+    "async function activateAuthenticatedWorkspace",
+  );
+  assert.doesNotMatch(
+    activationBlock,
+    /if \(!isCurrentWorkspaceActivation\(workspaceKey, activationId\)\) \{\s*syncStore\.stop\(\);/,
+  );
+  assert.doesNotMatch(app, /@authenticated="handleAuthenticated"/);
+  assert.doesNotMatch(app, /if \(auth\.isAuthenticated\) \{\s*await startDesktopServices\(\)/);
 });
 
 test("desktop sidebar exposes three accessible navigation entries and one account menu", async () => {
@@ -38,6 +84,8 @@ test("desktop sidebar exposes three accessible navigation entries and one accoun
   assert.match(sidebar, /emit\("navigate", "today"\)/);
   assert.match(sidebar, /emit\("navigate", "tasks"\)/);
   assert.match(sidebar, /emit\("navigate", "settings"\)/);
+  assert.match(sidebar, /class="brand" title="TaskBridge"/);
+  assert.match(sidebar, /class="account-menu-trigger"[\s\S]{0,120}:title="accountMenuAriaLabel"/);
 });
 
 test("desktop account menu closes through its own interaction boundary", async () => {
@@ -194,7 +242,7 @@ test("all-tasks view centralizes save feedback and drops inline sync diagnostics
   const todayViewMount = app.match(/<TodayView[\s\S]*?\/>/);
   const workspaceBannerMount = app.match(/<WorkspaceStatusBanner[\s\S]*?\/>/);
 
-  assert.match(tasks, /import \{ computed, onBeforeUnmount, ref, watch \} from "vue"/);
+  assert.match(tasks, /import \{ computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch \} from "vue"/);
   assert.match(tasks, /import AppToast from "\.\.\/components\/AppToast\.vue"/);
   assert.doesNotMatch(tasks, /TaskSyncHealthBar|showTaskSyncHealth|useSyncStore|action-feedback/);
   assert.doesNotMatch(tasks, /diagnosticSyncIssueCount|taskRecordSyncIssueCount|taskSyncIssueCount|taskSyncHealthTone|taskSyncHealthText/);
@@ -226,6 +274,210 @@ test("all-tasks view centralizes save feedback and drops inline sync diagnostics
   assert.match(taskUnmount[1], /^\s*if \(noticeTimer !== undefined\) \{\s*window\.clearTimeout\(noticeTimer\);\s*noticeTimer = undefined;\s*\}\s*$/);
   assert.match(tasks, /function openCreate\(\): void \{\s*editorSaveError\.value = "";/);
   assert.match(tasks, /function openEdit\(task: TaskRecord\): void \{\s*editorSaveError\.value = "";/);
+});
+
+test("all tasks keeps common filters visible and moves secondary filters into menus", async () => {
+  const [taskView, taskItem, taskEditor] = await Promise.all([
+    source("desktop/src/views/TaskView.vue"),
+    source("desktop/src/components/TaskItem.vue"),
+    source("desktop/src/components/TaskEditor.vue"),
+  ]);
+
+  assert.match(taskView, /class="task-command-bar"/);
+  assert.match(taskView, /class="segment-control task-filter-segments"/);
+  assert.match(taskView, /class="filter-menu"/);
+  assert.match(taskView, /activeFilterItems/);
+  assert.match(taskView, /clearActiveFilter/);
+  assert.match(taskView, /if \(key === "filter"\) filter\.value = "all"/);
+  assert.match(taskView, /if \(key === "project"\) selectedProject\.value = ""/);
+  assert.match(taskView, /if \(key === "tag"\) selectedTag\.value = ""/);
+  assert.match(taskView, /if \(key === "search"\) search\.value = ""/);
+  assert.match(taskView, /const taskSearchInput = useTemplateRef<HTMLInputElement>\("taskSearchInput"\)/);
+  assert.match(taskView, /const clearFiltersButton = useTemplateRef<HTMLButtonElement>\("clearFiltersButton"\)/);
+  assert.match(taskView, /await focusAfterActiveFilterRemoval\(\)/);
+  assert.match(taskView, /settingsStore\.language === "zh-CN" \? `搜索: \$\{keyword\}` : `Search: \$\{keyword\}`/);
+  assert.match(taskView, /ref="taskSearchInput"/);
+  assert.match(taskView, /ref="clearFiltersButton"/);
+  assert.match(taskView, /v-for="option in secondaryFilterOptions"/);
+  assert.match(taskView, /v-model="selectedProject"/);
+  assert.match(taskView, /v-model="selectedTag"/);
+  assert.match(taskEditor, /role="alert"/);
+  assert.match(taskView, /<AppToast/);
+  assert.match(taskView, /v-if="selectionMode" class="bulk-action-toolbar"/);
+  assert.doesNotMatch(taskView, /TaskSyncHealthBar|currentFilters|activeFilterLabels|v-model="secondaryFilter"/);
+  assert.match(taskItem, /<MoreHorizontal/);
+  const taskMenuTrigger = taskItem.match(/<summary[\s\S]*?<MoreHorizontal[\s\S]*?<\/summary>/);
+  assert.ok(taskMenuTrigger, "task menu must expose an icon trigger");
+  assert.match(taskMenuTrigger[0], /task\.title/);
+  assert.match(taskItem, /\.task-title\s*\{[\s\S]*?white-space:\s*normal;[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?\}/);
+});
+
+test("settings displays one persistent category panel at a time", async () => {
+  const [settings, recovery] = await Promise.all([
+    source("desktop/src/views/SettingsView.vue"),
+    source("desktop/src/components/settings/SettingsSyncRecoveryPanel.vue"),
+  ]);
+
+  assert.match(settings, /type SettingsSectionId\s*=/);
+  assert.match(settings, /const activeSettingsSection = ref<SettingsSectionId>\("account-display"\)/);
+  assert.match(settings, /const syncDiagnosticsOpen = ref\(false\)/);
+  assert.match(settings, /const diagnosticsExportNote = ref\(""\)/);
+  assert.match(settings, /const settingsNavItems = computed/);
+  assert.match(settings, /function showSettingsSection\(sectionId: string\): void/);
+  assert.match(settings, /class="settings-category-nav"/);
+  assert.match(settings, /:aria-current="activeSettingsSection === item\.sectionId \? 'page' : undefined"/);
+  for (const section of ["account-display", "account-security", "connection", "window", "data", "sync-recovery", "metadata"]) {
+    assert.match(settings, new RegExp(`v-show="activeSettingsSection === '${section}'"`));
+  }
+  assert.match(settings, /<SettingsSyncRecoveryPanel/);
+  const recoveryPanelTag = extractOpeningTag(settings, "<SettingsSyncRecoveryPanel");
+  for (const contract of [
+    ':diagnostics="syncStore.diagnostics"',
+    'v-model:diagnostics-open="syncDiagnosticsOpen"',
+    ':export-note="diagnosticsExportNote"',
+    '@refresh="refreshDiagnostics"',
+    '@retry="retryExhaustedQueue"',
+    '@export-diagnostics="exportDiagnostics"',
+  ]) {
+    assert.ok(recoveryPanelTag.includes(contract), `sync recovery panel must wire ${contract}`);
+  }
+  assert.match(settings, /if \(request\.sectionId === "sync-recovery"\) syncDiagnosticsOpen\.value = true/);
+  assert.doesNotMatch(settings, /scrollIntoView|scrollToSettingsSection|settings-section-nav|settingsNavGroups/);
+  assert.match(recovery, /settings\.syncRecoveryCenter/);
+  assert.match(recovery, /settings\.syncDiagnostics/);
+  assert.match(recovery, /settings\.diagnosticsSupportTools/);
+  assert.match(recovery, /const diagnosticsOpen = defineModel<boolean>\("diagnosticsOpen"/);
+  assert.match(recovery, /exportNote: string/);
+  assert.match(recovery, /v-if="exportNote"[\s\S]{0,180}role="status"/);
+  assert.match(recovery, /defineEmits<\{\s*refresh: \[\];\s*retry: \[\];\s*exportDiagnostics: \[\];\s*\}>/);
+  assert.match(recovery, /@click="emit\('refresh'\)"/);
+  assert.match(recovery, /@click="emit\('retry'\)"/);
+  assert.match(recovery, /@click="emit\('exportDiagnostics'\)"/);
+  const diagnosticsTag = extractOpeningTag(recovery, '<details class="settings-advanced-details"');
+  assert.match(diagnosticsTag, /:open="diagnosticsOpen"/);
+  assert.equal(hasLiteralBooleanAttribute(diagnosticsTag, "open"), false);
+
+  const exportDiagnostics = settings.match(/async function exportDiagnostics\(\): Promise<void> \{([\s\S]*?)\n\}/);
+  assert.ok(exportDiagnostics, "exportDiagnostics must be declared");
+  assert.match(exportDiagnostics[1], /diagnosticsExportNote\.value/);
+  assert.doesNotMatch(exportDiagnostics[1], /\bexportNote\.value/);
+});
+
+test("metadata rename feedback stays in the metadata category", async () => {
+  const [settings, metadata] = await Promise.all([
+    source("desktop/src/views/SettingsView.vue"),
+    source("desktop/src/components/settings/SettingsMetadataPanel.vue"),
+  ]);
+
+  assert.match(settings, /const metadataNote = ref\(""\)/);
+  for (const [functionName, translationKey] of [
+    ["renameProject", "settings.projectRenamed"],
+    ["renameTag", "settings.tagRenamed"],
+  ]) {
+    const renameBlock = extractBalancedBlock(settings, `async function ${functionName}`);
+    assert.match(renameBlock, new RegExp(`metadataNote\\.value = settingsStore\\.t\\("${translationKey.replace(".", "\\.")}\\"\\)`));
+    assert.doesNotMatch(renameBlock, /exportNote\.value/);
+  }
+  const metadataPanelTag = extractOpeningTag(settings, "<SettingsMetadataPanel");
+  assert.match(metadataPanelTag, /:note="metadataNote"/);
+  assert.match(metadata, /note: string/);
+  assert.match(metadata, /v-if="note"[^>]*role="status"/);
+});
+
+test("desktop visual verifier rejects runtime errors and covers narrow interactions", async () => {
+  const visual = await source("desktop/scripts/check-desktop-focus-visual.mjs");
+  const mainBlock = sourceSection(visual, "async function main", "function createApiServer");
+  const runtimeErrorBlock = sourceSection(
+    visual,
+    "async function assertNoRuntimeErrors",
+    "async function loginThroughUserInterface",
+  );
+  const tasksBlock = sourceSection(
+    visual,
+    "async function verifyAllTasksWorkspace",
+    "async function verifyNarrowTaskInteractions",
+  );
+  const narrowTasksBlock = sourceSection(
+    visual,
+    "async function verifyNarrowTaskInteractions",
+    "async function verifySettingsWorkspace",
+  );
+  const settingsBlock = sourceSection(
+    visual,
+    "async function verifySettingsWorkspace",
+    "async function verifyStatusAndMotionStates",
+  );
+
+  assert.match(mainBlock, /await assertNoRuntimeErrors\(\)/);
+  assert.match(runtimeErrorBlock, /__taskBridgeVisualErrors/);
+  assert.match(runtimeErrorBlock, /Runtime\.exceptionThrown/);
+  assert.match(runtimeErrorBlock, /Runtime\.consoleAPICalled/);
+  assert.match(runtimeErrorBlock, /findUnexpectedRuntimeLogLines\(runtimeLogs\)/);
+  assert.match(runtimeErrorBlock, /expectedRuntimeWarningPatterns\.some/);
+  assert.match(visual, /shortcut registration failed/);
+
+  assert.match(tasksBlock, /await verifyNarrowTaskInteractions\(\)/);
+  assert.match(narrowTasksBlock, /setWindowSize\(799, 700\)/);
+  assert.match(narrowTasksBlock, /assertWorkspaceLayout\(64, metrics, "tasks-narrow"\)/);
+  assert.match(narrowTasksBlock, /filter-menu\[open\]/);
+  assert.match(narrowTasksBlock, /task-menu\[open\]/);
+  assert.match(narrowTasksBlock, /Boolean\(document\.querySelector\('\.side-panel'\)\)/);
+  assert.match(narrowTasksBlock, /assertNoUnnamedInteractiveControls\("all tasks filter menu"\)/);
+  assert.match(narrowTasksBlock, /assertNoUnnamedInteractiveControls\("all tasks task menu"\)/);
+  assert.match(narrowTasksBlock, /assertNoUnnamedInteractiveControls\("all tasks narrow drawer"\)/);
+
+  assert.match(settingsBlock, /setWindowSize\(1024, 768\)/);
+  assert.match(settingsBlock, /assertWorkspaceLayout\(72, mediumMetrics, "settings-medium"\)/);
+  assert.match(settingsBlock, /setWindowSize\(800, 700\)/);
+  assert.match(settingsBlock, /assertNoUnnamedInteractiveControls\(`settings \$\{label\}`\)/);
+});
+
+test("workspace stylesheet defines stable desktop and narrow layouts", async () => {
+  const [main, css, baseCss] = await Promise.all([
+    source("desktop/src/main.ts"),
+    source("desktop/src/assets/workspace.css"),
+    source("desktop/src/assets/base.css"),
+  ]);
+
+  const baseImportIndex = main.indexOf('import "./assets/base.css"');
+  const workspaceImportIndex = main.indexOf('import "./assets/workspace.css"');
+  assert.notEqual(baseImportIndex, -1, "desktop entry must import base styles");
+  assert.notEqual(workspaceImportIndex, -1, "desktop entry must import workspace styles");
+  assert.ok(
+    baseImportIndex < workspaceImportIndex,
+    "workspace styles must load after base styles",
+  );
+  const mediumCss = extractBalancedBlock(css, "@media (max-width: 1099px)");
+  const narrowCss = extractBalancedBlock(css, "@media (max-width: 799px)");
+  const reducedMotionCss = extractBalancedBlock(css, "@media (prefers-reduced-motion: reduce)");
+  const reducedMotionRule = extractBalancedBlock(reducedMotionCss, ".focus-workspace *,");
+  assert.match(css, /grid-template-columns:\s*184px minmax\(0, 1fr\)/);
+  assert.match(css, /max-width:\s*1080px/);
+  assert.match(css, /width:\s*min\(440px/);
+  assert.match(mediumCss, /\.focus-workspace\s*\{[^}]*grid-template-columns:\s*72px minmax\(0, 1fr\)/);
+  assert.match(mediumCss, /\.focus-workspace \.settings-workspace\s*\{[^}]*grid-template-columns:\s*200px minmax\(0, 1fr\)/);
+  const accountMenuRule = css.match(/\.focus-workspace \.account-menu-items \{([^}]*)\}/);
+  assert.ok(accountMenuRule, "workspace account menu must have a positioning rule");
+  assert.match(accountMenuRule[1], /right:\s*auto/);
+  assert.match(accountMenuRule[1], /left:\s*calc\(100% \+ 8px\)/);
+  assert.match(narrowCss, /\.focus-workspace\s*\{[^}]*grid-template-columns:\s*64px minmax\(0, 1fr\)[^}]*overflow-x:\s*hidden/);
+  assert.match(narrowCss, /\.focus-workspace \.settings-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  assert.match(narrowCss, /\.focus-workspace \.side-panel\s*\{[^}]*width:\s*min\(440px,\s*calc\(100vw - 64px\)\)/);
+  assert.match(reducedMotionCss, /\.focus-workspace \*,\s*\.app-toast\s*\{/);
+  assert.match(reducedMotionRule, /animation:\s*none !important/);
+  assert.match(css, /\.focus-workspace button:focus-visible,[\s\S]*?outline:\s*3px solid var\(--focus\)/);
+  const iconButtonRule = [...css.matchAll(/\.focus-workspace \.icon-button \{([^}]*)\}/g)]
+    .find((match) => /width:\s*36px/.test(match[1]));
+  assert.ok(iconButtonRule, "workspace icon buttons must have a stable base rule");
+  assert.match(iconButtonRule[1], /width:\s*36px/);
+  assert.match(iconButtonRule[1], /height:\s*36px/);
+  assert.match(iconButtonRule[1], /min-height:\s*36px/);
+  assert.match(iconButtonRule[1], /padding:\s*0/);
+
+  const activeSegmentRule = css.match(/\.focus-workspace \.segment-control\.task-filter-segments button\.active \{([^}]*)\}/);
+  assert.ok(activeSegmentRule, "active task filter segment must have a style rule");
+  assert.doesNotMatch(activeSegmentRule[1], /box-shadow/);
+  assert.doesNotMatch(baseCss, /\.sidebar-sync-button|\.task-sync-health-bar|\.filter-advanced-details|\.sync-status|\.sync-dot|\.settings-section-nav|\.settings-nav-group/);
 });
 
 test("task editor associates save errors with its form and submit action", async () => {
@@ -300,4 +552,55 @@ test("workspace quick add preserves input until parent confirms success", async 
   assert.doesNotMatch(quickAdd, /<svg\b/i);
   assert.doesNotMatch(quickAdd, />\s*\+\s*</);
   assert.doesNotMatch(quickAdd, /(?:Press|按下|Enter|回车)/i);
+});
+
+test("expired desktop sessions keep the real workspace and offer an explicit local mode", async () => {
+  const [app, login, authStore, state, http, ipc, banner] = await Promise.all([
+    source("desktop/src/App.vue"),
+    source("desktop/src/views/LoginView.vue"),
+    source("desktop/src/stores/auth.ts"),
+    source("desktop/electron/state.ts"),
+    source("desktop/electron/http.ts"),
+    source("desktop/electron/ipc.ts"),
+    source("desktop/src/components/ReauthenticationBanner.vue"),
+  ]);
+
+  assert.match(state, /export function expireTokens\(\): void/);
+  const expireTokens = extractBalancedBlock(state, "export function expireTokens");
+  assert.doesNotMatch(expireTokens, /currentUserId/);
+  assert.match(http, /expireTokens\(\);[\s\S]{0,120}broadcastSessionExpired\("refresh-rejected"\)/);
+  assert.match(ipc, /serverChanged && \(hasTokens\(\) \|\| previousSettings\.currentUserId !== null\)/);
+  assert.match(authStore, /const cachedWorkspaceKey = tryCreateWorkspaceKey\(settings\.baseUrl, settings\.currentUserId\)/);
+  assert.match(authStore, /sessionExpired\.value = true;[\s\S]{0,100}workspaceKey\.value = cachedWorkspaceKey/);
+  const expireSession = extractBalancedBlock(authStore, "function expireSession");
+  assert.doesNotMatch(expireSession, /user\.value = null|workspaceKey\.value = null/);
+
+  assert.match(app, /const continueOfflineAfterExpiry = ref\(false\)/);
+  assert.match(app, /<LoginView[\s\S]{0,260}@continue-offline="continueWithCachedWorkspace"/);
+  assert.match(app, /<ReauthenticationBanner[\s\S]{0,180}@reauthenticate="showReauthentication"/);
+  assert.match(app, /v-show="auth\.isAuthenticated \|\| continueOfflineAfterExpiry"/);
+  assert.match(login, /canContinueOffline: boolean/);
+  assert.match(login, /cachedTaskCount: number/);
+  assert.match(login, /emit\("continueOffline"\)/);
+  assert.match(banner, /role="status"/);
+  assert.match(banner, /emit\('reauthenticate'\)/);
+});
+
+test("desktop batch actions use an explicit selection mode without competing completion controls", async () => {
+  const [taskView, taskItem, taskListSection] = await Promise.all([
+    source("desktop/src/views/TaskView.vue"),
+    source("desktop/src/components/TaskItem.vue"),
+    source("desktop/src/components/TaskListSection.vue"),
+  ]);
+
+  assert.match(taskView, /const selectionMode = ref\(false\)/);
+  assert.match(taskView, /<ListChecks/);
+  assert.match(taskView, /v-if="selectionMode" class="bulk-action-toolbar"/);
+  assert.match(taskView, /:disabled="bulkActionTargets\.length === 0"/);
+  assert.match(taskView, /\$\{bulkActionTargets\.value\.length\} \$\{settingsStore\.t\("task\.selectedCountSuffix"\)\}/);
+  const completeSelected = extractBalancedBlock(taskView, "async function completeVisibleTasks");
+  assert.doesNotMatch(completeSelected, /requestConfirmation/);
+  assert.match(taskItem, /v-if="selectable" class="task-selection-checkbox"/);
+  assert.match(taskItem, /v-if="!trash && !selectable"[\s\S]{0,100}class="check-button"/);
+  assert.match(taskListSection, /:selectable="selectionMode && selectable"/);
 });

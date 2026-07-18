@@ -16,14 +16,14 @@ export const request = {
   get<T = unknown>(url: string, config?: RequestConfig): Promise<{ data: ApiEnvelope<T> }> {
     return send<T>("GET", url, undefined, config);
   },
-  post<T = unknown>(url: string, data?: unknown): Promise<{ data: ApiEnvelope<T> }> {
-    return send<T>("POST", url, data);
+  post<T = unknown>(url: string, data?: unknown, config?: RequestConfig): Promise<{ data: ApiEnvelope<T> }> {
+    return send<T>("POST", url, data, config);
   },
-  put<T = unknown>(url: string, data?: unknown): Promise<{ data: ApiEnvelope<T> }> {
-    return send<T>("PUT", url, data);
+  put<T = unknown>(url: string, data?: unknown, config?: RequestConfig): Promise<{ data: ApiEnvelope<T> }> {
+    return send<T>("PUT", url, data, config);
   },
-  delete<T = unknown>(url: string): Promise<{ data: ApiEnvelope<T> }> {
-    return send<T>("DELETE", url);
+  delete<T = unknown>(url: string, config?: RequestConfig): Promise<{ data: ApiEnvelope<T> }> {
+    return send<T>("DELETE", url, undefined, config);
   },
 };
 

@@ -21,16 +21,41 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.taskbridge.app.ui.i18n.AppLanguage
+import com.taskbridge.app.ui.i18n.LocalAppLanguage
 import com.taskbridge.app.ui.i18n.TaskBridgeStrings
 
 data class AppUiOption<T>(
     val value: T,
     val label: String,
 )
+
+@Composable
+fun AppDynamicStatusText(
+    text: String,
+    isError: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        modifier = modifier.semantics {
+            liveRegion = if (isError) LiveRegionMode.Assertive else LiveRegionMode.Polite
+            if (isError) error(text)
+        },
+        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        style = MaterialTheme.typography.bodySmall,
+    )
+}
 
 fun languageOptions(strings: TaskBridgeStrings): List<AppUiOption<AppLanguage>> {
     return listOf(
@@ -161,6 +186,8 @@ fun <T> AppDropdownField(
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val fieldDescription = if (label.isBlank()) selectedLabel else "$label: $selectedLabel"
+    val isEnglish = LocalAppLanguage.current == AppLanguage.English
     Column(modifier = modifier) {
         if (label.isNotBlank()) {
             Text(
@@ -170,8 +197,17 @@ fun <T> AppDropdownField(
             )
         }
         OutlinedButton(
-            onClick = { onExpandedChange(true) },
-            modifier = Modifier.fillMaxWidth(),
+            onClick = { onExpandedChange(!expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics(mergeDescendants = true) {
+                    contentDescription = fieldDescription
+                    stateDescription = if (expanded) {
+                        if (isEnglish) "Expanded" else "已展开"
+                    } else {
+                        if (isEnglish) "Collapsed" else "已收起"
+                    }
+                },
             shape = RoundedCornerShape(8.dp),
             colors = ButtonDefaults.outlinedButtonColors(
                 containerColor = MaterialTheme.colorScheme.surface,
@@ -185,7 +221,8 @@ fun <T> AppDropdownField(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "v",
+                text = "\u25BE",
+                modifier = Modifier.clearAndSetSemantics { },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelMedium,
             )

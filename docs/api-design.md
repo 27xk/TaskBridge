@@ -44,6 +44,7 @@ POST /api/v1/auth/register
 POST /api/v1/auth/login
 POST /api/v1/auth/refresh
 GET  /api/v1/auth/me
+PUT  /api/v1/auth/password
 GET  /api/v1/auth/sessions
 POST /api/v1/auth/sessions/revoke-other-devices
 DELETE /api/v1/auth/sessions/{session_id}
@@ -58,6 +59,7 @@ POST /api/v1/auth/ws-ticket
 - Refresh Token 保存在服务端，并绑定 `device_id`。
 - 删除设备会撤销该设备关联的 Refresh Token。
 - 用户可以查看当前账号的活跃 Refresh Token 会话，撤销单个会话，或按当前 `device_id` 一键撤销其他设备会话。
+- `PUT /api/v1/auth/password` 需要 `current_password` 和 `new_password`，成功后保留当前会话并撤销其他活跃会话。
 - `POST /api/v1/auth/refresh` 建议传入当前设备的 `device_id`，旧 Token 首次刷新时会补齐设备绑定。
 - WebSocket 建议使用短期 Ticket 建连，避免在 URL 中暴露长期 Access Token。
 
@@ -116,6 +118,8 @@ POST /api/v1/tasks/{task_id}/plan
 
 直接写接口支持 `expected_version` 乐观锁；如果客户端带着旧版本提交，服务端返回 `409 version conflict`，避免浏览器或其他直连客户端静默覆盖新改动。`/sync/push` 仍然保留既有的 `version` 字段协议，不与直接写接口混用。
 
+直接创建可传 `client_request_id`。该值由客户端为一次创建操作稳定生成：相同用户、相同键和相同创建数据的重试返回第一次创建的任务；相同键提交不同数据返回 `409 client_request_id already used with different task data`。该键按用户隔离，不能跨账号去重。
+
 高级能力：
 
 ```text
@@ -144,7 +148,8 @@ DELETE /api/v1/tasks/{task_id}/purge
 | 参数 | 说明 |
 | --- | --- |
 | `q` | 标题、内容、项目或标签关键词；多个空白分隔词按 AND 匹配，`%` 和 `_` 按普通字符处理 |
-| `view` | 任务视图，例如 `today`、`inbox`、`overdue`、`week`、`high`、`completed`、`pending`、`conflict` |
+| `view` | 服务端任务视图：`today`、`inbox`、`overdue`、`week`、`high_priority`、`completed`、`templates`、`trash`；未知值返回 422 |
+| `timezone` | IANA 时区名，例如 `Asia/Shanghai`、`America/Los_Angeles`；用于 `today`、`week` 和 meta 计数，未知值返回 400 |
 | `status` | 任务状态 |
 | `tag` | 标签 |
 | `project` | 项目 |
@@ -156,6 +161,8 @@ DELETE /api/v1/tasks/{task_id}/purge
 | `cursor_id` / `cursor_updated_at` | 任务列表游标分页参数；必须成对传入，且不能和 `offset` 混用 |
 
 `GET /api/v1/tasks` 保持原有数组响应，客户端需要下一页时使用上一页最后一条任务的 `id` 和 `updated_at` 作为 `cursor_id` / `cursor_updated_at`，并沿用同一组过滤参数和 `now`。服务端按任务时间线排序元组做 keyset 翻页；如果 cursor 已被其他设备更新或不属于当前用户，会返回 `400 invalid task cursor`，客户端应重新拉取第一页。
+
+`pending` 和 `conflict` 不是服务端视图：它们依赖当前设备尚未上传的队列和冲突快照，客户端必须在本地缓存中筛选并与远端结果合并，不能把这两个值发送给 `view`。
 
 任务删除默认使用软删除，确保离线设备重新上线后也能收到删除变更。
 

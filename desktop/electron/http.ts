@@ -1,4 +1,11 @@
-import { clearTokens, getSettings, getTokens, setTokens } from "./state";
+import { broadcastSessionExpired, expireTokens, getSettings, getTokens, setTokens } from "./state";
+import { setTraySyncStatus } from "./tray";
+import {
+  canInvalidateAuthSession,
+  captureAuthSession,
+  classifyRefreshCommit,
+  type CapturedAuthSession,
+} from "../shared/auth-session";
 
 export interface ApiEnvelope<T = unknown> {
   code: number;
@@ -37,7 +44,14 @@ const ALLOWED_API_PATH_PREFIXES = [
   "/sync/",
 ] as const;
 
-let refreshInFlight: Promise<TokenRefreshResponse> | null = null;
+const refreshFlights = new Map<string, Promise<TokenRefreshResponse>>();
+
+class StaleAuthSessionError extends Error {
+  constructor() {
+    super("Authentication session changed while refreshing");
+    this.name = "StaleAuthSessionError";
+  }
+}
 
 function isInvalidRefreshTokenError(error: unknown): boolean {
   return error instanceof ApiHttpError && (error.status === 401 || error.status === 403);
@@ -48,6 +62,10 @@ export async function performApiRequest<T = unknown>(
 ): Promise<ApiEnvelope<T>> {
   const safePath = normalizeApiPath(payload.url);
   let tokens = getTokens();
+  const initialSettings = getSettings();
+  const refreshSession = tokens?.refreshToken
+    ? captureAuthSession(initialSettings.baseUrl, tokens, initialSettings.deviceId)
+    : null;
 
   try {
     const response = await sendApiRequest<T>(payload, safePath, tokens?.accessToken);
@@ -60,28 +78,54 @@ export async function performApiRequest<T = unknown>(
   }
 
   try {
-    const refreshed = await refreshTokenOnce(tokens.refreshToken);
-    setTokens({
-      accessToken: refreshed.access_token,
-      refreshToken: refreshed.refresh_token,
-    });
+    if (!refreshSession) throw new StaleAuthSessionError();
+    const refreshed = await refreshTokenOnce(refreshSession);
+    commitRefreshResult(refreshSession, refreshed);
     tokens = getTokens();
     return await sendApiRequest<T>(payload, safePath, tokens?.accessToken);
   } catch (refreshError) {
-    if (isInvalidRefreshTokenError(refreshError)) {
-      clearTokens();
+    if (
+      refreshSession &&
+      isInvalidRefreshTokenError(refreshError) &&
+      canInvalidateAuthSession(refreshSession, getSettings().baseUrl, getTokens())
+    ) {
+      expireTokens();
+      setTraySyncStatus("signed-out");
+      broadcastSessionExpired("refresh-rejected");
     }
     throw refreshError;
   }
 }
 
-function refreshTokenOnce(refreshTokenValue: string): Promise<TokenRefreshResponse> {
-  if (!refreshInFlight) {
-    refreshInFlight = refreshToken(refreshTokenValue).finally(() => {
-      refreshInFlight = null;
-    });
-  }
-  return refreshInFlight;
+function refreshTokenOnce(session: CapturedAuthSession): Promise<TokenRefreshResponse> {
+  const existing = refreshFlights.get(session.key);
+  if (existing) return existing;
+  const request = refreshToken(session).finally(() => {
+    if (refreshFlights.get(session.key) === request) {
+      refreshFlights.delete(session.key);
+    }
+  });
+  refreshFlights.set(session.key, request);
+  return request;
+}
+
+function commitRefreshResult(
+  session: CapturedAuthSession,
+  refreshed: TokenRefreshResponse,
+): void {
+  const decision = classifyRefreshCommit(
+    session,
+    getSettings().baseUrl,
+    getTokens(),
+    refreshed,
+  );
+  if (decision === "stale") throw new StaleAuthSessionError();
+  if (decision === "already-applied") return;
+  setTokens({
+    accessToken: refreshed.access_token,
+    refreshToken: refreshed.refresh_token,
+    userId: session.userId ?? undefined,
+  });
 }
 
 function persistAuthTokensFromResponse(path: string, response: ApiEnvelope<unknown>): void {
@@ -122,14 +166,13 @@ async function sendApiRequest<T>(
   });
 }
 
-async function refreshToken(refreshTokenValue: string): Promise<TokenRefreshResponse> {
-  const settings = getSettings();
+async function refreshToken(session: CapturedAuthSession): Promise<TokenRefreshResponse> {
   const response = await requestJson<{ access_token: string; refresh_token: string }>(
-    settings.baseUrl,
+    session.serverOrigin,
     "/auth/refresh",
     {
       method: "POST",
-      data: { refresh_token: refreshTokenValue, device_id: settings.deviceId },
+      data: { refresh_token: session.refreshToken, device_id: session.deviceId },
     },
   );
   return response.data;

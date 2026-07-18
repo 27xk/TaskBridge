@@ -275,7 +275,9 @@ if (-not (Test-ExternalCommand "npm")) {
         "check:supply-chain",
         "check:desktop-auto-update",
         "check:android-data-extraction",
-        "check:security-governance"
+        "check:security-governance",
+        "check:ux-priority-polish",
+        "check:user-experience"
     )
 
     foreach ($check in $desktopChecks) {

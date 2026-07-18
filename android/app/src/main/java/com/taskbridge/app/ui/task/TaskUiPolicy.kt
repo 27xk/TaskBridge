@@ -160,21 +160,35 @@ fun getSyncStatusLabel(status: SyncStatus, languageCode: String): String? {
 
 fun taskListSyncHealthText(tasks: List<Task>, languageCode: String): TaskListSyncHealthUi {
     val isEnglish = languageCode == "en-US"
-    val issueCount = tasks
-        .distinctBy { it.localId }
-        .count { it.syncStatus != SyncStatus.Synced }
-    return if (issueCount > 0) {
-        TaskListSyncHealthUi(
+    val distinctTasks = tasks.distinctBy { it.localId }
+    val errorCount = distinctTasks.count {
+        it.syncStatus == SyncStatus.Failed || it.syncStatus == SyncStatus.Conflict
+    }
+    val pendingCount = distinctTasks.count {
+        it.syncStatus == SyncStatus.PendingCreate ||
+            it.syncStatus == SyncStatus.PendingUpdate ||
+            it.syncStatus == SyncStatus.PendingDelete
+    }
+    return when {
+        errorCount > 0 -> TaskListSyncHealthUi(
             title = if (isEnglish) "Sync needs attention" else "同步需要处理",
             body = if (isEnglish) {
-                "$issueCount tasks are pending, failed, or conflicted. Open sync details before clearing this device."
+                "$errorCount ${if (errorCount == 1) "task failed or conflicted" else "tasks failed or conflicted"}. Open sync details to resolve ${if (errorCount == 1) "it" else "them"}."
             } else {
-                "${issueCount} 条任务待同步、失败或冲突。清除此设备数据前请先打开同步详情处理。"
+                "${errorCount} 条任务同步失败或存在冲突，请打开同步详情处理。"
             },
             needsAttention = true,
         )
-    } else {
-        TaskListSyncHealthUi(
+        pendingCount > 0 -> TaskListSyncHealthUi(
+            title = if (isEnglish) "Waiting to sync" else "等待同步",
+            body = if (isEnglish) {
+                "$pendingCount ${if (pendingCount == 1) "task" else "tasks"} will sync automatically when a connection is available."
+            } else {
+                "${pendingCount} 条任务将在网络可用后自动同步。"
+            },
+            needsAttention = false,
+        )
+        else -> TaskListSyncHealthUi(
             title = if (isEnglish) "Sync is healthy" else "同步正常",
             body = if (isEnglish) {
                 "No action needed. Keep adding tasks and TaskBridge will sync automatically."

@@ -25,4 +25,11 @@ class SyncStatusBarTest {
         assertEquals("已保留同步来的版本", syncStatusMessageText(SyncStatusMessage.UsingCloudVersion, AppLanguage.Chinese))
         assertEquals("This device version queued", syncStatusMessageText(SyncStatusMessage.OverwriteCloudQueued, AppLanguage.English))
     }
+
+    @Test
+    fun syncRunMessagesHaveTerminalSuccessFailureAndOfflineCopy() {
+        assertEquals("同步完成", syncStatusMessageText(SyncStatusMessage.SyncSucceeded, AppLanguage.Chinese))
+        assertEquals("Sync failed. Try again.", syncStatusMessageText(SyncStatusMessage.SyncFailed, AppLanguage.English))
+        assertEquals("Offline. Changes will sync automatically when connected.", syncStatusMessageText(SyncStatusMessage.Offline, AppLanguage.English))
+    }
 }

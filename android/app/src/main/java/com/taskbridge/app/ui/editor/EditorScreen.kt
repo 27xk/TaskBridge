@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.taskbridge.app.ui.components.AppDropdownField
+import com.taskbridge.app.ui.components.AppDynamicStatusText
 import com.taskbridge.app.ui.components.AppHeader
 import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
@@ -45,6 +46,7 @@ import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
 import com.taskbridge.app.ui.i18n.TaskBridgeStrings
 import com.taskbridge.app.ui.task.getTaskPriorityLabel
 import com.taskbridge.app.ui.task.getTaskPriorityOptions
+import com.taskbridge.app.notification.shouldRequestReminderPermission
 import com.taskbridge.app.utils.ShanghaiTime
 import java.time.Instant
 import java.time.LocalDate
@@ -67,7 +69,12 @@ fun EditorScreen(
     var arrangeOpen by remember(state.editingLocalId) {
         mutableStateOf(state.editingLocalId != null && hasArrangementFields(state))
     }
-    var advancedOpen by remember(state.editingLocalId) { mutableStateOf(state.editingLocalId != null) }
+    var bodyOpen by remember(state.editingLocalId) {
+        mutableStateOf(state.editingLocalId != null && hasTaskBodyFields(state))
+    }
+    var advancedOpen by remember(state.editingLocalId) {
+        mutableStateOf(state.editingLocalId != null && hasAdvancedMetadataFields(state))
+    }
     var listMenuOpen by remember { mutableStateOf(false) }
     var priorityMenuOpen by remember { mutableStateOf(false) }
     var repeatMenuOpen by remember { mutableStateOf(false) }
@@ -97,7 +104,7 @@ fun EditorScreen(
     val repeatOptions = remember(isEnglish) { repeatRuleOptions(isEnglish) }
     val selectedRepeatLabel = repeatOptions.firstOrNull { it.value == state.repeatRule }?.label
         ?: state.repeatRule.ifBlank { repeatOptions.first().label }
-    val scheduleHelpMessage = scheduleHelpText(isEnglish)
+    val scheduleHelpMessage = strings.taskScheduleHelp
     fun pickPlannedDate() {
         showDatePicker(
             context = context,
@@ -126,6 +133,7 @@ fun EditorScreen(
         if (state.hasUnsavedChanges) {
             confirmDiscardChanges = true
         } else {
+            viewModel.discardDraft()
             onCancel()
         }
     }
@@ -151,6 +159,7 @@ fun EditorScreen(
                 TextButton(
                     onClick = {
                         confirmDiscardChanges = false
+                        viewModel.discardDraft()
                         onCancel()
                     },
                 ) {
@@ -172,7 +181,15 @@ fun EditorScreen(
             bottomBar = {
                 EditorBottomActions(
                     strings = strings,
-                    onSave = { viewModel.save(onSaved) },
+                    isEnglish = isEnglish,
+                    isLoadingTask = state.isLoadingTask,
+                    isSaving = state.isSaving,
+                    onSave = {
+                        if (shouldRequestReminderPermission(state.remindTime, state.dueTime)) {
+                            onRequestNotificationPermission()
+                        }
+                        viewModel.save(onSaved)
+                    },
                     onCancel = { requestCancel() },
                 )
             },
@@ -196,24 +213,31 @@ fun EditorScreen(
                         onValueChange = viewModel::updateTitle,
                         label = { Text(strings.quickAddLabel) },
                         placeholder = { Text(strings.quickAddPlaceholder) },
+                        isError = state.error != null,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     QuickAddPreviewChips(chips = quickPreviewChips)
-                    OutlinedTextField(
-                        value = state.content,
-                        onValueChange = viewModel::updateContent,
-                        label = { Text(strings.content) },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 3,
+                }
+
+                TextButton(onClick = { bodyOpen = !bodyOpen }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (bodyOpen) strings.taskHideBodyDetails else strings.taskBodyDetails)
+                }
+
+                if (bodyOpen) {
+                    BodyTaskFieldsPanel(
+                        state = state,
+                        strings = strings,
+                        onContentChanged = viewModel::updateContent,
+                        onChecklistChanged = viewModel::updateChecklistText,
                     )
                 }
 
                 TextButton(onClick = { arrangeOpen = !arrangeOpen }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (arrangeOpen) hideArrangementText(isEnglish) else arrangementText(isEnglish))
+                    Text(if (arrangeOpen) strings.taskHideArrangementSettings else strings.taskArrangementSettings)
                 }
 
                 if (arrangeOpen) {
-                    QuickFieldsPanel(
+                    ArrangementTaskFieldsPanel(
                         state = state,
                         strings = strings,
                         displayTimeZone = displayTimeZone,
@@ -252,7 +276,6 @@ fun EditorScreen(
                         onRepeatExpandedChange = { repeatMenuOpen = it },
                         onTagChanged = viewModel::updateTag,
                         onProjectChanged = viewModel::updateProject,
-                        onChecklistChanged = viewModel::updateChecklistText,
                         onRepeatSelected = viewModel::updateRepeatRule,
                         onTemplateChanged = viewModel::updateIsTemplate,
                         onTemplateNameChanged = viewModel::updateTemplateName,
@@ -260,7 +283,10 @@ fun EditorScreen(
                 }
 
                 state.error?.let {
-                    Text(localizeEditorError(it, strings), color = MaterialTheme.colorScheme.error)
+                    AppDynamicStatusText(
+                        text = localizeEditorError(it, strings),
+                        isError = true,
+                    )
                 }
             }
         }
@@ -270,6 +296,9 @@ fun EditorScreen(
 @Composable
 private fun EditorBottomActions(
     strings: TaskBridgeStrings,
+    isEnglish: Boolean,
+    isLoadingTask: Boolean,
+    isSaving: Boolean,
     onSave: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -287,8 +316,18 @@ private fun EditorBottomActions(
             TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
                 Text(strings.cancel)
             }
-            Button(onClick = onSave, modifier = Modifier.weight(1f)) {
-                Text(strings.saveTask)
+            Button(
+                onClick = onSave,
+                enabled = !isSaving && !isLoadingTask,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    if (isSaving) {
+                        if (isEnglish) "Saving..." else "正在保存..."
+                    } else {
+                        strings.saveTask
+                    },
+                )
             }
         }
     }
@@ -320,7 +359,32 @@ private fun QuickAddPreviewChips(chips: List<String>) {
 }
 
 @Composable
-private fun QuickFieldsPanel(
+private fun BodyTaskFieldsPanel(
+    state: EditorUiState,
+    strings: TaskBridgeStrings,
+    onContentChanged: (String) -> Unit,
+    onChecklistChanged: (String) -> Unit,
+) {
+    AppPanel {
+        OutlinedTextField(
+            value = state.content,
+            onValueChange = onContentChanged,
+            label = { Text(strings.content) },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+        )
+        OutlinedTextField(
+            value = state.checklistText,
+            onValueChange = onChecklistChanged,
+            label = { Text(strings.checklist) },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+        )
+    }
+}
+
+@Composable
+private fun ArrangementTaskFieldsPanel(
     state: EditorUiState,
     strings: TaskBridgeStrings,
     displayTimeZone: String,
@@ -437,7 +501,6 @@ private fun AdvancedTaskFieldsPanel(
     onRepeatExpandedChange: (Boolean) -> Unit,
     onTagChanged: (String) -> Unit,
     onProjectChanged: (String) -> Unit,
-    onChecklistChanged: (String) -> Unit,
     onRepeatSelected: (String) -> Unit,
     onTemplateChanged: (Boolean) -> Unit,
     onTemplateNameChanged: (String) -> Unit,
@@ -455,13 +518,6 @@ private fun AdvancedTaskFieldsPanel(
             label = { Text(strings.project) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-        )
-        OutlinedTextField(
-            value = state.checklistText,
-            onValueChange = onChecklistChanged,
-            label = { Text(strings.checklist) },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 3,
         )
         AppDropdownField(
             label = strings.repeatRule,
@@ -502,20 +558,16 @@ private fun hasArrangementFields(state: EditorUiState): Boolean {
         state.remindTime.isNotBlank()
 }
 
-private fun arrangementText(isEnglish: Boolean): String {
-    return if (isEnglish) "Time and schedule" else "时间与安排"
+private fun hasTaskBodyFields(state: EditorUiState): Boolean {
+    return state.content.isNotBlank() || state.checklistText.isNotBlank()
 }
 
-private fun hideArrangementText(isEnglish: Boolean): String {
-    return if (isEnglish) "Hide time and schedule" else "收起时间与安排"
-}
-
-private fun scheduleHelpText(isEnglish: Boolean): String {
-    return if (isEnglish) {
-        "Plan date is when you intend to work on it; due time is the latest finish time; reminder only sends a notification."
-    } else {
-        "计划日期表示哪天要做；截止时间表示最晚完成时间；提醒时间只负责通知。"
-    }
+private fun hasAdvancedMetadataFields(state: EditorUiState): Boolean {
+    return state.tag.isNotBlank() ||
+        state.project.isNotBlank() ||
+        state.repeatRule.isNotBlank() ||
+        state.isTemplate ||
+        state.templateName.isNotBlank()
 }
 
 private fun showDatePicker(

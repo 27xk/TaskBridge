@@ -130,15 +130,20 @@ assert.match(ipcSource, /assertTrustedSender/, "IPC handlers must validate the i
 assert.doesNotMatch(ipcSource, /ipcMain\.handle\("[^"]+",\s*\(/, "IPC handlers must go through the trusted sender wrapper");
 for (const token of [
   "function validateLocalId",
+  "function validateOptionalLocalId",
   "function validateNotificationText",
   "function validateServerIds",
-  "showTaskNotification(validateNotificationText(title",
   "getTask(validateLocalId(localId))",
   "listTasksByServerIds(validateServerIds(serverIds))",
   "openTaskDetail(validateLocalId(localId))",
 ]) {
   assert.match(ipcSource, new RegExp(escapeRegExp(token)), `IPC must harden renderer input: ${token}`);
 }
+assert.match(
+  ipcSource,
+  /showTaskNotification\([\s\S]{0,180}validateNotificationText\(title[\s\S]{0,180}validateNotificationText\(body[\s\S]{0,180}validateOptionalLocalId\(localId\)/,
+  "notification IPC must validate title, body, and optional task identity",
+);
 
 const setTokensSource = sliceBetween(
   stateSource,

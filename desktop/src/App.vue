@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import AppSidebar from "./components/AppSidebar.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
+import ReauthenticationBanner from "./components/ReauthenticationBanner.vue";
 import WorkspaceStatusBanner from "./components/WorkspaceStatusBanner.vue";
 import { bridge } from "./db/sqlite";
 import { useConfirmDialog } from "./composables/useConfirmDialog";
@@ -27,12 +28,24 @@ const quickAddSignal = ref(0);
 const openTaskRequest = ref<{ localId: string; nonce: number } | null>(null);
 const settingsSectionRequest = ref<{ sectionId: string; nonce: number } | null>(null);
 const workspaceInstanceKey = ref(0);
+const continueOfflineAfterExpiry = ref(false);
 const auth = useAuthStore();
 const taskStore = useTaskStore();
 const syncStore = useSyncStore();
 const settingsStore = useSettingsStore();
 const workspaceStatus = computed(() =>
   deriveWorkspaceStatus(syncStore.status, syncStore.diagnostics),
+);
+const displayedWorkspaceStatus = computed(() =>
+  continueOfflineAfterExpiry.value
+    ? { indicator: "offline", banner: "none", issueCount: 0 } as const
+    : workspaceStatus.value,
+);
+const canContinueOffline = computed(
+  () =>
+    auth.sessionExpired &&
+    auth.sessionExpiredReason === "refresh-rejected" &&
+    Boolean(auth.workspaceKey),
 );
 const keepWorkspaceMounted = computed(
   () =>
@@ -54,8 +67,28 @@ let removeSyncNowListener: (() => void) | undefined;
 let removeSessionExpiredListener: (() => void) | undefined;
 let reminderTimer: number | undefined;
 let preservedWorkspaceKey: string | null = null;
+let desktopServicesWorkspaceKey: string | null = null;
+let desktopServicesActivationId = 0;
 const notifiedReminderIds = new Set<string>();
 const REMINDER_DEDUP_STORAGE_KEY = "taskbridge.desktop.notifiedReminders.v1";
+
+watch(
+  () => [auth.isAuthenticated, auth.workspaceKey] as const,
+  ([isAuthenticated, workspaceKey]) => {
+    if (isFloating) return;
+    if (isAuthenticated) {
+      continueOfflineAfterExpiry.value = false;
+    }
+    if (!isAuthenticated || !workspaceKey) {
+      desktopServicesWorkspaceKey = null;
+      desktopServicesActivationId += 1;
+      return;
+    }
+    if (desktopServicesWorkspaceKey === workspaceKey) return;
+    void activateAuthenticatedWorkspace(workspaceKey);
+  },
+  { flush: "post" },
+);
 
 onMounted(async () => {
   await settingsStore.load();
@@ -85,12 +118,14 @@ onMounted(async () => {
   });
 
   await auth.loadSession();
-  if (auth.isAuthenticated) {
-    await startDesktopServices();
+  if (canContinueOffline.value && taskStore.tasks.length === 0) {
+    await loadCachedWorkspace();
   }
 });
 
 onBeforeUnmount(() => {
+  desktopServicesActivationId += 1;
+  desktopServicesWorkspaceKey = null;
   removeQuickAddListener?.();
   removeSettingsListener?.();
   removeTasksChangedListener?.();
@@ -104,28 +139,76 @@ onBeforeUnmount(() => {
 
 function handleSessionExpired(reason: "refresh-rejected" | "server-changed"): void {
   preservedWorkspaceKey ??= auth.workspaceKey;
+  continueOfflineAfterExpiry.value = false;
   syncStore.stop();
   stopReminderLoop();
   auth.expireSession(reason);
 }
 
-async function startDesktopServices(): Promise<void> {
+async function loadCachedWorkspace(): Promise<void> {
+  try {
+    await settingsStore.load();
+    await reloadTasksAndPruneReminders();
+  } catch (error) {
+    console.error("[TaskBridge] cached workspace failed to load", error);
+  }
+}
+
+async function continueWithCachedWorkspace(): Promise<void> {
+  if (!canContinueOffline.value) return;
+  if (taskStore.tasks.length === 0) {
+    await loadCachedWorkspace();
+  }
+  activeView.value = "today";
+  continueOfflineAfterExpiry.value = true;
+}
+
+function showReauthentication(): void {
+  continueOfflineAfterExpiry.value = false;
+}
+
+async function startDesktopServices(
+  workspaceKey: string,
+  activationId: number,
+): Promise<void> {
   await reloadTasksAndPruneReminders();
+  if (!isCurrentWorkspaceActivation(workspaceKey, activationId)) return;
   await syncStore.start(reloadTasksAndPruneReminders);
+  if (!isCurrentWorkspaceActivation(workspaceKey, activationId)) return;
   startReminderLoop();
 }
 
-async function handleAuthenticated(): Promise<void> {
+async function activateAuthenticatedWorkspace(workspaceKey: string): Promise<void> {
+  if (!auth.isAuthenticated || auth.workspaceKey !== workspaceKey) return;
+  desktopServicesWorkspaceKey = workspaceKey;
+  const activationId = ++desktopServicesActivationId;
   const preserveWorkspace = shouldPreserveWorkspaceState(
     preservedWorkspaceKey,
-    auth.workspaceKey,
+    workspaceKey,
   );
   preservedWorkspaceKey = null;
   if (!preserveWorkspace) {
     resetWorkspaceUiState();
   }
-  await settingsStore.load();
-  await startDesktopServices();
+  try {
+    await settingsStore.load();
+    if (!isCurrentWorkspaceActivation(workspaceKey, activationId)) return;
+    await startDesktopServices(workspaceKey, activationId);
+  } catch (error) {
+    if (isCurrentWorkspaceActivation(workspaceKey, activationId)) {
+      desktopServicesWorkspaceKey = null;
+    }
+    console.error("[TaskBridge] desktop services failed to start", error);
+  }
+}
+
+function isCurrentWorkspaceActivation(workspaceKey: string, activationId: number): boolean {
+  return (
+    auth.isAuthenticated &&
+    auth.workspaceKey === workspaceKey &&
+    desktopServicesWorkspaceKey === workspaceKey &&
+    desktopServicesActivationId === activationId
+  );
 }
 
 function resetWorkspaceUiState(): void {
@@ -160,6 +243,9 @@ async function logout(): Promise<void> {
   editorDirty.value = false;
   settingsConnectionDirty.value = false;
   await auth.logout();
+  continueOfflineAfterExpiry.value = false;
+  preservedWorkspaceKey = null;
+  resetWorkspaceUiState();
 }
 
 async function hasUnsyncedWork(): Promise<boolean> {
@@ -174,6 +260,10 @@ async function hasUnsyncedWork(): Promise<boolean> {
 }
 
 async function manualSync(): Promise<void> {
+  if (!auth.isAuthenticated) {
+    showReauthentication();
+    return;
+  }
   await syncStore.syncNow(true);
   await reloadTasksAndPruneReminders();
 }
@@ -334,21 +424,23 @@ function saveNotifiedReminderIds(): void {
   <FloatingView v-if="isFloating" />
 
   <LoginView
-    v-if="!isFloating && !auth.isAuthenticated"
-    @authenticated="handleAuthenticated"
+    v-if="!isFloating && !auth.isAuthenticated && !continueOfflineAfterExpiry"
+    :can-continue-offline="canContinueOffline"
+    :cached-task-count="taskStore.tasks.length"
+    @continue-offline="continueWithCachedWorkspace"
   />
 
   <main
     v-if="!isFloating && keepWorkspaceMounted"
-    v-show="auth.isAuthenticated"
+    v-show="auth.isAuthenticated || continueOfflineAfterExpiry"
     :key="workspaceInstanceKey"
     class="app-shell focus-workspace"
   >
     <AppSidebar
       :active-view="activeView"
-      :username="auth.user?.username ?? ''"
-      :status="workspaceStatus"
-      :syncing="syncStore.status === 'syncing'"
+      :username="auth.user?.username ?? settingsStore.t('auth.localWorkspaceTitle')"
+      :status="displayedWorkspaceStatus"
+      :syncing="auth.isAuthenticated && syncStore.status === 'syncing'"
       @navigate="requestViewChange"
       @sync-now="manualSync"
       @open-sync-details="openSettingsSection('sync-recovery')"
@@ -356,8 +448,12 @@ function saveNotifiedReminderIds(): void {
     />
 
     <section class="workspace-main">
+      <ReauthenticationBanner
+        v-if="continueOfflineAfterExpiry"
+        @reauthenticate="showReauthentication"
+      />
       <WorkspaceStatusBanner
-        v-if="workspaceStatus.banner !== 'none'"
+        v-if="auth.isAuthenticated && workspaceStatus.banner !== 'none'"
         :status="workspaceStatus"
         @retry="manualSync"
         @open-details="openSettingsSection('sync-recovery')"

@@ -99,7 +99,7 @@ for (const [name, source] of [
 ]) {
   assert.doesNotMatch(source, /TaskSyncHealthBar|showTaskSyncHealth/, `${name} must not duplicate the app-level sync status banner`);
 }
-assert.match(desktopAppSource, /v-if="workspaceStatus\.banner !== 'none'"/, "Desktop app must only show sync status when workspace attention is needed");
+assert.match(desktopAppSource, /v-if="auth\.isAuthenticated && workspaceStatus\.banner !== 'none'"/, "Desktop app must only show sync status for authenticated workspaces that need attention");
 assert.match(desktopWorkspaceStatusBannerSource, /aria-live="polite"/, "Desktop workspace status banner must announce sync status changes politely");
 
 assert.doesNotMatch(desktopLoginSource, /authPrimaryActionReady/, "Desktop login priority must not depend on a prior manual connection check");
@@ -110,7 +110,7 @@ assert.doesNotMatch(desktopLoginSource, /TaskBridge Docker 本机试用/, "Deskt
 assert.doesNotMatch(desktopI18nSource, /同步异常恢复/, "Desktop sync recovery wording should be consolidated through sync-issues settings labels");
 
 assert.match(androidTaskListSource, /listToolsOpen/, "Android task list must let search and filters collapse behind a list tools control");
-assert.match(androidTaskListSource, /if \(syncHealth\.needsAttention\) \{[\s\S]{0,180}TaskListSyncHealthBar/, "Android task-list sync health must only appear when action is needed");
+assert.match(androidTaskListSource, /if \(!localWorkspaceMode && syncHealth\.needsAttention\) \{[\s\S]{0,180}TaskListSyncHealthBar/, "Android task-list sync health must only appear for online workspaces when action is needed");
 assert.doesNotMatch(androidLoginSource, /connectionReadyForAuth/, "Android login priority must not depend on a prior manual connection check");
 assert.match(androidTaskListSource, /TaskListSyncHealthBar\([\s\S]{0,140}syncHealth = syncHealth/, "Android task list must render actionable sync health near the list");
 assert.match(androidEditorSource, /bottomBar = \{[\s\S]{0,260}EditorBottomActions/, "Android editor must keep save and cancel actions available at the bottom");

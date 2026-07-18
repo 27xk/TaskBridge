@@ -81,15 +81,23 @@ private data class ConflictSnapshotField(
     val type: String? = null,
 )
 
+private data class TaskMetaChip(
+    val text: String,
+    val attention: Boolean = false,
+)
+
 @Composable
 fun TaskListScreen(
     viewModel: TaskListViewModel,
     todayOnly: Boolean,
+    localWorkspaceMode: Boolean,
+    initialFilter: TaskListFilter = TaskListFilter.All,
     onAddClick: () -> Unit,
     onTaskClick: (String) -> Unit,
     onEditClick: (String) -> Unit,
     onSettingsClick: () -> Unit,
     onSyncDetailsClick: () -> Unit,
+    onSignInToSync: () -> Unit,
     onTodayClick: () -> Unit,
     onAllClick: () -> Unit,
 ) {
@@ -100,6 +108,11 @@ fun TaskListScreen(
     val allTasks by viewModel.tasks.collectAsStateWithLifecycle()
     val todayTasks by viewModel.todayTasks.collectAsStateWithLifecycle()
     val trashTasks by viewModel.trashTasks.collectAsStateWithLifecycle()
+    LaunchedEffect(todayOnly, initialFilter) {
+        if (!todayOnly && initialFilter != TaskListFilter.All && uiState.filter != initialFilter) {
+            viewModel.setFilter(initialFilter)
+        }
+    }
     val isTrashFilter = !todayOnly && uiState.filter == TaskListFilter.Trash
     val sourceTasks = when {
         todayOnly -> todayTasks
@@ -213,7 +226,7 @@ fun TaskListScreen(
     }
 
     AppPage(modifier = Modifier.fillMaxSize()) {
-        if (uiState.syncMessage != SyncStatusMessage.LocalCacheReady) {
+        if (!localWorkspaceMode && uiState.syncMessage != SyncStatusMessage.LocalCacheReady) {
             SyncStatusBar(uiState.syncMessage)
         }
         Column(
@@ -233,16 +246,38 @@ fun TaskListScreen(
                         Button(onClick = onAddClick) {
                             Text(strings.add, maxLines = 1)
                         }
-                        TaskListHeaderActions(
-                            strings = strings,
-                            expanded = headerActionsExpanded,
-                            onExpandedChange = { headerActionsExpanded = it },
-                            onSyncNow = { viewModel.refresh() },
-                            languageCode = appLanguage.code,
-                        )
+                        if (!localWorkspaceMode) {
+                            TaskListHeaderActions(
+                                strings = strings,
+                                expanded = headerActionsExpanded,
+                                onExpandedChange = { headerActionsExpanded = it },
+                                onSyncNow = { viewModel.refresh() },
+                                languageCode = appLanguage.code,
+                            )
+                        }
                     }
                 },
             )
+
+            if (localWorkspaceMode) {
+                AppPanel {
+                    Text(
+                        text = strings.localWorkspaceMode,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        text = strings.localWorkspaceModeBody,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(
+                        onClick = onSignInToSync,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(strings.signInToSync)
+                    }
+                }
+            }
 
             TaskListPrimaryNavigation(
                 todaySelected = todayOnly,
@@ -252,53 +287,56 @@ fun TaskListScreen(
                 onSettingsClick = onSettingsClick,
             )
 
-            TaskListSyncHealthBar(
-                syncHealth = syncHealth,
-                strings = strings,
-                onOpenDetails = onSyncDetailsClick,
-            )
-
-            TextButton(onClick = { listToolsOpen = !listToolsOpen }, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    if (listToolsOpen || uiState.searchQuery.isNotBlank() || (!todayOnly && uiState.filter != TaskListFilter.All)) {
-                        if (isEnglish) "Hide list tools" else "收起列表工具"
-                    } else {
-                        if (isEnglish) "Search and filters" else "搜索与筛选"
-                    },
+            if (!localWorkspaceMode && syncHealth.needsAttention) {
+                TaskListSyncHealthBar(
+                    syncHealth = syncHealth,
+                    strings = strings,
+                    onOpenDetails = onSyncDetailsClick,
                 )
             }
 
-            if (listToolsOpen || uiState.searchQuery.isNotBlank() || (!todayOnly && uiState.filter != TaskListFilter.All)) {
-                AppPanel(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)) {
-                    OutlinedTextField(
-                        value = uiState.searchQuery,
-                        onValueChange = viewModel::updateSearchQuery,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        placeholder = { Text(strings.searchHint) },
-                    )
-                    if (!todayOnly) {
-                        val selectedFilterLabel = uiState.filter.localizedLabel(strings)
-                        AppDropdownField(
-                            label = strings.filter,
-                            selectedLabel = selectedFilterLabel,
-                            expanded = filterMenuExpanded,
-                            options = combinedTaskListFilterOptions(strings),
-                            onExpandedChange = { filterMenuExpanded = it },
-                            onSelect = viewModel::setFilter,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    TaskFilterSummaryBar(
-                        activeFilterLabels = activeFilterLabels,
-                        strings = strings,
-                        canClearSearch = uiState.searchQuery.isNotBlank(),
-                        canClearFilter = !todayOnly && uiState.filter != TaskListFilter.All,
-                        onClearSearch = { viewModel.updateSearchQuery("") },
-                        onClearFilter = { viewModel.setFilter(TaskListFilter.All) },
+            TaskListSearchField(
+                searchQuery = uiState.searchQuery,
+                strings = strings,
+                onSearchChange = viewModel::updateSearchQuery,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (!todayOnly) {
+                TextButton(onClick = { listToolsOpen = !listToolsOpen }, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        if (listToolsOpen || uiState.filter != TaskListFilter.All) {
+                            if (isEnglish) "Hide filters" else "收起筛选"
+                        } else {
+                            if (isEnglish) "Filters" else "筛选"
+                        },
                     )
                 }
             }
+
+            if (!todayOnly && (listToolsOpen || uiState.filter != TaskListFilter.All)) {
+                AppPanel(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)) {
+                    val selectedFilterLabel = uiState.filter.localizedLabel(strings)
+                    AppDropdownField(
+                        label = strings.filter,
+                        selectedLabel = selectedFilterLabel,
+                        expanded = filterMenuExpanded,
+                        options = combinedTaskListFilterOptions(strings),
+                        onExpandedChange = { filterMenuExpanded = it },
+                        onSelect = viewModel::setFilter,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            TaskFilterSummaryBar(
+                activeFilterLabels = activeFilterLabels,
+                strings = strings,
+                canClearSearch = uiState.searchQuery.isNotBlank(),
+                canClearFilter = !todayOnly && uiState.filter != TaskListFilter.All,
+                onClearSearch = { viewModel.updateSearchQuery("") },
+                onClearFilter = { viewModel.setFilter(TaskListFilter.All) },
+            )
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -480,6 +518,27 @@ private fun TaskListSyncHealthBar(
                 Text(strings.syncHealthAction, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+    }
+}
+
+@Composable
+private fun TaskListSearchField(
+    searchQuery: String,
+    strings: TaskBridgeStrings,
+    onSearchChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AppPanel(
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = { Text(strings.searchHint) },
+        )
     }
 }
 
@@ -876,19 +935,10 @@ private fun TaskRow(
                         },
                         color = if (isOverdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                     )
-                    taskListSubtitleOrNull(task.subtitle(strings, displayTimeZone, now, languageCode))?.let { subtitle ->
-                        Text(
-                            text = subtitle,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isOverdue || task.syncStatus == SyncStatus.Conflict) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
+                    TaskMetaChips(
+                        chips = taskMetaChips(task, strings, displayTimeZone, now, languageCode),
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
                 }
             }
             if (task.syncStatus == SyncStatus.Conflict) {
@@ -979,6 +1029,45 @@ private fun TaskRow(
                         },
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun TaskMetaChips(
+    chips: List<TaskMetaChip>,
+    modifier: Modifier = Modifier,
+) {
+    if (chips.isEmpty()) return
+
+    FlowRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        chips.forEach { chip ->
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = if (chip.attention) {
+                    MaterialTheme.colorScheme.errorContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f)
+                },
+                contentColor = if (chip.attention) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            ) {
+                Text(
+                    text = chip.text,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                )
             }
         }
     }
@@ -1197,17 +1286,29 @@ private fun List<Task>.filterByQuery(query: String): List<Task> {
     }
 }
 
-private fun Task.subtitle(strings: TaskBridgeStrings, displayTimeZone: String, now: Instant, languageCode: String): String {
-    return listOfNotNull(
-        strings.overdue.takeIf { isOverdueAt(now, displayTimeZone) },
-        project?.takeIf { it.isNotBlank() }?.let { "${strings.project} $it" },
-        tag?.takeIf { it.isNotBlank() }?.let { "#$it" },
-        plannedDate?.let { "${strings.plan} $it" },
-        dueTime?.let { "${strings.due} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
-        snoozedUntil?.let { "${strings.snooze} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}" },
-        if (priority > 0) "${strings.priority} ${getTaskPriorityLabel(priority, languageCode)}" else null,
-        getSyncStatusLabel(syncStatus, languageCode),
-    ).joinToString("  /  ")
+private fun taskMetaChips(
+    task: Task,
+    strings: TaskBridgeStrings,
+    displayTimeZone: String,
+    now: Instant,
+    languageCode: String,
+): List<TaskMetaChip> {
+    return buildList {
+        if (task.isOverdueAt(now, displayTimeZone)) {
+            add(TaskMetaChip(strings.overdue, attention = true))
+        }
+        task.project?.takeIf { it.isNotBlank() }?.let { add(TaskMetaChip("${strings.project} $it")) }
+        task.tag?.takeIf { it.isNotBlank() }?.let { add(TaskMetaChip("#$it")) }
+        task.plannedDate?.let { add(TaskMetaChip("${strings.plan} $it")) }
+        task.dueTime?.let { add(TaskMetaChip("${strings.due} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}")) }
+        task.snoozedUntil?.let { add(TaskMetaChip("${strings.snooze} ${ShanghaiTime.formatDateTime(it, displayTimeZone)}")) }
+        if (task.priority > 0) {
+            add(TaskMetaChip("${strings.priority} ${getTaskPriorityLabel(task.priority, languageCode)}"))
+        }
+        getSyncStatusLabel(task.syncStatus, languageCode)?.let {
+            add(TaskMetaChip(it, attention = task.syncStatus != SyncStatus.Synced))
+        }
+    }
 }
 
 private fun Task.dueLocalDate(displayTimeZone: String): LocalDate? {

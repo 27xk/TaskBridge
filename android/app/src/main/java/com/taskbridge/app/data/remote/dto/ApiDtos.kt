@@ -37,6 +37,27 @@ data class RefreshTokenRequestDto(
     @SerializedName("device_id") val deviceId: String? = null,
 )
 
+data class PasswordChangeRequestDto(
+    @SerializedName("current_password") val currentPassword: String,
+    @SerializedName("new_password") val newPassword: String,
+)
+
+data class AuthSessionDto(
+    val id: Int,
+    @SerializedName("device_id") val deviceId: String?,
+    @SerializedName("created_at") val createdAt: String,
+    @SerializedName("expires_at") val expiresAt: String,
+    @SerializedName("revoked_at") val revokedAt: String?,
+)
+
+data class RevokeOtherSessionsRequestDto(
+    @SerializedName("device_id") val deviceId: String,
+)
+
+data class RevokeSessionsResponseDto(
+    val revoked: Int,
+)
+
 data class TokenPairDto(
     @SerializedName("access_token") val accessToken: String,
     @SerializedName("refresh_token") val refreshToken: String,
@@ -67,6 +88,12 @@ data class DeviceDto(
     @SerializedName("device_name") val deviceName: String,
     @SerializedName("device_type") val deviceType: String,
     @SerializedName("last_online_at") val lastOnlineAt: String?,
+)
+
+data class TaskMetaDto(
+    val projects: List<String> = emptyList(),
+    val tags: List<String> = emptyList(),
+    val counts: Map<String, Int> = emptyMap(),
 )
 
 data class TaskDto(

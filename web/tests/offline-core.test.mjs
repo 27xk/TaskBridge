@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildOfflineDatabaseName,
   buildConflictOverwritePayload,
   buildTaskMetaLabels,
   buildLocalMeta,
@@ -10,13 +11,211 @@ import {
   getTaskPriorityLabel,
   getTaskStatusLabel,
   getTaskViewLabel,
+  hasOfflineQueueId,
   makeOfflineTask,
   makeTaskFromTemplate,
   matchesTaskView,
+  isOfflineProfileForApi,
+  normalizeOfflineApiBaseUrl,
+  normalizeOfflineProfile,
+  reconcileCachedTaskSnapshot,
+  resetEndpointScopedConnectionState,
   shouldConfirmTaskAction,
+  shouldShowConnectionBadge,
 } from "../offline-core.js";
 
 const fixedNow = new Date("2026-06-05T10:00:00.000Z");
+
+test("offline resume profiles retain only the identity needed to open the correct cache", () => {
+  assert.deepEqual(
+    normalizeOfflineProfile({
+      id: 42,
+      username: " owner ",
+      email: "owner@example.com",
+      api_base_url: "HTTPS://TaskBridge.Example.com:443/root/api/v1/",
+      access_token: "must-not-persist",
+      refresh_token: "must-not-persist",
+      role: "admin",
+    }),
+    {
+      id: 42,
+      username: "owner",
+      email: "owner@example.com",
+      api_base_url: "https://taskbridge.example.com/root/api/v1",
+    },
+  );
+});
+
+test("offline resume rejects profiles without a positive user id", () => {
+  const apiBaseUrl = "https://taskbridge.example.com/api/v1";
+  assert.equal(normalizeOfflineProfile({ id: 0, username: "owner", api_base_url: apiBaseUrl }), null);
+  assert.equal(normalizeOfflineProfile({ id: "not-a-number", username: "owner", api_base_url: apiBaseUrl }), null);
+  assert.equal(normalizeOfflineProfile({ id: 1, username: "owner" }), null);
+  assert.equal(normalizeOfflineProfile(null), null);
+});
+
+test("legacy offline profiles are bound to the saved API during migration", () => {
+  assert.deepEqual(
+    normalizeOfflineProfile(
+      { id: 42, username: "owner", email: "owner@example.com" },
+      "http://127.0.0.1:8000/api/v1",
+    ),
+    {
+      id: 42,
+      username: "owner",
+      email: "owner@example.com",
+      api_base_url: "http://127.0.0.1:8000/api/v1",
+    },
+  );
+});
+
+test("offline database names isolate equal user ids on different servers", () => {
+  const first = buildOfflineDatabaseName(
+    "taskbridge.web.v1",
+    "https://one.example.com/api/v1",
+    42,
+  );
+  const equivalent = buildOfflineDatabaseName(
+    "taskbridge.web.v1",
+    "HTTPS://ONE.EXAMPLE.COM:443/api/v1/",
+    42,
+  );
+  const second = buildOfflineDatabaseName(
+    "taskbridge.web.v1",
+    "https://two.example.com/api/v1",
+    42,
+  );
+
+  assert.equal(first, equivalent);
+  assert.notEqual(first, second);
+  assert.match(first, /\.offline\.server\..+\.user\.42$/);
+  assert.equal(
+    normalizeOfflineApiBaseUrl("https://one.example.com"),
+    "https://one.example.com/api/v1",
+  );
+});
+
+test("offline resume profiles only match their original API", () => {
+  const profile = normalizeOfflineProfile({
+    id: 42,
+    username: "owner",
+    api_base_url: "https://one.example.com/api/v1",
+  });
+
+  assert.equal(isOfflineProfileForApi(profile, "HTTPS://ONE.EXAMPLE.COM:443/api/v1/"), true);
+  assert.equal(isOfflineProfileForApi(profile, "https://two.example.com/api/v1"), false);
+});
+
+test("cache reconciliation removes stale scoped records and preserves pending work", () => {
+  const cached = [
+    { id: 1, title: "Removed remotely", list_type: "inbox", status: "open" },
+    {
+      id: 2,
+      title: "Local pending title",
+      list_type: "inbox",
+      status: "open",
+      offline_status: "pending:update",
+      offline_queue_id: 7,
+    },
+    { id: 3, title: "Other view", list_type: "later", status: "open" },
+    {
+      id: 4,
+      title: "Old remote title",
+      list_type: "inbox",
+      status: "open",
+      offline_status: null,
+      offline_queue_id: null,
+    },
+  ];
+  const remote = [
+    { id: 2, title: "Server title", list_type: "inbox", status: "open" },
+    { id: 4, title: "Fresh remote title", list_type: "inbox", status: "open" },
+    { id: 5, title: "New remote task", list_type: "inbox", status: "open" },
+  ];
+
+  const reconciled = reconcileCachedTaskSnapshot(cached, remote, { view: "inbox", search: "" });
+
+  assert.deepEqual(reconciled.map((task) => task.id), [2, 3, 4, 5]);
+  assert.equal(reconciled.find((task) => task.id === 2)?.title, "Local pending title");
+  assert.equal(reconciled.find((task) => task.id === 4)?.title, "Fresh remote title");
+  assert.equal(reconciled.find((task) => task.id === 4)?.offline_status, null);
+});
+
+test("offline queue ids accept only positive integer IndexedDB keys", () => {
+  for (const value of [1, 42, Number.MAX_SAFE_INTEGER]) {
+    assert.equal(hasOfflineQueueId(value), true, `${String(value)} should be accepted`);
+  }
+  for (const value of [
+    null,
+    undefined,
+    "",
+    "1",
+    0,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    true,
+    [1],
+    { valueOf: () => 1 },
+  ]) {
+    assert.equal(hasOfflineQueueId(value), false, `${String(value)} should be rejected`);
+  }
+});
+
+test("connection badge visibility follows local workspace and connection check state", () => {
+  assert.equal(shouldShowConnectionBadge(false, null), false);
+  assert.equal(shouldShowConnectionBadge(true, null), true);
+  assert.equal(shouldShowConnectionBadge(false, { status: "ready" }), true);
+  assert.equal(shouldShowConnectionBadge(false, { status: "degraded" }), true);
+});
+
+test("endpoint changes clear only endpoint-scoped connection state", () => {
+  const user = { id: 42, username: "owner" };
+  const tasks = [{ id: 1, title: "Keep me" }];
+  const offlineQueue = [{ offline_queue_id: 7 }];
+  const state = {
+    serverBaseUrl: "https://one.example.com",
+    apiBaseUrl: "https://one.example.com/api/v1",
+    registrationStatusKnown: true,
+    registrationEnabled: true,
+    syncStatus: { status: "ready" },
+    user,
+    accessToken: "access-token",
+    refreshToken: "refresh-token",
+    tasks,
+    offlineQueue,
+  };
+
+  assert.equal(
+    resetEndpointScopedConnectionState(
+      state,
+      "https://one.example.com",
+      "https://one.example.com/api/v1",
+    ),
+    false,
+  );
+  assert.equal(state.registrationStatusKnown, true);
+  assert.equal(state.registrationEnabled, true);
+  assert.deepEqual(state.syncStatus, { status: "ready" });
+
+  assert.equal(
+    resetEndpointScopedConnectionState(
+      state,
+      "https://one.example.com",
+      "https://one.example.com/custom-api/v1",
+    ),
+    true,
+  );
+  assert.equal(state.registrationStatusKnown, false);
+  assert.equal(state.registrationEnabled, false);
+  assert.equal(state.syncStatus, null);
+  assert.equal(state.user, user);
+  assert.equal(state.accessToken, "access-token");
+  assert.equal(state.refreshToken, "refresh-token");
+  assert.equal(state.tasks, tasks);
+  assert.equal(state.offlineQueue, offlineQueue);
+});
 
 test("offline-created tasks preserve the full task payload used by sync", () => {
   const task = makeOfflineTask(

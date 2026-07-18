@@ -4,6 +4,8 @@ import android.content.Context
 import com.google.gson.GsonBuilder
 import com.taskbridge.app.BuildConfig
 import com.taskbridge.app.data.datastore.TokenDataStore
+import com.taskbridge.app.data.datastore.canApplyTokenRefresh
+import com.taskbridge.app.data.datastore.requireMatchingWorkspace
 import com.taskbridge.app.data.remote.dto.RefreshTokenRequestDto
 import com.taskbridge.app.sync.DeviceIdProvider
 import kotlinx.coroutines.flow.first
@@ -19,6 +21,8 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.net.URI
 import java.util.concurrent.TimeUnit
 
+const val INTERNAL_WORKSPACE_HEADER = "X-TaskBridge-Expected-Workspace"
+
 object RetrofitClient {
     fun create(
         context: Context,
@@ -31,6 +35,7 @@ object RetrofitClient {
         val refreshClient = baseHttpClient()
             .newBuilder()
             .addInterceptor(endpointInterceptor)
+            .addInterceptor(StripInternalWorkspaceHeaderInterceptor())
             .build()
         val refreshApi = Retrofit.Builder()
             .baseUrl(retrofitBaseUrl)
@@ -78,8 +83,15 @@ private class EndpointInterceptor(
         ?: error("Invalid TASKBRIDGE_BASE_URL")
 
     override fun intercept(chain: Interceptor.Chain): Response {
-        val targetBase = endpointUri(runBlocking { tokenDataStore.apiBaseUrl.first() }) ?: defaultBase
         val original = chain.request()
+        val requestContext = runBlocking { tokenDataStore.requestAuthContext() }
+        original.header(INTERNAL_WORKSPACE_HEADER)?.let { expectedWorkspaceId ->
+            requireMatchingWorkspace(
+                expectedWorkspaceId,
+                requestContext.workspace,
+            )
+        }
+        val targetBase = endpointUri(requestContext.apiBaseUrl) ?: defaultBase
         val rewrittenUrl = rewriteUrl(original.url().toString(), targetBase)
         return chain.proceed(original.newBuilder().url(rewrittenUrl).build())
     }
@@ -122,15 +134,36 @@ private class AuthInterceptor(
     private val tokenDataStore: TokenDataStore,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val token = runBlocking { tokenDataStore.accessToken.first() }
+        val original = chain.request()
+        val requestContext = runBlocking { tokenDataStore.requestAuthContext() }
+        original.header(INTERNAL_WORKSPACE_HEADER)?.let { expectedWorkspaceId ->
+            requireMatchingWorkspace(
+                expectedWorkspaceId,
+                requestContext.workspace,
+            )
+        }
+        val token = requestContext.accessToken
         val request = if (token.isNullOrBlank()) {
-            chain.request()
+            original.newBuilder()
+                .removeHeader(INTERNAL_WORKSPACE_HEADER)
+                .build()
         } else {
-            chain.request().newBuilder()
+            original.newBuilder()
                 .header("Authorization", "Bearer $token")
+                .removeHeader(INTERNAL_WORKSPACE_HEADER)
                 .build()
         }
         return chain.proceed(request)
+    }
+}
+
+private class StripInternalWorkspaceHeaderInterceptor : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        return chain.proceed(
+            chain.request().newBuilder()
+                .removeHeader(INTERNAL_WORKSPACE_HEADER)
+                .build(),
+        )
     }
 }
 
@@ -155,20 +188,60 @@ private class RefreshTokenAuthenticator(
                     .build()
             }
 
-            val refreshToken = runBlocking { tokenDataStore.refreshToken.first() } ?: return@synchronized null
+            val workspace = runBlocking { tokenDataStore.currentWorkspace.first() }
+                ?: return@synchronized null
+            val refreshToken = runBlocking { tokenDataStore.refreshToken.first() }
+                ?: return@synchronized null
 
-            val tokenPair = try {
+            val refreshResponse = try {
                 refreshApi
-                    .refresh(RefreshTokenRequestDto(refreshToken, deviceIdProvider.getDeviceId()))
+                    .refresh(
+                        RefreshTokenRequestDto(refreshToken, deviceIdProvider.getDeviceId()),
+                        workspace.id,
+                    )
                     .execute()
-                    .body()
-                    ?.data
             } catch (_: Exception) {
                 null
             } ?: return@synchronized null
 
+            if (!refreshResponse.isSuccessful) {
+                if (refreshResponse.code() == 401 || refreshResponse.code() == 403) {
+                    val rejectedWorkspace = runBlocking { tokenDataStore.currentWorkspace.first() }
+                    val rejectedRefreshToken = runBlocking { tokenDataStore.refreshToken.first() }
+                    if (
+                        canApplyTokenRefresh(
+                            workspace.id,
+                            refreshToken,
+                            rejectedWorkspace,
+                            rejectedRefreshToken,
+                        )
+                    ) {
+                        runBlocking { tokenDataStore.expireSession() }
+                    }
+                }
+                return@synchronized null
+            }
+            val tokenPair = refreshResponse.body()?.data ?: return@synchronized null
+
+            val currentWorkspace = runBlocking { tokenDataStore.currentWorkspace.first() }
+            val currentRefreshToken = runBlocking { tokenDataStore.refreshToken.first() }
+            if (!canApplyTokenRefresh(workspace.id, refreshToken, currentWorkspace, currentRefreshToken)) {
+                val replacementAccessToken = runBlocking { tokenDataStore.accessToken.first() }
+                return@synchronized replacementAccessToken
+                    ?.takeIf { currentWorkspace?.id == workspace.id && it.isNotBlank() }
+                    ?.let { token ->
+                        response.request().newBuilder()
+                            .header("Authorization", "Bearer $token")
+                            .build()
+                    }
+            }
+
             runBlocking {
-                tokenDataStore.saveTokens(tokenPair.accessToken, tokenPair.refreshToken)
+                tokenDataStore.saveTokens(
+                    tokenPair.accessToken,
+                    tokenPair.refreshToken,
+                    workspace.userId.toIntOrNull(),
+                )
             }
 
             response.request().newBuilder()

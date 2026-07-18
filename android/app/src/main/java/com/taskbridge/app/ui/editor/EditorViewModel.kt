@@ -1,9 +1,12 @@
 package com.taskbridge.app.ui.editor
 
 import android.content.Context
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.CreationExtras
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.taskbridge.app.data.datastore.TokenDataStore
@@ -19,7 +22,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -40,6 +46,8 @@ data class EditorUiState(
     val isTemplate: Boolean = false,
     val templateName: String = "",
     val hasUnsavedChanges: Boolean = false,
+    val isLoadingTask: Boolean = false,
+    val isSaving: Boolean = false,
     val error: String? = null,
 )
 
@@ -48,7 +56,7 @@ enum class EditorEntryPreset {
     Today,
 }
 
-private data class EditorDraftSnapshot(
+data class EditorDraftSnapshot(
     val editingLocalId: String? = null,
     val title: String = "",
     val content: String = "",
@@ -73,15 +81,40 @@ private data class EditorChecklistItem(
 
 private val editorGson = Gson()
 private val editorChecklistType = object : TypeToken<List<EditorChecklistItem>>() {}.type
+private const val EDITOR_DRAFT_ID_KEY = "editor_draft_id"
+private const val EDITOR_EDITING_LOCAL_ID_KEY = "editor_editing_local_id"
 
 class EditorViewModel(
     private val appContext: Context,
     private val taskRepository: TaskRepository,
     private val syncManager: SyncManager,
     private val tokenDataStore: TokenDataStore,
+    private val savedStateHandle: SavedStateHandle,
+    private val draftStore: EditorDraftStore = FileEditorDraftStore(appContext),
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(EditorUiState())
-    private var savedSnapshot = EditorDraftSnapshot()
+    private val restoredDraftId: String? = savedStateHandle[EDITOR_DRAFT_ID_KEY]
+    private val draftId = restoredDraftId ?: UUID.randomUUID().toString()
+    private val restoredEditingLocalId: String? = savedStateHandle[EDITOR_EDITING_LOCAL_ID_KEY]
+    private val _uiState = MutableStateFlow(EditorUiState(editingLocalId = restoredEditingLocalId))
+    private var savedSnapshot = EditorDraftSnapshot(editingLocalId = restoredEditingLocalId)
+    @Volatile
+    private var restoredDraftLoaded = false
+    @Volatile
+    private var draftStorageCleared = false
+    private val draftStoreMutex = Mutex()
+    private val operations = EditorOperationCoordinator()
+    private val restoreRevision = operations.captureRevision()
+    private val restoreJob = restoredDraftId?.let { id ->
+        viewModelScope.launch(Dispatchers.IO) {
+            val stored = runCatching { draftStore.read(id) }.getOrNull() ?: return@launch
+            val restoredState = decodeEditorState(stored.stateJson) ?: return@launch
+            val restoredSnapshot = decodeEditorSnapshot(stored.snapshotJson) ?: return@launch
+            if (!operations.canApplyLoadedTask(restoreRevision)) return@launch
+            savedSnapshot = restoredSnapshot
+            _uiState.value = restoredState.copy(isLoadingTask = false, isSaving = false)
+            restoredDraftLoaded = true
+        }
+    }
     private val reminderManager = ReminderManager(appContext, tokenDataStore)
     val uiState: StateFlow<EditorUiState> = _uiState
     val displayTimeZone: StateFlow<String> = tokenDataStore.displayTimeZone
@@ -116,17 +149,36 @@ class EditorViewModel(
     fun updateIsTemplate(value: Boolean) = updateDraft { it.copy(isTemplate = value) }
 
     fun startNewTask(preset: EditorEntryPreset = EditorEntryPreset.Default) {
-        val next = initialEditorDraftForPreset(
-            preset = preset,
-            displayTimeZone = displayTimeZone.value,
-        )
-        savedSnapshot = snapshotFromState(next)
-        _uiState.value = next.copy(hasUnsavedChanges = false)
+        viewModelScope.launch {
+            restoreJob?.join()
+            if (restoredDraftLoaded && _uiState.value.editingLocalId == null) return@launch
+            draftStorageCleared = false
+            val next = initialEditorDraftForPreset(
+                preset = preset,
+                displayTimeZone = displayTimeZone.value,
+            )
+            savedSnapshot = snapshotFromState(next)
+            _uiState.value = next.copy(hasUnsavedChanges = false)
+            persistDraft()
+        }
     }
 
     fun loadTask(localId: String) {
+        val revisionAtLoadStart = operations.captureRevision()
+        _uiState.update { it.copy(editingLocalId = localId, isLoadingTask = true, error = null) }
         viewModelScope.launch {
-            val task = taskRepository.getTask(localId) ?: return@launch
+            restoreJob?.join()
+            if (restoredDraftLoaded && _uiState.value.editingLocalId == localId) {
+                _uiState.update { it.copy(isLoadingTask = false) }
+                return@launch
+            }
+            val task = taskRepository.getTask(localId)
+            if (task == null) {
+                if (operations.canApplyLoadedTask(revisionAtLoadStart)) {
+                    _uiState.update { it.copy(isLoadingTask = false, error = "Task could not be loaded.") }
+                }
+                return@launch
+            }
             val loaded = EditorUiState(
                 editingLocalId = task.localId,
                 title = task.title,
@@ -143,8 +195,13 @@ class EditorViewModel(
                 isTemplate = task.isTemplate,
                 templateName = task.templateName.orEmpty(),
             )
+            if (!operations.canApplyLoadedTask(revisionAtLoadStart)) {
+                _uiState.update { it.copy(isLoadingTask = false) }
+                return@launch
+            }
             savedSnapshot = snapshotFromState(loaded)
             _uiState.value = loaded.copy(hasUnsavedChanges = false)
+            persistDraft()
         }
     }
 
@@ -163,68 +220,124 @@ class EditorViewModel(
             _uiState.update { it.copy(error = "Invalid time.") }
             return
         }
+        if (!operations.tryBeginSave()) return
+        _uiState.update { it.copy(isSaving = true, error = null) }
 
         viewModelScope.launch {
-            val editingLocalId = state.editingLocalId
-            val localId = if (editingLocalId == null) {
-                val parsed = QuickAddParser.parse(state.title, timeZoneId)
-                val tag = state.tag.trim().ifBlank { parsed.tag.orEmpty() }.ifBlank { null }
-                val project = state.project.trim().ifBlank { parsed.project.orEmpty() }.ifBlank { null }
-                val dueTime = ShanghaiTime.inputToInstantText(state.dueTime, timeZoneId) ?: parsed.dueTime
-                val remindTime = ShanghaiTime.inputToInstantText(state.remindTime, timeZoneId)
-                taskRepository.addTask(
-                    title = parsed.title,
-                    content = state.content.ifBlank { null },
-                    priority = state.priority.toIntOrNull()?.takeIf { it > 0 } ?: parsed.priority,
-                    tag = tag,
-                    dueTime = dueTime,
-                    remindTime = remindTime,
-                    repeatRule = state.repeatRule.ifBlank { null },
-                    project = project,
-                    listType = state.listType,
-                    plannedDate = state.plannedDate.trim().ifBlank { parsed.plannedDate.orEmpty() }.ifBlank { null },
-                    checklistJson = checklistTextToJson(state.checklistText),
-                    isTemplate = state.isTemplate,
-                    templateName = state.templateName.ifBlank { null },
-                )
-            } else {
-                val existingChecklistJson = taskRepository.getTask(editingLocalId)?.checklistJson
-                taskRepository.updateTask(
-                    localId = editingLocalId,
-                    title = state.title.trim(),
-                    content = state.content.ifBlank { null },
-                    priority = state.priority.toIntOrNull()?.coerceIn(0, 5) ?: 0,
-                    tag = state.tag.trim().ifBlank { null },
-                    project = state.project.trim().ifBlank { null },
-                    updateProject = true,
-                    dueTime = ShanghaiTime.inputToInstantText(state.dueTime, timeZoneId),
-                    remindTime = ShanghaiTime.inputToInstantText(state.remindTime, timeZoneId),
-                    repeatRule = state.repeatRule.ifBlank { null },
-                    listType = state.listType,
-                    plannedDate = state.plannedDate.trim().ifBlank { null },
-                    updatePlannedDate = true,
-                    checklistJson = checklistTextToJson(state.checklistText, existingChecklistJson),
-                    isTemplate = state.isTemplate,
-                    templateName = state.templateName.ifBlank { null },
-                    updateTemplateName = true,
-                )
-                editingLocalId
+            val result = runCatching {
+                val editingLocalId = state.editingLocalId
+                val localId = if (editingLocalId == null) {
+                    val parsed = QuickAddParser.parse(state.title, timeZoneId)
+                    val tag = state.tag.trim().ifBlank { parsed.tag.orEmpty() }.ifBlank { null }
+                    val project = state.project.trim().ifBlank { parsed.project.orEmpty() }.ifBlank { null }
+                    val dueTime = ShanghaiTime.inputToInstantText(state.dueTime, timeZoneId) ?: parsed.dueTime
+                    val remindTime = ShanghaiTime.inputToInstantText(state.remindTime, timeZoneId)
+                    taskRepository.addTask(
+                        title = parsed.title,
+                        content = state.content.ifBlank { null },
+                        priority = state.priority.toIntOrNull()?.takeIf { it > 0 } ?: parsed.priority,
+                        tag = tag,
+                        dueTime = dueTime,
+                        remindTime = remindTime,
+                        repeatRule = state.repeatRule.ifBlank { null },
+                        project = project,
+                        listType = state.listType,
+                        plannedDate = state.plannedDate.trim().ifBlank { parsed.plannedDate.orEmpty() }.ifBlank { null },
+                        checklistJson = checklistTextToJson(state.checklistText),
+                        isTemplate = state.isTemplate,
+                        templateName = state.templateName.ifBlank { null },
+                    )
+                } else {
+                    val existingChecklistJson = taskRepository.getTask(editingLocalId)?.checklistJson
+                    taskRepository.updateTask(
+                        localId = editingLocalId,
+                        title = state.title.trim(),
+                        content = state.content.ifBlank { null },
+                        priority = state.priority.toIntOrNull()?.coerceIn(0, 5) ?: 0,
+                        tag = state.tag.trim().ifBlank { null },
+                        project = state.project.trim().ifBlank { null },
+                        updateProject = true,
+                        dueTime = ShanghaiTime.inputToInstantText(state.dueTime, timeZoneId),
+                        remindTime = ShanghaiTime.inputToInstantText(state.remindTime, timeZoneId),
+                        repeatRule = state.repeatRule.ifBlank { null },
+                        listType = state.listType,
+                        plannedDate = state.plannedDate.trim().ifBlank { null },
+                        updatePlannedDate = true,
+                        checklistJson = checklistTextToJson(state.checklistText, existingChecklistJson),
+                        isTemplate = state.isTemplate,
+                        templateName = state.templateName.ifBlank { null },
+                        updateTemplateName = true,
+                    )
+                    editingLocalId
+                }
+                taskRepository.getTask(localId)?.let(reminderManager::schedule)
+                TodayTaskWidgetUpdateWorker.enqueue(appContext)
+                syncManager.enqueueNetworkSync()
+                syncManager.syncNow()
+                savedSnapshot = snapshotFromState(_uiState.value)
+                clearPersistedDraft()
             }
-            taskRepository.getTask(localId)?.let(reminderManager::schedule)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
-            syncManager.enqueueNetworkSync()
-            syncManager.syncNow()
-            savedSnapshot = snapshotFromState(_uiState.value)
-            onSaved()
+            operations.finishSave()
+            result.onSuccess {
+                _uiState.update { it.copy(isSaving = false) }
+                onSaved()
+            }.onFailure {
+                _uiState.update { it.copy(isSaving = false, error = "Task could not be saved.") }
+            }
         }
     }
 
+    fun discardDraft() {
+        clearPersistedDraft()
+    }
+
     private fun updateDraft(transform: (EditorUiState) -> EditorUiState) {
+        if (_uiState.value.isSaving) return
+        operations.markDraftChanged()
         _uiState.update { current ->
             val next = transform(current)
             next.copy(hasUnsavedChanges = snapshotFromState(next) != savedSnapshot)
         }
+        persistDraft()
     }
+
+    private fun persistDraft() {
+        val reference = editorSavedStateReference(draftId, _uiState.value.editingLocalId)
+        savedStateHandle[EDITOR_DRAFT_ID_KEY] = reference.draftId
+        if (reference.editingLocalId == null) {
+            savedStateHandle.remove<String>(EDITOR_EDITING_LOCAL_ID_KEY)
+        } else {
+            savedStateHandle[EDITOR_EDITING_LOCAL_ID_KEY] = reference.editingLocalId
+        }
+        val stored = StoredEditorDraft(
+            stateJson = editorGson.toJson(_uiState.value),
+            snapshotJson = editorGson.toJson(savedSnapshot),
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            draftStoreMutex.withLock {
+                if (!draftStorageCleared) runCatching { draftStore.write(draftId, stored) }
+            }
+        }
+    }
+
+    private fun clearPersistedDraft() {
+        draftStorageCleared = true
+        savedStateHandle.remove<String>(EDITOR_DRAFT_ID_KEY)
+        savedStateHandle.remove<String>(EDITOR_EDITING_LOCAL_ID_KEY)
+        viewModelScope.launch(Dispatchers.IO) {
+            draftStoreMutex.withLock {
+                runCatching { draftStore.delete(draftId) }
+            }
+        }
+    }
+}
+
+private fun decodeEditorState(value: String): EditorUiState? {
+    return runCatching { editorGson.fromJson(value, EditorUiState::class.java) }.getOrNull()
+}
+
+private fun decodeEditorSnapshot(value: String): EditorDraftSnapshot? {
+    return runCatching { editorGson.fromJson(value, EditorDraftSnapshot::class.java) }.getOrNull()
 }
 
 fun isValidPlannedDateInput(value: String): Boolean {
@@ -384,7 +497,13 @@ class EditorViewModelFactory(
     private val tokenDataStore: TokenDataStore,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return EditorViewModel(appContext, taskRepository, syncManager, tokenDataStore) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
+        return EditorViewModel(
+            appContext,
+            taskRepository,
+            syncManager,
+            tokenDataStore,
+            extras.createSavedStateHandle(),
+        ) as T
     }
 }

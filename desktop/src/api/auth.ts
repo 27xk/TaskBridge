@@ -39,6 +39,23 @@ export interface RegistrationStatusDto {
   registration_enabled: boolean;
 }
 
+export interface RefreshSessionDto {
+  id: number;
+  device_id: string | null;
+  created_at: string;
+  expires_at: string;
+  revoked_at: string | null;
+}
+
+export interface RevokeSessionsDto {
+  revoked: number;
+}
+
+export interface ChangePasswordPayload {
+  current_password: string;
+  new_password: string;
+}
+
 export function register(payload: RegisterPayload): Promise<TokenPairDto> {
   return unwrap(request.post("/auth/register", payload));
 }
@@ -57,4 +74,20 @@ export function getRegistrationStatus(): Promise<RegistrationStatusDto> {
 
 export function createWebSocketTicket(deviceId: string): Promise<WebSocketTicketDto> {
   return unwrap(request.post("/auth/ws-ticket", { device_id: deviceId }));
+}
+
+export function listSessions(): Promise<RefreshSessionDto[]> {
+  return unwrap(request.get("/auth/sessions"));
+}
+
+export function revokeSession(sessionId: number): Promise<RefreshSessionDto> {
+  return unwrap(request.delete(`/auth/sessions/${sessionId}`));
+}
+
+export function revokeOtherSessions(deviceId: string): Promise<RevokeSessionsDto> {
+  return unwrap(request.post("/auth/sessions/revoke-other-devices", { device_id: deviceId }));
+}
+
+export function changePassword(payload: ChangePasswordPayload): Promise<RevokeSessionsDto> {
+  return unwrap(request.put("/auth/password", payload));
 }

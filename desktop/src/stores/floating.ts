@@ -5,7 +5,7 @@ import { bridge } from "../db/sqlite";
 import { formatShanghaiDateTime } from "../../shared/quick-add-parser";
 import {
   completeFloatingTask,
-  listFloatingTodayTasks,
+  getFloatingTodayTaskSummary,
   openTaskDetail,
   quickAddTodayTask,
 } from "../db/task.dao";
@@ -22,6 +22,7 @@ export const useFloatingStore = defineStore("floating", () => {
   const loading = ref(false);
   const authenticated = ref(false);
   const feedback = ref("");
+  const hiddenTaskCount = ref(0);
   const width = ref(320);
   const height = ref(460);
   let refreshTimer: number | null = null;
@@ -42,6 +43,7 @@ export const useFloatingStore = defineStore("floating", () => {
 
     if (!authenticated.value) {
       tasks.value = [];
+      hiddenTaskCount.value = 0;
       syncMessage.value = "请登录 TaskBridge";
       syncState.value = "offline";
       return;
@@ -49,7 +51,9 @@ export const useFloatingStore = defineStore("floating", () => {
 
     loading.value = true;
     try {
-      tasks.value = await listFloatingTodayTasks(8);
+      const summary = await getFloatingTodayTaskSummary(8);
+      tasks.value = summary.tasks;
+      hiddenTaskCount.value = Math.max(0, summary.totalOpen - openTasks.value.length);
       const status = await bridge().sync.getStatus();
       syncMessage.value = translateSyncStatus(status);
       syncState.value = mapSyncState(status);
@@ -119,11 +123,19 @@ export const useFloatingStore = defineStore("floating", () => {
     const unsubscribeOpacity = bridge().floating.onOpacityChanged((value) => {
       opacity.value = value;
     });
+    const unsubscribeSessionExpired = bridge().auth.onSessionExpired(() => {
+      authenticated.value = false;
+      tasks.value = [];
+      hiddenTaskCount.value = 0;
+      syncMessage.value = useSettingsStore().t("auth.sessionExpired");
+      syncState.value = "offline";
+    });
     return () => {
       unsubscribeTasks();
       unsubscribeStatus();
       unsubscribeQuickAdd();
       unsubscribeOpacity();
+      unsubscribeSessionExpired();
       if (refreshTimer !== null) {
         window.clearTimeout(refreshTimer);
         refreshTimer = null;
@@ -169,6 +181,7 @@ export const useFloatingStore = defineStore("floating", () => {
     loading,
     authenticated,
     feedback,
+    hiddenTaskCount,
     init,
     refresh,
     quickAdd,

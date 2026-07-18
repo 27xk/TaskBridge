@@ -24,8 +24,6 @@ android {
 
     val taskBridgeBaseUrl = taskBridgeProperty("TASKBRIDGE_BASE_URL", "https://taskbridge.example.invalid/api/v1/")
     val taskBridgeWebSocketUrl = taskBridgeProperty("TASKBRIDGE_WS_URL", "wss://taskbridge.example.invalid/ws/sync")
-    val taskBridgeUsesCleartext =
-        taskBridgeBaseUrl.startsWith("http://") || taskBridgeWebSocketUrl.startsWith("ws://")
     val releaseEndpointLooksPlaceholder =
         taskBridgeBaseUrl.contains("example.invalid") || taskBridgeWebSocketUrl.contains("example.invalid")
     val releaseKeystorePath = taskBridgeProperty("ANDROID_KEYSTORE_PATH", System.getenv("ANDROID_KEYSTORE_PATH") ?: "")
@@ -43,14 +41,14 @@ android {
         applicationId = "com.taskbridge.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.1.7"
+        versionCode = 5
+        versionName = "0.1.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "TASKBRIDGE_BASE_URL", "\"$taskBridgeBaseUrl\"")
         buildConfigField("String", "TASKBRIDGE_WS_URL", "\"$taskBridgeWebSocketUrl\"")
         manifestPlaceholders["allowBackup"] = true
-        manifestPlaceholders["usesCleartextTraffic"] = taskBridgeUsesCleartext
+        manifestPlaceholders["usesCleartextTraffic"] = true
     }
 
     compileOptions {
@@ -106,7 +104,7 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
             manifestPlaceholders["allowBackup"] = false
-            manifestPlaceholders["usesCleartextTraffic"] = taskBridgeUsesCleartext
+            manifestPlaceholders["usesCleartextTraffic"] = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

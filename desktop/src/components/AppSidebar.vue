@@ -205,7 +205,7 @@ function closeMenu(): void {
 
 <template>
   <aside class="sidebar app-sidebar" :aria-label="settingsStore.t('nav.label')">
-    <div class="brand">
+    <div class="brand" title="TaskBridge">
       <span class="brand-mark" aria-hidden="true">TB</span>
       <span class="brand-name">TaskBridge</span>
     </div>
@@ -252,7 +252,7 @@ function closeMenu(): void {
         id="account-menu-trigger"
         type="button"
         class="account-menu-trigger"
-        :title="settingsStore.t('nav.accountMenu')"
+        :title="accountMenuAriaLabel"
         :aria-label="accountMenuAriaLabel"
         aria-haspopup="menu"
         :aria-expanded="menuOpen"

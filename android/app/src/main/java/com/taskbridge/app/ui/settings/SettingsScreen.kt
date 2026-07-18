@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -28,16 +29,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.Gson
+import com.taskbridge.app.BuildConfig
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.datastore.deriveNetworkEndpoints
 import com.taskbridge.app.data.datastore.inferServerBaseUrlFromApi
 import com.taskbridge.app.data.datastore.validateApiBaseUrl
 import com.taskbridge.app.data.datastore.validateWebSocketUrl
 import com.taskbridge.app.data.repository.AuthRepository
+import com.taskbridge.app.data.remote.dto.AuthSessionDto
 import com.taskbridge.app.data.local.SyncQueueCounts
 import com.taskbridge.app.data.local.SyncQueueEntity
 import com.taskbridge.app.data.repository.BackupImportErrorCode
@@ -45,16 +49,20 @@ import com.taskbridge.app.data.repository.BackupImportPreview
 import com.taskbridge.app.data.repository.BackupImportUndoItem
 import com.taskbridge.app.data.repository.TaskRepository
 import com.taskbridge.app.sync.SyncManager
+import com.taskbridge.app.sync.SyncRunState
 import com.taskbridge.app.ui.components.AppDropdownField
+import com.taskbridge.app.ui.components.AppDynamicStatusText
 import com.taskbridge.app.ui.components.AppHeader
 import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
 import com.taskbridge.app.ui.components.AppSection
 import com.taskbridge.app.ui.components.AppUiOption
 import com.taskbridge.app.ui.components.languageOptions
+import com.taskbridge.app.ui.components.tryOpenExternalUri
 import com.taskbridge.app.ui.components.userFacingConnectionErrorMessage
 import com.taskbridge.app.ui.i18n.AppLanguage
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
+import com.taskbridge.app.ui.login.PasswordTextField
 import com.taskbridge.app.utils.ShanghaiTime
 import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
 import com.taskbridge.app.widget.WidgetConstants
@@ -69,6 +77,7 @@ import java.time.ZoneId
 import kotlin.math.roundToInt
 
 private const val MAX_SELECTED_BACKUP_BYTES = 20_000_000
+private const val LATEST_RELEASE_URL = "https://github.com/27xk/TaskBridge/releases/latest"
 
 private data class PendingBackupImport(
     val raw: String,
@@ -143,9 +152,11 @@ fun SettingsScreen(
     initialSection: String? = null,
     onLanguageChange: (AppLanguage) -> Unit,
     onBack: () -> Unit,
+    onOpenConflictTasks: () -> Unit,
     onLogout: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val uriHandler = LocalUriHandler.current
     val strings = LocalTaskBridgeStrings.current
     val scope = rememberCoroutineScope()
     val widgetOpacity by tokenDataStore.widgetOpacityPercent.collectAsStateWithLifecycle(initialValue = 78)
@@ -181,7 +192,9 @@ fun SettingsScreen(
     var failedSyncTaskCount by remember { mutableStateOf(0) }
     var exhaustedSyncQueuePreview by remember { mutableStateOf<List<SyncQueueEntity>>(emptyList()) }
     var syncRecoveryNote by remember { mutableStateOf("") }
+    var syncRecoveryNoteIsError by remember { mutableStateOf(false) }
     var backupImportNote by remember { mutableStateOf("") }
+    var backupImportNoteIsError by remember { mutableStateOf(false) }
     var pendingBackupImport by remember { mutableStateOf<PendingBackupImport?>(null) }
     var confirmBackupImport by remember { mutableStateOf(false) }
     var confirmUndoBackupImport by remember { mutableStateOf(false) }
@@ -189,6 +202,7 @@ fun SettingsScreen(
     var lastImportedBackupUndoItems by remember { mutableStateOf<List<BackupImportUndoItem>>(emptyList()) }
     var connectionNote by remember { mutableStateOf("") }
     var connectionNoteIsError by remember { mutableStateOf(false) }
+    var externalLinkError by remember { mutableStateOf("") }
     var testConnection by remember { mutableStateOf(false) }
     var advancedConnectionOpen by remember { mutableStateOf(false) }
     var supportToolsOpen by remember(initialSection) { mutableStateOf(initialSection == "sync-recovery") }
@@ -196,12 +210,129 @@ fun SettingsScreen(
     var confirmLogoutWithPendingSync by remember { mutableStateOf(false) }
     var confirmExportBackup by remember { mutableStateOf(false) }
     var confirmClearLocalData by remember { mutableStateOf(false) }
+    var confirmRevokeOtherSessions by remember { mutableStateOf(false) }
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmNewPassword by remember { mutableStateOf("") }
+    var passwordNote by remember { mutableStateOf("") }
+    var passwordNoteIsError by remember { mutableStateOf(false) }
+    var changingPassword by remember { mutableStateOf(false) }
+    var sessions by remember { mutableStateOf<List<AuthSessionDto>>(emptyList()) }
+    var sessionsLoading by remember { mutableStateOf(false) }
+    var sessionsLoaded by remember { mutableStateOf(false) }
+    var sessionNote by remember { mutableStateOf("") }
+    var sessionNoteIsError by remember { mutableStateOf(false) }
     var selectedSection by remember(initialSection) { mutableStateOf(initialSettingsSection(initialSection)) }
     val isEnglish = language == AppLanguage.English
+
+    suspend fun refreshAccountSessions() {
+        sessionsLoading = true
+        authRepository.sessions()
+            .onSuccess { loadedSessions ->
+                sessions = loadedSessions
+                sessionsLoaded = true
+                if (sessionNoteIsError) sessionNote = ""
+                sessionNoteIsError = false
+            }
+            .onFailure {
+                sessionNoteIsError = true
+                sessionNote = if (isEnglish) {
+                    "Could not load signed-in sessions. Try again."
+                } else {
+                    "无法加载登录会话，请重试。"
+                }
+            }
+        sessionsLoading = false
+    }
+
+    fun loadSessions() {
+        scope.launch { refreshAccountSessions() }
+    }
+
+    fun submitPasswordChange() {
+        val validationError = when {
+            currentPassword.isBlank() -> if (isEnglish) "Enter your current password." else "请输入当前密码。"
+            newPassword.length !in 8..128 -> if (isEnglish) {
+                "The new password must contain 8 to 128 characters."
+            } else {
+                "新密码长度必须为 8 到 128 个字符。"
+            }
+            newPassword != confirmNewPassword -> if (isEnglish) {
+                "The new passwords do not match."
+            } else {
+                "两次输入的新密码不一致。"
+            }
+            else -> null
+        }
+        if (validationError != null) {
+            passwordNoteIsError = true
+            passwordNote = validationError
+            return
+        }
+        scope.launch {
+            changingPassword = true
+            authRepository.changePassword(currentPassword, newPassword)
+                .onSuccess { revoked ->
+                    currentPassword = ""
+                    newPassword = ""
+                    confirmNewPassword = ""
+                    passwordNoteIsError = false
+                    passwordNote = if (isEnglish) {
+                        "Password changed. $revoked other sessions were signed out."
+                    } else {
+                        "密码已修改，另有 $revoked 个会话已退出。"
+                    }
+                    refreshAccountSessions()
+                }
+                .onFailure {
+                    passwordNoteIsError = true
+                    passwordNote = if (isEnglish) {
+                        "Could not change the password. Check the current password and try again."
+                    } else {
+                        "无法修改密码，请检查当前密码后重试。"
+                    }
+                }
+            changingPassword = false
+        }
+    }
+
+    fun revokeOtherSessions() {
+        if (sessionsLoading) return
+        sessionsLoading = true
+        scope.launch {
+            try {
+                authRepository.revokeOtherSessions()
+                    .onSuccess { revoked ->
+                        sessionNoteIsError = false
+                        sessionNote = if (isEnglish) {
+                            "$revoked other sessions were signed out."
+                        } else {
+                            "已退出其他设备上的 $revoked 个会话。"
+                        }
+                        refreshAccountSessions()
+                    }
+                    .onFailure {
+                        sessionNoteIsError = true
+                        sessionNote = if (isEnglish) {
+                            "Could not sign out other sessions. Try again."
+                        } else {
+                            "无法退出其他会话，请重试。"
+                        }
+                    }
+            } finally {
+                sessionsLoading = false
+            }
+        }
+    }
     LaunchedEffect(initialSection) {
         selectedSection = initialSettingsSection(initialSection)
         if (initialSection == "sync-recovery") {
             supportToolsOpen = true
+        }
+    }
+    LaunchedEffect(selectedSection) {
+        if (selectedSection == SettingsSection.Account && !sessionsLoaded && !sessionsLoading) {
+            refreshAccountSessions()
         }
     }
     LaunchedEffect(lastBackupImportUndoItemsRaw) {
@@ -288,6 +419,7 @@ fun SettingsScreen(
     val exhaustedQueueCount = syncQueueCounts?.exhausted ?: 0
     val recoverableSyncIssueCount = pendingQueueCount + exhaustedQueueCount + failedSyncTaskCount
     val clearLocalDataBlocked = recoverableSyncIssueCount > 0 || conflictTaskCount > 0
+    val syncRecoveryToolsVisible = supportToolsOpen || recoverableSyncIssueCount > 0 || conflictTaskCount > 0
 
     suspend fun refreshSyncDiagnostics() {
         syncQueueCounts = taskRepository.getSyncQueueCounts()
@@ -300,6 +432,7 @@ fun SettingsScreen(
         scope.launch {
             val preview = taskRepository.previewBackupImport(raw)
             if (preview.errorCode != null || preview.importableCount <= 0) {
+                backupImportNoteIsError = true
                 backupImportNote = formatBackupImportFailureMessage(preview.errorCode, isEnglish)
                 pendingBackupImport = null
                 confirmBackupImport = false
@@ -324,6 +457,7 @@ fun SettingsScreen(
             } else {
                 tokenDataStore.saveLastBackupImportUndoItems(gson.toJson(result.importedUndoItems))
             }
+            backupImportNoteIsError = result.importedCount <= 0
             backupImportNote = if (result.importedCount > 0) {
                 val skippedNote = if (result.skippedCount > 0) {
                     if (isEnglish) " Skipped ${result.skippedCount} invalid tasks." else " 跳过 ${result.skippedCount} 条无效任务。"
@@ -358,6 +492,7 @@ fun SettingsScreen(
                 skippedChangedCount = result.skippedChangedCount,
                 isEnglish = isEnglish,
             )
+            backupImportNoteIsError = false
         }
     }
 
@@ -371,9 +506,11 @@ fun SettingsScreen(
             }
             when (raw) {
                 BackupTextReadResult.Empty -> {
+                    backupImportNoteIsError = true
                     backupImportNote = backupImportEmptyFileMessage(isEnglish)
                 }
                 BackupTextReadResult.TooLarge -> {
+                    backupImportNoteIsError = true
                     backupImportNote = formatBackupImportFailureMessage(BackupImportErrorCode.FileTooLarge, isEnglish)
                 }
                 is BackupTextReadResult.Success -> {
@@ -432,6 +569,37 @@ fun SettingsScreen(
 
     LaunchedEffect(Unit) {
         refreshSyncDiagnostics()
+    }
+
+    if (confirmRevokeOtherSessions) {
+        AlertDialog(
+            onDismissRequest = { confirmRevokeOtherSessions = false },
+            title = { Text(if (isEnglish) "Sign out other devices?" else "退出其他设备？") },
+            text = {
+                Text(
+                    if (isEnglish) {
+                        "All other active sessions will be revoked. This device will stay signed in."
+                    } else {
+                        "其他设备上的所有有效会话都会被撤销，这台设备会保持登录。"
+                    },
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmRevokeOtherSessions = false
+                        revokeOtherSessions()
+                    },
+                ) {
+                    Text(if (isEnglish) "Sign out other devices" else "退出其他设备")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRevokeOtherSessions = false }) {
+                    Text(strings.cancel)
+                }
+            },
+        )
     }
 
     if (confirmLogoutWithPendingSync) {
@@ -493,13 +661,7 @@ fun SettingsScreen(
             onDismissRequest = { confirmClearLocalData = false },
             title = { Text(if (isEnglish) "Clear this device?" else "清除此设备数据？") },
             text = {
-                Text(
-                    if (isEnglish) {
-                        "This logs out and deletes this account's local tasks, waiting-to-sync changes, and backup undo records on this device. Server tasks will not be deleted. Export a local backup first if needed."
-                    } else {
-                        "这会退出登录，并删除当前账号在这台设备上的本地任务、等待同步的修改和备份撤销记录。服务器上的任务不会被删除。建议先导出本地备份。"
-                    },
-                )
+                Text(clearLocalDataConfirmationText(isEnglish))
             },
             confirmButton = {
                 Button(
@@ -766,13 +928,13 @@ fun SettingsScreen(
                             value = widgetOpacityDraft,
                             onValueChange = { widgetOpacityDraft = it },
                             onValueChangeFinished = {
-                                val nextOpacity = widgetOpacityDraft.roundToInt().coerceIn(0, 100)
+                                val nextOpacity = widgetOpacityDraft.roundToInt().coerceIn(60, 100)
                                 scope.launch {
                                     tokenDataStore.saveWidgetOpacityPercent(nextOpacity)
                                     TodayTaskWidgetUpdateWorker.enqueue(context)
                                 }
                             },
-                            valueRange = 0f..100f,
+                            valueRange = 60f..100f,
                             steps = 19,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -785,6 +947,39 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                         )
+                    }
+                }
+
+                AppSection(
+                    title = if (isEnglish) "About" else "关于",
+                ) {
+                    AppPanel {
+                        Text(
+                            text = if (isEnglish) {
+                                "Installed version ${BuildConfig.VERSION_NAME}"
+                            } else {
+                                "当前版本 ${BuildConfig.VERSION_NAME}"
+                            },
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                externalLinkError = if (tryOpenExternalUri(uriHandler, LATEST_RELEASE_URL)) {
+                                    ""
+                                } else {
+                                    strings.externalLinkFailed
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (isEnglish) "View latest release" else "查看最新版本")
+                        }
+                        if (externalLinkError.isNotBlank()) {
+                            AppDynamicStatusText(
+                                text = externalLinkError,
+                                isError = true,
+                            )
+                        }
                     }
                 }
             }
@@ -802,6 +997,7 @@ fun SettingsScreen(
                             connectionNoteIsError = false
                         },
                         label = { Text(if (isEnglish) "Server URL" else "服务器地址") },
+                        isError = connectionNoteIsError,
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -860,7 +1056,7 @@ fun SettingsScreen(
                         )
                     }
                     TextButton(onClick = { advancedConnectionOpen = !advancedConnectionOpen }) {
-                        Text(if (isEnglish) "Advanced connection settings" else "高级连接设置")
+                        Text(if (isEnglish) "Troubleshooting: custom connection URLs" else "排障：自定义连接地址")
                     }
                     if (advancedConnectionOpen) {
                         OutlinedTextField(
@@ -872,7 +1068,8 @@ fun SettingsScreen(
                                 connectionNote = ""
                                 connectionNoteIsError = false
                             },
-                            label = { Text(if (isEnglish) "Request URL (advanced)" else "请求地址（高级）") },
+                            label = { Text(if (isEnglish) "Request address for custom proxy" else "自定义请求地址") },
+                            isError = connectionNoteIsError,
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -883,7 +1080,8 @@ fun SettingsScreen(
                                 connectionNote = ""
                                 connectionNoteIsError = false
                             },
-                            label = { Text(if (isEnglish) "Sync connection URL (advanced)" else "同步连接地址（高级）") },
+                            label = { Text(if (isEnglish) "Sync address for custom proxy" else "自定义同步地址") },
+                            isError = connectionNoteIsError,
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -899,14 +1097,9 @@ fun SettingsScreen(
                         }
                     }
                     if (connectionNote.isNotBlank()) {
-                        Text(
+                        AppDynamicStatusText(
                             text = connectionNote,
-                            color = if (connectionNoteIsError) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            },
-                            style = MaterialTheme.typography.bodySmall,
+                            isError = connectionNoteIsError,
                         )
                     }
                     }
@@ -918,6 +1111,114 @@ fun SettingsScreen(
                     title = if (isEnglish) "Account" else "账号",
                 ) {
                     AppPanel {
+                    Text(
+                        text = if (isEnglish) "Change password" else "修改密码",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    PasswordTextField(
+                        value = currentPassword,
+                        onValueChange = {
+                            currentPassword = it
+                            passwordNote = ""
+                            passwordNoteIsError = false
+                        },
+                        strings = strings,
+                        label = if (isEnglish) "Current password" else "当前密码",
+                        enabled = !changingPassword,
+                        isError = passwordNoteIsError,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    PasswordTextField(
+                        value = newPassword,
+                        onValueChange = {
+                            newPassword = it
+                            passwordNote = ""
+                            passwordNoteIsError = false
+                        },
+                        strings = strings,
+                        label = if (isEnglish) "New password" else "新密码",
+                        enabled = !changingPassword,
+                        isError = passwordNoteIsError,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    PasswordTextField(
+                        value = confirmNewPassword,
+                        onValueChange = {
+                            confirmNewPassword = it
+                            passwordNote = ""
+                            passwordNoteIsError = false
+                        },
+                        strings = strings,
+                        label = if (isEnglish) "Confirm new password" else "确认新密码",
+                        enabled = !changingPassword,
+                        isError = passwordNoteIsError,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(
+                        onClick = { submitPasswordChange() },
+                        enabled = !changingPassword,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (changingPassword) {
+                                if (isEnglish) "Changing..." else "正在修改..."
+                            } else {
+                                if (isEnglish) "Change password" else "修改密码"
+                            },
+                        )
+                    }
+                    if (passwordNote.isNotBlank()) {
+                        AppDynamicStatusText(
+                            text = passwordNote,
+                            isError = passwordNoteIsError,
+                        )
+                    }
+                    Text(
+                        text = if (isEnglish) "Signed-in sessions" else "登录会话",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    OutlinedButton(
+                        onClick = { loadSessions() },
+                        enabled = !sessionsLoading,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (sessionsLoading) {
+                                if (isEnglish) "Loading..." else "正在加载..."
+                            } else {
+                                if (isEnglish) "Refresh sessions" else "刷新会话"
+                            },
+                        )
+                    }
+                    sessions.forEach { session ->
+                        Text(
+                            text = session.deviceId?.takeIf { it.isNotBlank() }
+                                ?: if (isEnglish) "Unknown device" else "未知设备",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = if (isEnglish) {
+                                "Created ${ShanghaiTime.formatDateTime(session.createdAt, displayTimeZone)} · Expires ${ShanghaiTime.formatDateTime(session.expiresAt, displayTimeZone)}"
+                            } else {
+                                "创建于 ${ShanghaiTime.formatDateTime(session.createdAt, displayTimeZone)} · 到期于 ${ShanghaiTime.formatDateTime(session.expiresAt, displayTimeZone)}"
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Button(
+                        onClick = { confirmRevokeOtherSessions = true },
+                        enabled = !sessionsLoading,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (isEnglish) "Sign out other devices" else "退出其他设备")
+                    }
+                    if (sessionNote.isNotBlank()) {
+                        AppDynamicStatusText(
+                            text = sessionNote,
+                            isError = sessionNoteIsError,
+                        )
+                    }
                     Text(
                         text = if (isEnglish) {
                             "Sign out only affects this device. Local data stays here."
@@ -944,7 +1245,7 @@ fun SettingsScreen(
                         enabled = !clearLocalDataBlocked,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (isEnglish) "Log out and clear this device" else "退出并清除此设备数据")
+                        Text(if (isEnglish) "Clear this device" else "清除此设备数据")
                     }
                     Text(
                         text = if (clearLocalDataBlocked) {
@@ -1017,10 +1318,9 @@ fun SettingsScreen(
                         Text(strings.importBackup)
                     }
                     if (backupImportNote.isNotBlank()) {
-                        Text(
+                        AppDynamicStatusText(
                             text = backupImportNote,
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.bodySmall,
+                            isError = backupImportNoteIsError,
                         )
                     }
                     if (lastImportedBackupLocalIds.isNotEmpty()) {
@@ -1040,109 +1340,132 @@ fun SettingsScreen(
                     title = if (isEnglish) "Sync issues" else "同步问题",
                 ) {
                     AppPanel {
-                    TextButton(onClick = { supportToolsOpen = !supportToolsOpen }, modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            if (supportToolsOpen) {
-                                if (isEnglish) "Hide sync recovery tools" else "收起同步恢复工具"
-                            } else {
-                                if (isEnglish) "Show sync recovery tools" else "查看同步恢复工具"
-                            },
-                        )
-                    }
-                    if (supportToolsOpen) {
-                        Text(
-                            text = if (isEnglish) "Sync recovery tools" else "同步恢复工具",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Text(
-                            text = syncRecoverySummaryText(
-                                pendingQueueCount = pendingQueueCount,
-                                exhaustedQueueCount = exhaustedQueueCount,
-                                failedTaskCount = failedSyncTaskCount,
-                                isEnglish = isEnglish,
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        if (exhaustedSyncQueuePreview.isEmpty()) {
+                        if (recoverableSyncIssueCount == 0 && conflictTaskCount == 0) {
+                            TextButton(onClick = { supportToolsOpen = !supportToolsOpen }, modifier = Modifier.fillMaxWidth()) {
+                                Text(syncRecoveryToolsToggleText(supportToolsOpen, isEnglish))
+                            }
+                        }
+                        if (syncRecoveryToolsVisible) {
                             Text(
-                                text = if (recoverableSyncIssueCount > 0) {
-                                    syncRecoveryRetryAvailableText(isEnglish)
-                                } else {
-                                    syncRecoveryNoManualRetryText(isEnglish)
-                                },
+                                text = syncRecoveryToolsTitle(isEnglish),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                text = syncRecoverySummaryText(
+                                    pendingQueueCount = pendingQueueCount,
+                                    exhaustedQueueCount = exhaustedQueueCount,
+                                    failedTaskCount = failedSyncTaskCount,
+                                    conflictTaskCount = conflictTaskCount,
+                                    isEnglish = isEnglish,
+                                ),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodySmall,
                             )
-                        } else {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                exhaustedSyncQueuePreview.take(5).forEach { item ->
-                                    val itemTitle = item.title?.takeIf { it.isNotBlank() }
-                                        ?: if (isEnglish) "Untitled task" else "未命名任务"
-                                    Text(
-                                        text = itemTitle,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                    Text(
-                                        text = if (isEnglish) "Needs a manual retry" else "需要手动重试",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
+                            if (exhaustedSyncQueuePreview.isEmpty()) {
+                                Text(
+                                    text = if (recoverableSyncIssueCount > 0) {
+                                        syncRecoveryRetryAvailableText(isEnglish)
+                                    } else {
+                                        syncRecoveryNoManualRetryText(isEnglish)
+                                    },
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    exhaustedSyncQueuePreview.take(5).forEach { item ->
+                                        val itemTitle = item.title?.takeIf { it.isNotBlank() }
+                                            ?: if (isEnglish) "Untitled task" else "未命名任务"
+                                        Text(
+                                            text = itemTitle,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                        Text(
+                                            text = if (isEnglish) "Needs a manual retry" else "需要手动重试",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
                                 }
                             }
-                        }
-                        TextButton(
-                            onClick = { showTechnicalDiagnostics = !showTechnicalDiagnostics },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                if (showTechnicalDiagnostics) {
-                                    if (isEnglish) "Hide technical diagnostics" else "收起高级诊断"
-                                } else {
-                                    if (isEnglish) "Show technical diagnostics" else "查看高级诊断"
+                            TextButton(
+                                onClick = { showTechnicalDiagnostics = !showTechnicalDiagnostics },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    if (showTechnicalDiagnostics) {
+                                        if (isEnglish) "Hide technical diagnostics" else "收起高级诊断"
+                                    } else {
+                                        if (isEnglish) "Show technical diagnostics" else "查看高级诊断"
+                                    },
+                                )
+                            }
+                            if (showTechnicalDiagnostics && exhaustedSyncQueuePreview.isNotEmpty()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    exhaustedSyncQueuePreview.take(5).forEach { item ->
+                                        Text(
+                                            text = syncQueueDiagnosticText(
+                                                action = item.action,
+                                                taskTitle = item.title,
+                                                attemptCount = item.attemptCount,
+                                                isEnglish = isEnglish,
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                }
+                            }
+                            if (conflictTaskCount > 0) {
+                                Button(
+                                    onClick = { onOpenConflictTasks() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(syncRecoveryConflictActionText(isEnglish))
+                                }
+                            }
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        taskRepository.retryExhaustedSyncQueue()
+                                        syncManager.enqueueNetworkSync()
+                                        val syncResult = syncManager.syncNowAndWait()
+                                        refreshSyncDiagnostics()
+                                        syncRecoveryNoteIsError = syncResult is SyncRunState.Failure
+                                        syncRecoveryNote = when (syncResult) {
+                                            SyncRunState.Success -> if (isEnglish) {
+                                                "Sync completed. Diagnostics are up to date."
+                                            } else {
+                                                "同步完成，诊断信息已更新。"
+                                            }
+                                            SyncRunState.Offline -> if (isEnglish) {
+                                                "Offline. Retry will resume automatically when connected."
+                                            } else {
+                                                "当前离线，联网后会自动继续同步。"
+                                            }
+                                            is SyncRunState.Failure -> if (isEnglish) {
+                                                "Sync failed. Diagnostics were refreshed; try again after checking the connection."
+                                            } else {
+                                                "同步失败，诊断信息已刷新；请检查网络后重试。"
+                                            }
+                                            SyncRunState.Idle,
+                                            SyncRunState.Syncing -> if (isEnglish) "Sync did not finish." else "同步尚未完成。"
+                                        }
+                                    }
                                 },
-                            )
-                        }
-                        if (showTechnicalDiagnostics && exhaustedSyncQueuePreview.isNotEmpty()) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                exhaustedSyncQueuePreview.take(5).forEach { item ->
-                                    Text(
-                                        text = syncQueueDiagnosticText(
-                                            action = item.action,
-                                            taskTitle = item.title,
-                                            attemptCount = item.attemptCount,
-                                            isEnglish = isEnglish,
-                                        ),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
+                                enabled = recoverableSyncIssueCount > 0,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(syncRecoveryRetryButtonText(isEnglish))
+                            }
+                            if (syncRecoveryNote.isNotBlank()) {
+                                AppDynamicStatusText(
+                                    text = syncRecoveryNote,
+                                    isError = syncRecoveryNoteIsError,
+                                )
                             }
                         }
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    taskRepository.retryExhaustedSyncQueue()
-                                    syncManager.enqueueNetworkSync()
-                                    syncManager.syncNow()
-                                    refreshSyncDiagnostics()
-                                    syncRecoveryNote = syncRecoveryRetryStartedText(isEnglish)
-                                }
-                            },
-                            enabled = recoverableSyncIssueCount > 0,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(syncRecoveryRetryButtonText(isEnglish))
-                        }
-                        if (syncRecoveryNote.isNotBlank()) {
-                            Text(
-                                text = syncRecoveryNote,
-                                color = MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
                     }
                 }
             }
@@ -1205,22 +1528,6 @@ private fun settingsSectionStatusText(
         } else {
             if (isEnglish) "No manual sync recovery is required right now." else "当前通常不需要手动处理同步恢复。"
         }
-    }
-}
-
-private fun clearLocalDataSafetyHint(isEnglish: Boolean): String {
-    return if (isEnglish) {
-        "Before clearing, confirm there are no pending, failed, or conflicting tasks. Export a local backup if unsure."
-    } else {
-        "清除前先确认没有待同步、同步失败或冲突的任务；不确定时先导出本机备份。"
-    }
-}
-
-private fun clearLocalDataBlockedHint(isEnglish: Boolean): String {
-    return if (isEnglish) {
-        "This device still has pending, failed, or conflicting tasks. Handle sync recovery, or export a local backup before clearing this device."
-    } else {
-        "当前还有待同步、同步失败或冲突的任务。请先处理同步恢复，或先导出本机备份后再清除此设备数据。"
     }
 }
 

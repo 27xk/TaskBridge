@@ -76,14 +76,28 @@ assert.match(
   /Verify Android APK signature[\s\S]*TASKBRIDGE_ANDROID_SIGNED_RELEASE[\s\S]*apksigner[\s\S]*verify --verbose --print-certs/,
   "release workflow must verify the Android APK signature when Android signing is configured",
 );
+assert.doesNotMatch(
+  releaseSource,
+  /app-release-unsigned\.apk|android-unsigned\.apk/,
+  "release workflow must not publish unsigned Android APKs",
+);
 assert.match(
   releaseSource,
-  /app-release-unsigned\.apk[\s\S]*android-unsigned\.apk/,
-  "release workflow must publish a clearly named unsigned Android APK when signing is not configured",
+  /Skipping public Android APK because signing secrets are not configured/,
+  "release workflow must omit Android downloads when signing is unavailable",
+);
+assert.match(
+  releaseSource,
+  /Skipping public Windows installer because signing secrets are not configured/,
+  "release workflow must omit Windows downloads when signing is unavailable",
 );
 assert.doesNotMatch(androidBuildSource, /Release signing is required/, "Android release builds must not fail solely because signing is not configured");
-assert.match(androidReadmeSource, /unsigned release/i, "Android docs must explain unsigned release artifacts");
-assert.match(troubleshootingSource, /unsigned release APK/i, "troubleshooting docs must explain unsigned release APKs");
+assert.match(androidReadmeSource, /unsigned release/i, "Android docs must explain local unsigned release builds");
+assert.match(
+  troubleshootingSource,
+  /unsigned[\s\S]*不(?:应|会)[\s\S]*公开 Release/i,
+  "troubleshooting docs must explain that unsigned clients are not public downloads",
+);
 
 for (const token of [
   "docker compose",
@@ -120,12 +134,7 @@ for (const token of [
   assert.match(deployReadmeSource, new RegExp(escapeRegExp(token)), `deploy docs must document ${token}`);
 }
 
-for (const token of [
-  "WINDOWS_CERTIFICATE_BASE64",
-  "WINDOWS_CERTIFICATE_PASSWORD",
-  "unsigned Android",
-  "unsigned Windows",
-]) {
+for (const token of ["WINDOWS_CERTIFICATE_BASE64", "WINDOWS_CERTIFICATE_PASSWORD", "unsigned APK", "unsigned `.exe`"]) {
   assert.match(releaseDocsSource, new RegExp(escapeRegExp(token)), `release docs must document ${token}`);
 }
 

@@ -30,27 +30,42 @@ export const useAuthStore = defineStore("auth", () => {
       authenticated.value = false;
       user.value = null;
       workspaceKey.value = null;
+      sessionExpired.value = false;
+      sessionExpiredReason.value = null;
       return;
     }
+    const cachedWorkspaceKey = tryCreateWorkspaceKey(settings.baseUrl, settings.currentUserId);
     authenticated.value = await bridge().auth.hasTokens();
     if (!authenticated.value) {
       user.value = null;
-      workspaceKey.value = null;
+      if (cachedWorkspaceKey) {
+        sessionExpired.value = true;
+        sessionExpiredReason.value = "refresh-rejected";
+        workspaceKey.value = cachedWorkspaceKey;
+      } else {
+        sessionExpired.value = false;
+        sessionExpiredReason.value = null;
+        workspaceKey.value = null;
+      }
       return;
     }
-    workspaceKey.value = tryCreateWorkspaceKey(settings.baseUrl, settings.currentUserId);
+    workspaceKey.value = cachedWorkspaceKey;
     if (!workspaceKey.value) {
       await bridge().auth.clearTokens();
       authenticated.value = false;
       user.value = null;
       return;
     }
+    sessionExpired.value = false;
+    sessionExpiredReason.value = null;
     try {
       user.value = await getMe();
     } catch {
       authenticated.value = await bridge().auth.hasTokens();
       if (!authenticated.value) {
-        user.value = null;
+        sessionExpired.value = true;
+        sessionExpiredReason.value = "refresh-rejected";
+        workspaceKey.value = cachedWorkspaceKey;
       }
     }
   }
@@ -131,7 +146,6 @@ export const useAuthStore = defineStore("auth", () => {
 
   function expireSession(reason: "refresh-rejected" | "server-changed"): void {
     authenticated.value = false;
-    user.value = null;
     loading.value = false;
     error.value = null;
     sessionExpired.value = true;

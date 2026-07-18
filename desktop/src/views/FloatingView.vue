@@ -12,6 +12,9 @@ const floating = useFloatingStore();
 const settingsStore = useSettingsStore();
 
 const dateLabel = computed(() => formatShanghaiDate(new Date(), settingsStore.language, settingsStore.displayTimeZone));
+const hiddenTaskCountLabel = computed(() =>
+  settingsStore.t("floating.hiddenTasks").replace("{count}", String(floating.hiddenTaskCount)),
+);
 const surfaceStyle = computed(() => {
   const alpha = Math.min(0.98, Math.max(0.45, floating.opacity));
   const controlAlpha = Math.min(0.96, alpha + 0.12);
@@ -104,6 +107,14 @@ function stopResize(): void {
           @complete="floating.complete"
           @open="floating.openDetail"
         />
+        <button
+          v-if="floating.hiddenTaskCount > 0"
+          type="button"
+          class="floating-more-button"
+          @click="floating.openMain"
+        >
+          {{ hiddenTaskCountLabel }}
+        </button>
       </div>
     </section>
 

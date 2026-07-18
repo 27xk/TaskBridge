@@ -1,20 +1,46 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { workspaceRoot, escapeRegExp } from "./script-helpers.mjs";
+import {
+  escapeRegExp,
+  extractOpeningTag,
+  hasLiteralBooleanAttribute,
+  workspaceRoot,
+} from "./script-helpers.mjs";
 
 const desktopRoot = workspaceRoot(import.meta.url);
 
-const [syncStoreSource, settingsViewSource, i18nSource, cssSource, packageSource, preloadSource, ipcSource, envSource] = await Promise.all([
+const [syncStoreSource, settingsViewSource, syncRecoveryPanelSource, i18nSource, cssSource, workspaceCssSource, packageSource, preloadSource, ipcSource, envSource] = await Promise.all([
   readFile(resolve(desktopRoot, "src/stores/sync.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/views/SettingsView.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "src/components/settings/SettingsSyncRecoveryPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/i18n.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/assets/base.css"), "utf8"),
+  readFile(resolve(desktopRoot, "src/assets/workspace.css"), "utf8"),
   readFile(resolve(desktopRoot, "package.json"), "utf8"),
   readFile(resolve(desktopRoot, "electron/preload.ts"), "utf8"),
   readFile(resolve(desktopRoot, "electron/ipc.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/env.d.ts"), "utf8"),
 ]);
+
+const settingsSurfaceSource = `${settingsViewSource}\n${syncRecoveryPanelSource}`;
+const recoveryPanelTag = extractOpeningTag(settingsViewSource, "<SettingsSyncRecoveryPanel");
+for (const contract of [
+  ':diagnostics="syncStore.diagnostics"',
+  'v-model:diagnostics-open="syncDiagnosticsOpen"',
+  '@refresh="refreshDiagnostics"',
+  '@retry="retryExhaustedQueue"',
+  '@export-diagnostics="exportDiagnostics"',
+]) {
+  assert.ok(recoveryPanelTag.includes(contract), `settings recovery panel must wire ${contract}`);
+}
+for (const eventName of ["refresh", "retry", "exportDiagnostics"]) {
+  assert.match(
+    syncRecoveryPanelSource,
+    new RegExp(`@click="emit\\('${eventName}'\\)"`),
+    `settings recovery control must emit ${eventName}`,
+  );
+}
 
 for (const token of [
   "SyncDiagnostics",
@@ -47,7 +73,7 @@ for (const token of [
   "settings.exportDiagnostics",
   "syncQueueActionText",
 ]) {
-  assert.match(settingsViewSource, new RegExp(escapeRegExp(token)), `settings page must expose ${token}`);
+  assert.match(settingsSurfaceSource, new RegExp(escapeRegExp(token)), `settings page must expose ${token}`);
 }
 
 for (const key of [
@@ -114,40 +140,43 @@ for (const rawDiagnosticLeak of [
 assert.doesNotMatch(ipcSource, /baseUrl:\s*settings\.baseUrl/, "diagnostics must redact baseUrl credentials");
 assert.doesNotMatch(ipcSource, /wsUrl:\s*settings\.wsUrl/, "diagnostics must redact wsUrl credentials");
 assert.doesNotMatch(ipcSource, /deviceId:\s*settings\.deviceId/, "diagnostics must mask the raw device id");
-assert.match(settingsViewSource, /settings\.diagnosticsSensitiveHint/, "settings page must disclose diagnostic package sensitivity");
+assert.match(syncRecoveryPanelSource, /settings\.diagnosticsSensitiveHint/, "settings page must disclose diagnostic package sensitivity");
+const diagnosticsDetailsTag = extractOpeningTag(
+  syncRecoveryPanelSource,
+  '<details class="settings-advanced-details"',
+);
+assert.match(diagnosticsDetailsTag, /:open="diagnosticsOpen"/, "sync diagnostics details must bind its controlled open state");
+assert.equal(hasLiteralBooleanAttribute(diagnosticsDetailsTag, "open"), false, "sync diagnostics details must not be forced open by a literal attribute");
 assert.match(
-  settingsViewSource,
-  /<details\b[^>]*class="settings-advanced-details"[^>]*>\s*<summary>\{\{\s*settingsStore\.t\("settings\.syncDiagnostics"\)\s*\}\}<\/summary>[\s\S]*?<div class="sync-diagnostics">/,
+  syncRecoveryPanelSource,
+  /<summary>\{\{\s*settingsStore\.t\("settings\.syncDiagnostics"\)\s*\}\}<\/summary>[\s\S]*?<div class="sync-diagnostics">/,
   "settings sync diagnostics must be grouped in a collapsed details block",
 );
-assert.doesNotMatch(
-  settingsViewSource,
-  /<details class="settings-advanced-details"\s+open\b/,
-  "settings sync diagnostics must be collapsed by default",
-);
 assert.match(
-  settingsViewSource,
+  syncRecoveryPanelSource,
   /syncQueueActionText\(issue\.action\)/,
   "settings sync recovery center must render user-facing queue action labels",
 );
 assert.match(
-  settingsViewSource,
-  /syncStore\.diagnostics\.recoverableSyncIssueCount === 0/,
+  syncRecoveryPanelSource,
+  /diagnostics\.recoverableSyncIssueCount === 0/,
   "settings sync recovery action must be enabled for any pending, failed, or exhausted sync issue",
 );
 assert.match(
-  settingsViewSource,
+  syncRecoveryPanelSource,
   /settings\.pendingOrFailedSyncRetryAvailable/,
   "settings sync recovery center must explain pending or failed retries when no exhausted queue rows are listed",
 );
 assert.doesNotMatch(
-  settingsViewSource,
+  syncRecoveryPanelSource,
   /settingsStore\.t\("settings\.syncIssueAction"\)\s*\}\}:\s*\{\{\s*issue\.action\s*\}\}/,
   "settings sync recovery center must not expose raw queue action values",
 );
 assert.match(envSource, /exportDiagnostics/, "desktop env types must expose diagnostic package export");
 assert.match(cssSource, /sync-diagnostics/, "CSS must style the sync diagnostics block");
 assert.match(cssSource, /settings-advanced-details summary/, "CSS must style the sync diagnostics summary");
+assert.match(workspaceCssSource, /\.focus-workspace \.sync-issue-list/, "workspace CSS must preserve the recovery issue list override");
+assert.match(workspaceCssSource, /\.focus-workspace \.settings-advanced-details/, "workspace CSS must preserve the recovery disclosure override");
 assert.match(packageSource, /check:sync-diagnostics/, "package scripts must expose the sync diagnostics check");
 
 console.log("sync diagnostics check passed");

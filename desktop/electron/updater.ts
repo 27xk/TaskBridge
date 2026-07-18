@@ -1,5 +1,7 @@
 import { app, BrowserWindow } from "electron";
-import { autoUpdater } from "electron-updater";
+import updaterPackage from "electron-updater";
+
+const { autoUpdater } = updaterPackage;
 
 export type UpdateState =
   | "disabled"

@@ -10,7 +10,7 @@
 - JWT Access Token、Refresh Token 和短期 WebSocket Ticket。
 - 设备注册、设备列表和设备删除。
 - 任务 CRUD、完成、恢复、软删除和彻底删除。
-- 今日、收件箱、逾期、本周、高优先级、已完成、待同步、冲突和模板视图。
+- 今日、收件箱、逾期、本周、高优先级、已完成和模板等服务端视图；待同步和冲突由客户端本地队列生成。
 - 子清单、任务模板、重复任务、稍后提醒、计划日期、项目和标签。
 - 批量操作、导入预览、导入导出、项目重命名、标签重命名和冲突处理。
 - HTTP 增量同步、离线变更上传和同步日志。
@@ -118,6 +118,7 @@ POST /api/v1/auth/register
 POST /api/v1/auth/login
 POST /api/v1/auth/refresh
 GET  /api/v1/auth/me
+PUT  /api/v1/auth/password
 GET  /api/v1/auth/sessions
 POST /api/v1/auth/sessions/revoke-other-devices
 DELETE /api/v1/auth/sessions/{session_id}
@@ -141,6 +142,10 @@ POST /api/v1/sync/push
 ```
 
 `POST /api/v1/sync/push` 支持安全重试：同一 `device_id + local_id + action + version` 且 payload 相同的变更会返回首次应用结果，不会重复写入。复用同一幂等键但更换 payload 会被拒绝；如果该变更已经落后于服务端版本，则按普通 `conflict` 返回服务端任务快照。
+
+Web 等直接调用 `POST /api/v1/tasks` 的客户端可传稳定的 `client_request_id`。同一用户使用相同键和相同创建数据重试时返回原任务，不会重复创建或重复写同步日志；复用同一键提交不同数据时返回 409。`GET /api/v1/tasks` 和 `/tasks/meta` 接受 IANA `timezone` 参数，客户端应传当前显示时区，未知时区返回 400。
+
+已登录用户通过 `PUT /api/v1/auth/password` 修改密码，成功后会撤销其他活跃会话。无法登录时，自托管管理员可运行 `python -m tools.reset_password --username-or-email <账号>` 重置密码并撤销该账号全部会话。
 
 ## WebSocket
 
@@ -172,6 +177,7 @@ WS   /ws/sync?ticket=<short_lived_ticket>&device_id=<device_id>
 - Access Token 携带签发时的设备和 Refresh Token 会话声明；会话治理接口会校验当前会话仍然活跃。
 - Refresh Token 绑定设备；删除设备会撤销该设备的 Refresh Token。
 - 用户可以列出活跃 Refresh Token 会话，撤销单个会话，或一键撤销其他设备会话。
+- 修改密码需要校验当前密码，并撤销其他活跃会话；管理员离线重置会撤销全部会话。
 - WebSocket 推荐使用短期 Ticket 建连。
 - CSV 导出会转义公式前缀，降低表格软件公式注入风险。
 - 生产环境会拒绝默认 `JWT_SECRET` 和默认数据库密码。

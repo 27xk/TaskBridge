@@ -69,7 +69,8 @@ assert.match(apiServiceSource, /@GET\("sync\/status"\)/, "Android API service mu
 assert.match(authRepositorySource, /testConnection/, "Android auth repository must expose a connection test");
 assert.match(authRepositorySource, /apiService\.syncStatus\(\)/, "Android connection test must hit sync/status");
 assert.match(retrofitSource, /EndpointInterceptor/, "Android HTTP client must rewrite requests to the saved API endpoint");
-assert.match(retrofitSource, /tokenDataStore\.apiBaseUrl\.first\(\)/, "Android HTTP endpoint interceptor must read the latest saved API URL");
+assert.match(retrofitSource, /tokenDataStore\.requestAuthContext\(\)/, "Android HTTP endpoint interceptor must read endpoint and auth state from one preference snapshot");
+assert.match(retrofitSource, /endpointUri\(requestContext\.apiBaseUrl\)/, "Android HTTP endpoint interceptor must use the latest saved API URL from the request context");
 assert.match(syncManagerSource, /webSocketUrlProvider = \{ tokenDataStore\.webSocketUrl\.first\(\) \}/, "Android WebSocket must read the latest saved URL before connecting");
 assert.match(loginScreenSource, /strings\.connectionSettings|Connection settings|连接设置/, "Android login screen must expose connection settings before sign-in");
 assert.match(registerScreenSource, /strings\.connectionSettings|Connection settings|连接设置/, "Android register screen must expose connection settings before registration");

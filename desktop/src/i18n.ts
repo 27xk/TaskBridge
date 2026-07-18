@@ -39,6 +39,13 @@ type MessageKey =
   | "auth.serverError"
   | "auth.sessionExpired"
   | "auth.serverChangedRelogin"
+  | "auth.cachedWorkspaceTitle"
+  | "auth.cachedWorkspaceSummary"
+  | "auth.cachedWorkspaceEmpty"
+  | "auth.continueOffline"
+  | "auth.localWorkspaceTitle"
+  | "auth.localWorkspaceBody"
+  | "auth.loginAndSync"
   | "nav.label"
   | "nav.today"
   | "nav.all"
@@ -145,6 +152,7 @@ type MessageKey =
   | "task.deleteVisible"
   | "task.deleteVisibleConfirm"
   | "task.bulkActions"
+  | "task.enterSelectionMode"
   | "task.clearSelection"
   | "sync.synced"
   | "sync.syncing"
@@ -415,6 +423,22 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
     "zh-CN": "服务器已切换，请登录新服务器。原服务器的本地任务和待同步操作仍保留在原工作区。",
     "en-US": "The server changed. Sign in to the new server. Local tasks and pending changes remain in the previous workspace.",
   },
+  "auth.cachedWorkspaceTitle": { "zh-CN": "继续使用本机任务", "en-US": "Continue with local tasks" },
+  "auth.cachedWorkspaceSummary": {
+    "zh-CN": "这台电脑已缓存 {count} 条任务。可以继续查看和编辑，重新登录后再同步。",
+    "en-US": "This computer has {count} cached tasks. Keep viewing and editing them, then sign in to sync.",
+  },
+  "auth.cachedWorkspaceEmpty": {
+    "zh-CN": "本机工作区仍可打开。新建或修改会保存在这台电脑，重新登录后再同步。",
+    "en-US": "The local workspace is still available. New changes stay on this computer until you sign in again.",
+  },
+  "auth.continueOffline": { "zh-CN": "进入本机工作区", "en-US": "Open local workspace" },
+  "auth.localWorkspaceTitle": { "zh-CN": "本机模式", "en-US": "Local mode" },
+  "auth.localWorkspaceBody": {
+    "zh-CN": "任务会保存在这台电脑，但暂不会同步到其他设备。",
+    "en-US": "Tasks stay on this computer and will not sync to other devices yet.",
+  },
+  "auth.loginAndSync": { "zh-CN": "登录并同步", "en-US": "Sign in and sync" },
   "nav.label": { "zh-CN": "TaskBridge 导航", "en-US": "TaskBridge navigation" },
   "nav.today": { "zh-CN": "今日", "en-US": "Today" },
   "nav.all": { "zh-CN": "全部", "en-US": "All" },
@@ -566,6 +590,7 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
     "en-US": "Delete {count} selected open tasks? You can restore them from trash.",
   },
   "task.bulkActions": { "zh-CN": "所选任务批量操作", "en-US": "Selected task batch actions" },
+  "task.enterSelectionMode": { "zh-CN": "批量选择任务", "en-US": "Select multiple tasks" },
   "task.clearSelection": { "zh-CN": "取消选择", "en-US": "Clear selection" },
   "sync.synced": { "zh-CN": "已同步", "en-US": "Synced" },
   "sync.syncing": { "zh-CN": "同步中", "en-US": "Syncing" },

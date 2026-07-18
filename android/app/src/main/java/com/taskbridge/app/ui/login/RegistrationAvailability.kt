@@ -24,7 +24,7 @@ fun registrationAvailabilityUi(
         !registrationStatusKnown -> RegistrationAvailabilityUi(
             showCreateAccountAction = true,
             canEditAccountFields = !isLoading,
-            canSubmitRegistration = false,
+            canSubmitRegistration = !isLoading,
             helperText = registrationStatusPendingHelp(isEnglish),
             actionText = registrationCheckAction(isEnglish),
         )

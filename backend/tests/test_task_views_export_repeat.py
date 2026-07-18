@@ -206,6 +206,93 @@ def test_task_list_uses_timeline_order_and_today_includes_overdue(
     ]
 
 
+def test_task_list_rejects_unknown_view(client: TestClient) -> None:
+    headers = auth_headers(client, "unknown-view", "unknown-view@example.com")
+
+    response = client.get("/api/v1/tasks", headers=headers, params={"view": "conflict"})
+
+    assert response.status_code == 422
+
+
+def test_today_view_uses_requested_iana_timezone(client: TestClient) -> None:
+    headers = auth_headers(client, "timezone-view", "timezone-view@example.com")
+    for title, planned_date in (
+        ("Shanghai today", "2026-05-20"),
+        ("Los Angeles today", "2026-05-19"),
+    ):
+        response = client.post(
+            "/api/v1/tasks",
+            headers=headers,
+            json={"title": title, "planned_date": planned_date},
+        )
+        assert response.status_code == 201
+
+    shanghai_response = client.get(
+        "/api/v1/tasks",
+        headers=headers,
+        params={
+            "view": "today",
+            "now": "2026-05-20T01:00:00Z",
+            "timezone": "Asia/Shanghai",
+        },
+    )
+    los_angeles_response = client.get(
+        "/api/v1/tasks",
+        headers=headers,
+        params={
+            "view": "today",
+            "now": "2026-05-20T01:00:00Z",
+            "timezone": "America/Los_Angeles",
+        },
+    )
+
+    assert shanghai_response.status_code == 200
+    assert [task["title"] for task in shanghai_response.json()["data"]] == ["Shanghai today"]
+    assert los_angeles_response.status_code == 200
+    assert [task["title"] for task in los_angeles_response.json()["data"]] == [
+        "Los Angeles today"
+    ]
+
+
+def test_task_list_rejects_unknown_timezone(client: TestClient) -> None:
+    headers = auth_headers(client, "unknown-timezone", "unknown-timezone@example.com")
+
+    response = client.get(
+        "/api/v1/tasks",
+        headers=headers,
+        params={"view": "today", "timezone": "Mars/Olympus_Mons"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "invalid timezone"
+
+
+def test_task_meta_uses_the_same_requested_timezone_as_today_view(client: TestClient) -> None:
+    headers = auth_headers(client, "timezone-meta", "timezone-meta@example.com")
+    create_response = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"title": "Los Angeles plan", "planned_date": "2026-05-19"},
+    )
+    assert create_response.status_code == 201
+
+    shanghai_response = client.get(
+        "/api/v1/tasks/meta",
+        headers=headers,
+        params={"now": "2026-05-20T01:00:00Z", "timezone": "Asia/Shanghai"},
+    )
+    los_angeles_response = client.get(
+        "/api/v1/tasks/meta",
+        headers=headers,
+        params={"now": "2026-05-20T01:00:00Z", "timezone": "America/Los_Angeles"},
+    )
+
+    assert shanghai_response.status_code == 200
+    assert shanghai_response.json()["data"]["counts"]["today"] == 0
+    assert los_angeles_response.status_code == 200
+    assert los_angeles_response.json()["data"]["counts"]["today"] == 1
+
+
 def test_csv_export_escapes_spreadsheet_formula_values(client: TestClient) -> None:
     headers = auth_headers(client, "csv-user", "csv@example.com")
 

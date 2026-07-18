@@ -6,16 +6,28 @@ import type { AppLanguage } from "../i18n";
 import { useAuthStore } from "../stores/auth";
 import { useSettingsStore } from "../stores/settings";
 import { formatConnectionFailureMessage } from "../../shared/user-facing-errors";
+import {
+  deriveConnectionEndpoints,
+  hasCustomConnectionEndpoints,
+  inferServerUrlFromApi,
+  isLoopbackServerUrl,
+} from "../../shared/connection-endpoints";
+
+const props = defineProps<{
+  canContinueOffline: boolean;
+  cachedTaskCount: number;
+}>();
 
 const emit = defineEmits<{
   authenticated: [];
+  continueOffline: [];
 }>();
 
 const auth = useAuthStore();
 const settingsStore = useSettingsStore();
 const mode = ref<"login" | "register">("login");
 const username = ref("");
-const email = ref("");
+const email = ref(auth.user?.username ?? "");
 const password = ref("");
 const passwordVisible = ref(false);
 const serverUrlDraft = ref("");
@@ -26,13 +38,16 @@ const settings = reactive({
 const connectionNote = ref("");
 const connectionNoteTone = ref<"success" | "error" | null>(null);
 const connectionTesting = ref(false);
+const submitting = ref(false);
 const advancedConnectionOpen = ref(false);
 const advancedEndpointsEdited = ref(false);
 const advancedConnectionManuallyRequested = ref(false);
 const deployDocsCopied = ref(false);
 const deployDocsCopyFailed = ref(false);
+const guideReferenceKind = ref<"localTrial" | "selfHost">("localTrial");
 const localTrialGuideUrl =
-  "https://github.com/27xk/TaskBridge#%E6%99%AE%E9%80%9A%E7%94%A8%E6%88%B7%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B";
+  "https://github.com/27xk/TaskBridge/blob/main/docs/user-quick-start.md#%E6%B2%A1%E6%9C%89%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%9C%B0%E5%9D%80";
+const selfHostGuideUrl = "https://github.com/27xk/TaskBridge/blob/main/deploy/README.md";
 const serverLocalhostHint = computed(() => (isLoopbackServerUrl(serverUrlDraft.value) ? settingsStore.t("settings.localhostHint") : ""));
 const showAdvancedConnectionEntry = computed(
   () => advancedConnectionManuallyRequested.value || advancedConnectionOpen.value || advancedEndpointsEdited.value || connectionNoteTone.value === "error",
@@ -45,9 +60,29 @@ const passwordToggleLabel = computed(() =>
 const registrationUnavailableText = computed(() =>
   registrationBlocked.value ? settingsStore.t("auth.registrationClosed") : settingsStore.t("auth.registrationUnknown"),
 );
+const registrationConnectionHint = computed(() => settingsStore.t("auth.registrationConnectionHint"));
+const guideReferenceCopiedMessage = computed(() =>
+  settingsStore.t(guideReferenceKind.value === "selfHost" ? "auth.selfHostReferenceCopied" : "auth.localTrialReferenceCopied"),
+);
+const guideReferenceCopyFailedMessage = computed(() =>
+  settingsStore.t(guideReferenceKind.value === "selfHost" ? "auth.selfHostReferenceCopyFailed" : "auth.localTrialReferenceCopyFailed"),
+);
+const cachedWorkspaceSummary = computed(() =>
+  settingsStore
+    .t(props.cachedTaskCount > 0 ? "auth.cachedWorkspaceSummary" : "auth.cachedWorkspaceEmpty")
+    .replace("{count}", String(props.cachedTaskCount)),
+);
 onMounted(async () => {
   Object.assign(settings, await bridge().app.getSettings());
   serverUrlDraft.value = inferServerUrlFromApi(settings.baseUrl);
+  const hasCustomEndpoints = hasCustomConnectionEndpoints(
+    serverUrlDraft.value,
+    settings.baseUrl,
+    settings.wsUrl,
+  );
+  advancedEndpointsEdited.value = hasCustomEndpoints;
+  advancedConnectionManuallyRequested.value = hasCustomEndpoints;
+  advancedConnectionOpen.value = hasCustomEndpoints;
   await auth.loadRegistrationStatus();
   if (registrationBlocked.value) {
     mode.value = "login";
@@ -55,30 +90,27 @@ onMounted(async () => {
 });
 
 async function submit(): Promise<void> {
-  const connectionReady = await testConnection();
-  if (!connectionReady) return;
-  if (mode.value === "login") {
-    await auth.login(email.value || username.value, password.value);
-  } else {
-    await auth.register(username.value, email.value, password.value);
+  if (submitting.value) return;
+  submitting.value = true;
+  try {
+    const connectionReady = await testConnection();
+    if (!connectionReady) return;
+    if (mode.value === "login") {
+      await auth.login(email.value || username.value, password.value);
+    } else {
+      await auth.register(username.value, email.value, password.value);
+    }
+    emit("authenticated");
+  } catch {
+    // The auth store exposes the user-facing error in the form.
+  } finally {
+    submitting.value = false;
   }
-  emit("authenticated");
 }
 
 function updateLanguage(event: Event): void {
   const value = (event.target as HTMLSelectElement).value as AppLanguage;
   void settingsStore.setLanguage(value);
-}
-
-function deriveConnectionEndpoints(serverUrl: string): { serverUrl: string; baseUrl: string; wsUrl: string } {
-  const normalizedServerUrl = normalizeServerUrl(serverUrl);
-  const url = new URL(normalizedServerUrl);
-  const wsProtocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return {
-    serverUrl: normalizedServerUrl,
-    baseUrl: `${normalizedServerUrl}/api/v1`,
-    wsUrl: `${wsProtocol}//${url.host}${url.pathname === "/" ? "" : url.pathname}/ws/sync`,
-  };
 }
 
 async function saveConnection(): Promise<void> {
@@ -90,10 +122,13 @@ async function saveConnection(): Promise<void> {
     baseUrl = endpoints.baseUrl;
     wsUrl = endpoints.wsUrl;
   }
-  Object.assign(settings, await bridge().app.setSetting("baseUrl", baseUrl.trim()));
-  Object.assign(settings, await bridge().app.setSetting("wsUrl", wsUrl.trim()));
+  Object.assign(settings, await bridge().app.setConnection(baseUrl.trim(), wsUrl.trim()));
   serverUrlDraft.value = inferServerUrlFromApi(settings.baseUrl);
-  advancedEndpointsEdited.value = false;
+  advancedEndpointsEdited.value = hasCustomConnectionEndpoints(
+    serverUrlDraft.value,
+    settings.baseUrl,
+    settings.wsUrl,
+  );
 }
 
 function applyServerUrl(): boolean {
@@ -146,7 +181,15 @@ function showAdvancedConnection(): void {
 }
 
 async function copyDeployDocsReference(): Promise<void> {
-  const reference = localTrialReferenceText();
+  await copyGuideReference(localTrialReferenceText(), "localTrial");
+}
+
+async function copySelfHostDocsReference(): Promise<void> {
+  await copyGuideReference(selfHostReferenceText(), "selfHost");
+}
+
+async function copyGuideReference(reference: string, kind: "localTrial" | "selfHost"): Promise<void> {
+  guideReferenceKind.value = kind;
   deployDocsCopied.value = false;
   deployDocsCopyFailed.value = false;
   try {
@@ -170,20 +213,49 @@ async function openLocalTrialGuide(): Promise<void> {
   }
 }
 
+async function openSelfHostGuide(): Promise<void> {
+  deployDocsCopied.value = false;
+  deployDocsCopyFailed.value = false;
+  try {
+    await bridge().app.openExternal(selfHostGuideUrl);
+  } catch {
+    await copySelfHostDocsReference();
+  }
+}
+
 function localTrialReferenceText(): string {
   if (settingsStore.language === "en-US") {
     return [
       "TaskBridge local trial",
+      "If you are using someone else's TaskBridge service, ask the administrator or deployer for the server address first.",
       "Prepare the TaskBridge source or deployment package on the backend computer.",
-      "Start the backend from the deployment guide, then keep http://127.0.0.1:8000 on the same computer.",
-      "From a phone or another computer, use the backend computer's LAN IP instead.",
+      "Start the service from the deployment guide, then use http://127.0.0.1:8080 on the same computer.",
+      "From a phone or another computer, use port 8080 on the server computer's LAN IP.",
     ].join("\n");
   }
   return [
     "TaskBridge 本机试用",
+    "如果你只是使用别人部署好的 TaskBridge，请先向管理员或部署者索取服务器地址。",
     "在后端电脑准备 TaskBridge 源码/部署包。",
-    "按部署说明启动后端后，同一台电脑保持 http://127.0.0.1:8000。",
-    "手机或另一台电脑访问时，填写后端电脑的局域网 IP。",
+    "按部署说明启动服务后，同一台电脑填写 http://127.0.0.1:8080。",
+    "手机或另一台电脑访问时，填写服务电脑的局域网 IP 和 8080 端口。",
+  ].join("\n");
+}
+
+function selfHostReferenceText(): string {
+  if (settingsStore.language === "en-US") {
+    return [
+      "TaskBridge self-hosting",
+      "Use this only if you are the person deploying the TaskBridge service.",
+      "Open the deployment guide: https://github.com/27xk/TaskBridge/blob/main/deploy/README.md",
+      "Prepare a server address, strong secrets, and the allowed Web origin before signing in from clients.",
+    ].join("\n");
+  }
+  return [
+    "TaskBridge 自托管",
+    "只有你负责部署 TaskBridge 服务时才需要阅读这部分。",
+    "打开部署说明：https://github.com/27xk/TaskBridge/blob/main/deploy/README.md",
+    "请先准备服务器地址、强密码和允许访问的 Web 来源，再回到客户端登录。",
   ].join("\n");
 }
 
@@ -198,7 +270,7 @@ async function testConnection(): Promise<boolean> {
     if (registrationBlocked.value) {
       mode.value = "login";
     }
-    connectionNote.value = settingsStore.t("settings.connectionReady");
+    connectionNote.value = settingsStore.t("settings.apiConnectionReady");
     connectionNoteTone.value = "success";
     return true;
   } catch (error) {
@@ -241,38 +313,8 @@ function togglePasswordVisibility(): void {
   passwordVisible.value = !passwordVisible.value;
 }
 
-function normalizeServerUrl(value: string): string {
-  const trimmed = value.trim().replace(/\/+$/, "");
-  if (!trimmed) throw new Error("server_url_required");
-  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
-  const url = new URL(candidate);
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Server URL must start with http:// or https://");
-  }
-  url.username = "";
-  url.password = "";
-  url.search = "";
-  url.hash = "";
-  url.pathname = url.pathname.replace(/\/api\/v1\/?$/, "") || "/";
-  return url.toString().replace(/\/+$/, "");
-}
-
-function inferServerUrlFromApi(apiUrl: string): string {
-  try {
-    return normalizeServerUrl(apiUrl);
-  } catch {
-    return "http://127.0.0.1:8000";
-  }
-}
-
-function isLoopbackServerUrl(value: string): boolean {
-  try {
-    const url = new URL(normalizeServerUrl(value));
-    const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-  } catch {
-    return false;
-  }
+function continueOffline(): void {
+  emit("continueOffline");
 }
 
 function authErrorText(error: string): string {
@@ -305,87 +347,54 @@ function authErrorText(error: string): string {
         </select>
       </label>
 
-      <div class="first-use-guide" :aria-label="settingsStore.t('auth.firstUseTitle')">
-        <strong>{{ settingsStore.t("auth.firstUseTitle") }}</strong>
-        <span>{{ settingsStore.t("auth.firstUseHint") }}</span>
-        <details class="first-use-details">
-          <summary>{{ settingsStore.t("auth.noServerHelpSummary") }}</summary>
-          <span>{{ settingsStore.t("auth.noServerHelpBody") }}</span>
-          <button class="primary-button" type="button" @click="openLocalTrialGuide">
-            {{ settingsStore.t("auth.openLocalTrialGuide") }}
+      <form class="auth-form auth-main-form" @submit.prevent="submit">
+        <p v-if="auth.sessionExpired" class="form-error" role="alert" aria-live="assertive">
+          {{ settingsStore.t(auth.sessionExpiredReason === "server-changed" ? "auth.serverChangedRelogin" : "auth.sessionExpired") }}
+        </p>
+        <section v-if="canContinueOffline" class="cached-workspace-choice" aria-labelledby="cached-workspace-title">
+          <div>
+            <strong id="cached-workspace-title">{{ settingsStore.t("auth.cachedWorkspaceTitle") }}</strong>
+            <p>{{ cachedWorkspaceSummary }}</p>
+          </div>
+          <button class="secondary-button" type="button" @click="continueOffline">
+            {{ settingsStore.t("auth.continueOffline") }}
           </button>
-          <button class="text-button deploy-docs-copy-button" type="button" @click="copyDeployDocsReference">
-            {{ settingsStore.t("auth.copyLocalTrialReference") }}
-          </button>
-          <small v-if="deployDocsCopied" class="form-message form-message-success">
-            {{ settingsStore.t("auth.localTrialReferenceCopied") }}
-          </small>
-          <small v-if="deployDocsCopyFailed" class="form-message form-message-error">
-            {{ settingsStore.t("auth.localTrialReferenceCopyFailed") }}
-          </small>
-        </details>
-      </div>
-
-      <div class="auth-form login-connection">
+        </section>
         <label>
           <span>{{ settingsStore.t("settings.serverUrl") }}</span>
-          <input v-model.trim="serverUrlDraft" type="url" autocomplete="off" spellcheck="false" @change="applyServerUrl" />
+          <input
+            v-model.trim="serverUrlDraft"
+            type="text"
+            inputmode="url"
+            autocomplete="off"
+            spellcheck="false"
+            @change="applyServerUrl"
+          />
           <small>{{ settingsStore.t("settings.serverUrlHint") }}</small>
           <small v-if="serverLocalhostHint" class="form-message form-message-info">{{ serverLocalhostHint }}</small>
         </label>
-        <button v-if="!showAdvancedConnectionEntry" class="text-button" type="button" @click="showAdvancedConnection">
-          {{ settingsStore.t("settings.showAdvancedConnection") }}
-        </button>
-        <details v-if="showAdvancedConnectionEntry" :open="advancedConnectionOpen" class="first-use-details" @toggle="setAdvancedConnectionOpen">
-          <summary>{{ settingsStore.t("settings.advancedEndpoints") }}</summary>
-          <label>
-            <span>{{ settingsStore.t("settings.baseUrl") }}</span>
-            <input v-model.trim="settings.baseUrl" type="url" autocomplete="off" spellcheck="false" @change="syncServerUrlFromAdvanced" />
-            <small>{{ settingsStore.t("settings.baseUrlHint") }}</small>
-          </label>
-          <label>
-            <span>{{ settingsStore.t("settings.wsUrl") }}</span>
-            <input v-model.trim="settings.wsUrl" type="url" autocomplete="off" spellcheck="false" @change="markAdvancedEndpointEdited" />
-            <small>{{ settingsStore.t("settings.wsUrlHint") }}</small>
-          </label>
-          <button class="secondary-button" type="button" @click="resetGeneratedConnectionEndpoints">
-            {{ settingsStore.t("settings.resetGeneratedEndpoints") }}
+        <p class="form-message form-message-info">{{ registrationConnectionHint }}</p>
+
+        <div class="segment-control" role="group" :aria-label="settingsStore.t('auth.mode')">
+          <button
+            type="button"
+            :aria-pressed="mode === 'login'"
+            :class="{ active: mode === 'login' }"
+            @click="selectAuthMode('login')"
+          >
+            {{ settingsStore.t("auth.login") }}
           </button>
-        </details>
-        <button
-          class="secondary-button"
-          type="button"
-          :disabled="connectionTesting"
-          @click="checkAndSaveConnection"
-        >
-          {{ connectionTesting ? settingsStore.t("settings.connectionTesting") : settingsStore.t("settings.checkAndSaveConnection") }}
-        </button>
-        <small>{{ settingsStore.t("settings.loginAutoChecksConnection") }}</small>
-        <p
-          v-if="connectionNote"
-          :class="['form-message', connectionNoteTone === 'success' ? 'form-message-success' : 'form-message-error']"
-        >
-          {{ connectionNote }}
-        </p>
-      </div>
-
-      <div class="segment-control" role="tablist" :aria-label="settingsStore.t('auth.mode')">
-        <button type="button" :class="{ active: mode === 'login' }" @click="selectAuthMode('login')">
-          {{ settingsStore.t("auth.login") }}
-        </button>
-        <button
-          type="button"
-          :class="{ active: mode === 'register' }"
-          :disabled="registrationBlocked"
-          :title="registrationBlocked || !auth.registrationStatusKnown ? registrationUnavailableText : ''"
-          @click="selectAuthMode('register')"
-        >
-          {{ settingsStore.t("auth.register") }}
-        </button>
-      </div>
-      <p v-if="registrationBlocked || !auth.registrationStatusKnown" class="form-error">{{ registrationUnavailableText }}</p>
-
-      <form class="auth-form" @submit.prevent="submit">
+          <button
+            type="button"
+            :aria-pressed="mode === 'register'"
+            :class="{ active: mode === 'register' }"
+            :disabled="registrationBlocked"
+            :title="registrationBlocked || !auth.registrationStatusKnown ? registrationUnavailableText : ''"
+            @click="selectAuthMode('register')"
+          >
+            {{ settingsStore.t("auth.register") }}
+          </button>
+        </div>
         <label v-if="mode === 'register'">
           <span>{{ settingsStore.t("auth.username") }}</span>
           <input v-model="username" type="text" required minlength="3" autocomplete="username" />
@@ -416,11 +425,89 @@ function authErrorText(error: string): string {
           </div>
         </label>
 
-        <p v-if="auth.error" class="form-error">{{ authErrorText(auth.error) }}</p>
-        <button class="primary-button" type="submit" :disabled="auth.loading">
-          {{ auth.loading ? settingsStore.t("auth.processing") : mode === "login" ? settingsStore.t("auth.login") : settingsStore.t("auth.createAccount") }}
+        <p v-if="auth.error" class="form-error" role="alert" aria-live="assertive">{{ authErrorText(auth.error) }}</p>
+        <button class="primary-button" type="submit" :disabled="submitting || auth.loading">
+          {{ submitting || auth.loading ? settingsStore.t("auth.processing") : mode === "login" ? settingsStore.t("auth.login") : settingsStore.t("auth.createAccount") }}
         </button>
+        <div class="connection-secondary-actions">
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="submitting || connectionTesting"
+            @click="checkAndSaveConnection"
+          >
+            {{ connectionTesting ? settingsStore.t("settings.connectionTesting") : settingsStore.t("settings.checkAndSaveConnection") }}
+          </button>
+          <small>{{ settingsStore.t("settings.loginAutoChecksConnection") }}</small>
+          <p
+            v-if="connectionNote"
+            :class="['form-message', connectionNoteTone === 'success' ? 'form-message-success' : 'form-message-error']"
+            :role="connectionNoteTone === 'error' ? 'alert' : 'status'"
+            :aria-live="connectionNoteTone === 'error' ? 'assertive' : 'polite'"
+          >
+            {{ connectionNote }}
+          </p>
+          <button v-if="!showAdvancedConnectionEntry" class="text-button" type="button" @click="showAdvancedConnection">
+            {{ settingsStore.t("settings.showAdvancedConnection") }}
+          </button>
+          <details v-if="showAdvancedConnectionEntry" :open="advancedConnectionOpen" class="first-use-details" @toggle="setAdvancedConnectionOpen">
+            <summary>{{ settingsStore.t("settings.advancedEndpoints") }}</summary>
+            <label>
+              <span>{{ settingsStore.t("settings.baseUrl") }}</span>
+              <input
+                v-model.trim="settings.baseUrl"
+                type="text"
+                inputmode="url"
+                autocomplete="off"
+                spellcheck="false"
+                @change="syncServerUrlFromAdvanced"
+              />
+              <small>{{ settingsStore.t("settings.baseUrlHint") }}</small>
+            </label>
+            <label>
+              <span>{{ settingsStore.t("settings.wsUrl") }}</span>
+              <input
+                v-model.trim="settings.wsUrl"
+                type="text"
+                inputmode="url"
+                autocomplete="off"
+                spellcheck="false"
+                @change="markAdvancedEndpointEdited"
+              />
+              <small>{{ settingsStore.t("settings.wsUrlHint") }}</small>
+            </label>
+            <button class="secondary-button" type="button" @click="resetGeneratedConnectionEndpoints">
+              {{ settingsStore.t("settings.resetGeneratedEndpoints") }}
+            </button>
+          </details>
+        </div>
       </form>
+
+      <details class="first-use-guide first-use-guide-collapsed">
+        <summary>{{ settingsStore.t("auth.noServerHelpSummary") }}</summary>
+        <div class="first-use-guide-body" :aria-label="settingsStore.t('auth.firstUseTitle')">
+          <strong>{{ settingsStore.t("auth.firstUseTitle") }}</strong>
+          <span>{{ settingsStore.t("auth.firstUseHint") }}</span>
+          <span>{{ settingsStore.t("auth.noServerHelpBody") }}</span>
+          <div class="first-use-guide-actions">
+            <button class="secondary-button" type="button" @click="openLocalTrialGuide">
+              {{ settingsStore.t("auth.openLocalTrialGuide") }}
+            </button>
+            <button class="text-button" type="button" @click="openSelfHostGuide">
+              {{ settingsStore.t("auth.openSelfHostGuide") }}
+            </button>
+            <button class="text-button deploy-docs-copy-button" type="button" @click="copyDeployDocsReference">
+              {{ settingsStore.t("auth.copyLocalTrialReference") }}
+            </button>
+          </div>
+          <small v-if="deployDocsCopied" class="form-message form-message-success">
+            {{ guideReferenceCopiedMessage }}
+          </small>
+          <small v-if="deployDocsCopyFailed" class="form-message form-message-error">
+            {{ guideReferenceCopyFailedMessage }}
+          </small>
+        </div>
+      </details>
     </section>
   </main>
 </template>

@@ -23,13 +23,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.taskbridge.app.ui.components.AppDropdownField
+import com.taskbridge.app.ui.components.AppDynamicStatusText
 import com.taskbridge.app.ui.components.AppHeader
 import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
+import com.taskbridge.app.ui.components.tryOpenExternalUri
 import com.taskbridge.app.ui.components.loginFailureMessageKey
 import com.taskbridge.app.ui.components.registrationDisabledMessageKey
 import com.taskbridge.app.ui.components.userFacingAuthErrorMessage
@@ -39,11 +42,18 @@ import com.taskbridge.app.ui.i18n.AppLanguage
 import com.taskbridge.app.ui.i18n.LocalAppLanguage
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
 
+private const val LOCAL_TRIAL_GUIDE_URL =
+    "https://github.com/27xk/TaskBridge/blob/main/docs/user-quick-start.md#%E6%B2%A1%E6%9C%89%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%9C%B0%E5%9D%80"
+private const val SELF_HOST_GUIDE_URL =
+    "https://github.com/27xk/TaskBridge/blob/main/deploy/README.md"
+
 @Composable
 fun LoginScreen(
     viewModel: LoginViewModel,
+    canContinueOffline: Boolean,
     onLanguageChange: (AppLanguage) -> Unit,
     onLoginSuccess: () -> Unit,
+    onContinueOffline: () -> Unit,
     onRegisterClick: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -106,24 +116,34 @@ fun LoginScreen(
                 onSelect = onLanguageChange,
             )
 
-            FirstUseGuide(strings = strings)
+            SignInPanel(
+                state = state,
+                strings = strings,
+                registrationAvailability = registrationAvailability,
+                showRegistrationStatusUnknownAfterCheck = showRegistrationStatusUnknownAfterCheck,
+                isEnglish = isEnglish,
+                canContinueOffline = canContinueOffline,
+                onServerBaseUrlChange = viewModel::updateServerBaseUrl,
+                onUsernameOrEmailChange = viewModel::updateUsernameOrEmail,
+                onPasswordChange = viewModel::updatePassword,
+                onSignIn = { viewModel.login(onLoginSuccess) },
+                onContinueOffline = onContinueOffline,
+                onCreateAccount = {
+                    if (state.registrationStatusKnown && state.registrationEnabled) {
+                        viewModel.saveConnectionSettings()
+                        onRegisterClick()
+                    } else {
+                        showRegistrationStatusUnknownAfterCheck = false
+                        pendingRegisterNavigation = true
+                        viewModel.testConnection()
+                    }
+                },
+            )
 
             AppPanel {
                 Text(
                     text = strings.connectionSettings,
                     style = MaterialTheme.typography.titleMedium,
-                )
-                OutlinedTextField(
-                    value = state.serverBaseUrl,
-                    onValueChange = viewModel::updateServerBaseUrl,
-                    label = { Text(strings.serverUrl) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    text = strings.serverUrlHint,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
                 )
                 localhostWarningText(state.serverBaseUrl, isEnglish)?.let { warning ->
                     Text(
@@ -142,24 +162,25 @@ fun LoginScreen(
                     )
                 }
                 state.connectionMessage?.let {
-                    Text(
+                    AppDynamicStatusText(
                         text = localizeConnectionMessage(it, isEnglish),
-                        color = if (state.connectionMessageIsError) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.primary
-                        },
-                        style = MaterialTheme.typography.bodySmall,
+                        isError = state.connectionMessageIsError,
                     )
                 }
                 TextButton(onClick = { advancedConnectionOpen = !advancedConnectionOpen }) {
                     Text(strings.advancedConnectionSettings)
                 }
+                Text(
+                    text = strings.advancedConnectionSecondaryHint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 if (advancedConnectionOpen) {
                     OutlinedTextField(
                         value = state.apiBaseUrl,
                         onValueChange = viewModel::updateApiBaseUrl,
                         label = { Text(strings.requestUrlAdvanced) },
+                        isError = state.connectionMessageIsError,
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -167,6 +188,7 @@ fun LoginScreen(
                         value = state.webSocketUrl,
                         onValueChange = viewModel::updateWebSocketUrl,
                         label = { Text(strings.syncConnectionUrlAdvanced) },
+                        isError = state.connectionMessageIsError,
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -181,66 +203,110 @@ fun LoginScreen(
                 )
             }
 
-            AppPanel {
-                Text(
-                    text = strings.signIn,
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                OutlinedTextField(
-                    value = state.usernameOrEmail,
-                    onValueChange = viewModel::updateUsernameOrEmail,
-                    label = { Text(strings.usernameOrEmail) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                PasswordTextField(
-                    value = state.password,
-                    onValueChange = viewModel::updatePassword,
-                    strings = strings,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                state.error?.let {
-                    Text(localizeLoginError(it, strings), color = MaterialTheme.colorScheme.error)
-                }
-                Button(
-                    onClick = { viewModel.login(onLoginSuccess) },
-                    enabled = !state.isLoading,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(if (state.isLoading) strings.signingIn else strings.signIn)
-                }
-                if (registrationAvailability.showCreateAccountAction) {
-                    TextButton(
-                        onClick = {
-                            if (state.registrationStatusKnown && state.registrationEnabled) {
-                                viewModel.saveConnectionSettings()
-                                onRegisterClick()
-                            } else {
-                                showRegistrationStatusUnknownAfterCheck = false
-                                pendingRegisterNavigation = true
-                                viewModel.testConnection()
-                            }
-                        },
-                        enabled = !state.isLoading && !state.isTestingConnection,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(registrationAvailability.actionText ?: strings.createAccount)
-                    }
-                }
-                val registrationHelperText = if (showRegistrationStatusUnknownAfterCheck && !state.registrationStatusKnown) {
-                    registrationStatusUnknownAfterCheckHelp(isEnglish)
-                } else {
-                    registrationAvailability.helperText
-                }
-                if (registrationHelperText != null) {
-                    Text(
-                        text = registrationHelperText,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+            FirstUseGuide(strings = strings)
+        }
+    }
+}
+
+@Composable
+private fun SignInPanel(
+    state: LoginUiState,
+    strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings,
+    registrationAvailability: RegistrationAvailabilityUi,
+    showRegistrationStatusUnknownAfterCheck: Boolean,
+    isEnglish: Boolean,
+    canContinueOffline: Boolean,
+    onServerBaseUrlChange: (String) -> Unit,
+    onUsernameOrEmailChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onSignIn: () -> Unit,
+    onContinueOffline: () -> Unit,
+    onCreateAccount: () -> Unit,
+) {
+    AppPanel {
+        Text(
+            text = strings.signIn,
+            style = MaterialTheme.typography.titleMedium,
+        )
+        OutlinedTextField(
+            value = state.serverBaseUrl,
+            onValueChange = onServerBaseUrlChange,
+            label = { Text(strings.serverUrl) },
+            isError = state.connectionMessageIsError,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = strings.serverUrlHint,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (canContinueOffline) {
+            Text(
+                text = strings.localWorkspaceAvailableTitle,
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = strings.localWorkspaceAvailableBody,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(
+                onClick = onContinueOffline,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(strings.continueWithLocalTasks)
             }
+        }
+        OutlinedTextField(
+            value = state.usernameOrEmail,
+            onValueChange = onUsernameOrEmailChange,
+            label = { Text(strings.usernameOrEmail) },
+            isError = state.error != null,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        PasswordTextField(
+            value = state.password,
+            onValueChange = onPasswordChange,
+            strings = strings,
+            isError = state.error != null,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        state.error?.let {
+            AppDynamicStatusText(
+                text = localizeLoginError(it, strings),
+                isError = true,
+            )
+        }
+        Button(
+            onClick = onSignIn,
+            enabled = !state.isLoading,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (state.isLoading) strings.signingIn else strings.signIn)
+        }
+        if (registrationAvailability.showCreateAccountAction) {
+            TextButton(
+                onClick = onCreateAccount,
+                enabled = !state.isLoading && !state.isTestingConnection,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(registrationAvailability.actionText ?: strings.createAccount)
+            }
+        }
+        val registrationHelperText = if (showRegistrationStatusUnknownAfterCheck && !state.registrationStatusKnown) {
+            registrationStatusUnknownAfterCheckHelp(isEnglish)
+        } else {
+            registrationAvailability.helperText
+        }
+        if (registrationHelperText != null) {
+            Text(
+                text = registrationHelperText,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
@@ -248,6 +314,8 @@ fun LoginScreen(
 @Composable
 private fun FirstUseGuide(strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings) {
     var detailsOpen by remember { mutableStateOf(false) }
+    var externalLinkError by remember { mutableStateOf("") }
+    val uriHandler = LocalUriHandler.current
     AppPanel {
         Text(
             text = strings.signInFirstUseTitle,
@@ -263,11 +331,6 @@ private fun FirstUseGuide(strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings)
         }
         if (detailsOpen) {
             Text(
-                text = strings.setupChecklist,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
                 text = strings.localTrialHelp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
@@ -282,6 +345,36 @@ private fun FirstUseGuide(strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings)
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
+            OutlinedButton(
+                onClick = {
+                    externalLinkError = if (tryOpenExternalUri(uriHandler, LOCAL_TRIAL_GUIDE_URL)) {
+                        ""
+                    } else {
+                        strings.externalLinkFailed
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(strings.openLocalTrialGuide)
+            }
+            TextButton(
+                onClick = {
+                    externalLinkError = if (tryOpenExternalUri(uriHandler, SELF_HOST_GUIDE_URL)) {
+                        ""
+                    } else {
+                        strings.externalLinkFailed
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(strings.openSelfHostGuide)
+            }
+            if (externalLinkError.isNotBlank()) {
+                AppDynamicStatusText(
+                    text = externalLinkError,
+                    isError = true,
+                )
+            }
         }
     }
 }

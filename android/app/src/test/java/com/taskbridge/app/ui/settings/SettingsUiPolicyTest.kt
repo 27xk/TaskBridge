@@ -86,15 +86,20 @@ class SettingsUiPolicyTest {
     }
 
     @Test
-    fun syncRecoverySummaryIncludesFailedTasks() {
+    fun syncRecoverySummaryIncludesFailedAndConflictTasks() {
         assertEquals(
-            "2 tasks waiting to sync / 1 needs a retry / 3 failed",
+            "Resolve 4 conflicts first. Also check 3 failed, 1 retry, and 2 waiting to sync.",
             syncRecoverySummaryText(
                 pendingQueueCount = 2,
                 exhaustedQueueCount = 1,
                 failedTaskCount = 3,
+                conflictTaskCount = 4,
                 isEnglish = true,
             ),
+        )
+        assertEquals(
+            "View and resolve conflicted tasks",
+            syncRecoveryConflictActionText(isEnglish = true),
         )
         assertEquals(
             "Retry pending or failed sync",
@@ -103,6 +108,14 @@ class SettingsUiPolicyTest {
         assertEquals(
             "Pending or failed changes can be retried now.",
             syncRecoveryRetryAvailableText(isEnglish = true),
+        )
+        assertEquals(
+            "Sync recovery tools",
+            syncRecoveryToolsTitle(isEnglish = true),
+        )
+        assertEquals(
+            "Show sync recovery tools",
+            syncRecoveryToolsToggleText(isOpen = false, isEnglish = true),
         )
     }
 

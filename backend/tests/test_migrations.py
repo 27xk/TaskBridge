@@ -36,6 +36,7 @@ def test_alembic_upgrade_head_runs_against_empty_sqlite_database(tmp_path) -> No
             row[1] for row in connection.execute("PRAGMA index_list(product_events)")
         }
         task_indexes = {row[1] for row in connection.execute("PRAGMA index_list(tasks)")}
+        task_columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
         current_revision = connection.execute(
             "SELECT version_num FROM alembic_version",
         ).fetchone()[0]
@@ -49,10 +50,12 @@ def test_alembic_upgrade_head_runs_against_empty_sqlite_database(tmp_path) -> No
         "ix_tasks_user_deleted_due_time",
         "ix_tasks_user_deleted_updated_id",
     } <= task_indexes
+    assert {"client_request_id", "create_payload_hash"} <= task_columns
+    assert "uq_tasks_user_client_request_id" in task_indexes
     assert {
         "ix_product_events_user_created",
         "ix_product_events_user_name_created",
         "ix_product_events_user_source_created",
     } <= product_event_indexes
     assert "ix_tasks_user_deleted_updated" not in task_indexes
-    assert current_revision == "20260605_0012"
+    assert current_revision == "20260715_0013"

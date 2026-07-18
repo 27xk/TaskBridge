@@ -6,11 +6,11 @@ product
 
 ## Users
 
-TaskBridge is for people who manage personal or work tasks across a desktop computer, an Android phone, and a small desktop or home-server deployment. They need to capture work quickly, see what matters today, keep using the app offline after first login, and sync changes when the network returns.
+TaskBridge is for people who manage personal or work tasks across a desktop computer, an Android phone, a browser, and a small desktop or home-server deployment. They need to capture work quickly, see what matters today, keep using cached tasks after an initial sync, and understand when signing in again is required before changes can reach other devices.
 
 ## Product Purpose
 
-TaskBridge provides a local-first, self-hostable task system with desktop, Android, widget, floating-window, and static Web/PWA clients. Success means a user can connect to a server once, trust local task handling afterward, and move between devices without relearning the workflow.
+TaskBridge provides a local-first, self-hostable task system with desktop, Android, widget, floating-window, and static Web/PWA clients. Success means users can trust local task handling, move between devices without relearning the workflow, and distinguish local availability from authenticated online sync. Each client can retain the scoped local workspace after natural session expiry, but sending queued changes always requires signing in again.
 
 ## Brand Personality
 
@@ -27,6 +27,9 @@ Avoid marketing-first landing-page patterns inside the product UI, including ove
 - Hide complexity until it is useful: schedule, reminder, priority, template, repeat, and checklist controls should remain available without dominating the first screen.
 - Keep destructive or secondary actions out of the main path: completion and recovery are primary list actions; editing, template use, and deletion can sit behind a secondary menu.
 - Preserve self-hosting clarity: server setup and connection language should help non-developers choose the right entry point without duplicate decision trees.
+- Give regular users one server URL: Release Compose clients use the shared `8080` entry; direct API and WebSocket endpoints remain an advanced deployment option.
+- Keep healthy infrastructure quiet: sync panels should remain visible only when a user needs to make a decision or recover an item.
+- Make installed-version and update discovery available inside each packaged client instead of requiring users to infer it from filenames.
 
 ## Accessibility & Inclusion
 

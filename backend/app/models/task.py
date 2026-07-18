@@ -18,10 +18,18 @@ class Task(Base):
         Index("ix_tasks_user_deleted_project", "user_id", "is_deleted", "project"),
         Index("ix_tasks_user_deleted_list_type", "user_id", "is_deleted", "list_type"),
         Index("ix_tasks_user_deleted_due_time", "user_id", "is_deleted", "due_time"),
+        Index(
+            "uq_tasks_user_client_request_id",
+            "user_id",
+            "client_request_id",
+            unique=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    client_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    create_payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="todo", nullable=False)

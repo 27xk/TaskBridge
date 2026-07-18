@@ -1,7 +1,7 @@
 ﻿import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { workspacePaths } from "./script-helpers.mjs";
+import { extractBalancedBlock, workspacePaths } from "./script-helpers.mjs";
 
 const { desktopRoot, repoRoot } = workspacePaths(import.meta.url);
 
@@ -37,6 +37,7 @@ const [
   desktopSettingsAccountPanelSource,
   desktopSettingsConnectionPanelSource,
   desktopSettingsDataPanelSource,
+  desktopSettingsSyncRecoveryPanelSource,
   desktopSettingsMetadataPanelSource,
   desktopSettingsWindowPanelSource,
   desktopUserFacingErrorsSource,
@@ -56,6 +57,7 @@ const [
   desktopIpcSource,
   desktopInstallerSource,
   desktopCssSource,
+  desktopWorkspaceCssSource,
   desktopI18nSource,
   desktopAuthStoreSource,
   desktopFloatingStoreSource,
@@ -117,6 +119,7 @@ const [
   readFile(resolve(desktopRoot, "src/components/settings/SettingsAccountDisplayPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/settings/SettingsConnectionPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/settings/SettingsDataSessionPanel.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "src/components/settings/SettingsSyncRecoveryPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/settings/SettingsMetadataPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/settings/SettingsWindowPanel.vue"), "utf8"),
   readFile(resolve(desktopRoot, "shared/user-facing-errors.ts"), "utf8"),
@@ -136,6 +139,7 @@ const [
   readFile(resolve(desktopRoot, "electron/ipc.ts"), "utf8"),
   readFile(resolve(desktopRoot, "build/installer.nsh"), "utf8"),
   readFile(resolve(desktopRoot, "src/assets/base.css"), "utf8"),
+  readFile(resolve(desktopRoot, "src/assets/workspace.css"), "utf8"),
   readFile(resolve(desktopRoot, "src/i18n.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/stores/auth.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/stores/floating.ts"), "utf8"),
@@ -189,6 +193,7 @@ const desktopSettingsSurfaceSource = [
   desktopSettingsAccountPanelSource,
   desktopSettingsConnectionPanelSource,
   desktopSettingsDataPanelSource,
+  desktopSettingsSyncRecoveryPanelSource,
   desktopSettingsMetadataPanelSource,
   desktopSettingsWindowPanelSource,
 ].join("\n");
@@ -651,16 +656,12 @@ assert.match(desktopI18nSource, /"settings\.resetGeneratedEndpoints"/, "Desktop 
 assert.match(desktopSettingsSurfaceSource, /<button class="primary-button" type="button"[\s\S]{0,180}checkAndSaveConnection/, "Desktop settings should make save-and-test connection the primary action in the connection section");
 assert.match(desktopI18nSource, /"settings\.checkAndSaveConnection"/, "Desktop i18n must include combined connection copy");
 assert.match(desktopI18nSource, /"settings\.advancedEndpoints": \{ "zh-CN": "排障：自定义连接地址"/, "Desktop i18n must frame custom connection settings as troubleshooting");
-assert.match(desktopSettingsSource, /settingsNavGroups/, "Desktop settings must group navigation into user-oriented sections instead of one flat row");
-assert.match(desktopI18nSource, /"settings\.navCommon": \{ "zh-CN": "常用设置", "en-US": "Common settings" \}/, "Desktop settings must label common settings as a top-level group");
-assert.match(desktopI18nSource, /"settings\.navDataSafety": \{ "zh-CN": "数据安全", "en-US": "Data safety" \}/, "Desktop settings must label data safety as a top-level group");
-assert.match(desktopI18nSource, /"settings\.navSyncRecovery": \{ "zh-CN": "同步问题", "en-US": "Sync issues" \}/, "Desktop settings must label sync issues as a top-level group");
-assert.match(desktopI18nSource, /"settings\.navAdvancedMaintenance": \{ "zh-CN": "高级维护", "en-US": "Advanced maintenance" \}/, "Desktop settings must label advanced maintenance as a top-level group");
-assert.match(
-  desktopI18nSource,
-  /"settings\.subtitle": \{ "zh-CN": "常用设置与数据安全", "en-US": "Settings and data safety" \}/,
-  "Desktop settings title must describe the ordinary user outcome instead of the client module",
-);
+assert.match(desktopSettingsSource, /const settingsNavItems = computed<SettingsNavItem\[\]>/, "Desktop settings must define one focused category list");
+for (const sectionId of ["account-display", "account-security", "connection", "window", "data", "sync-recovery", "metadata"]) {
+  assert.match(desktopSettingsSource, new RegExp(`sectionId: "${sectionId}"`), `Desktop settings must keep the ${sectionId} category reachable`);
+}
+assert.match(desktopSettingsSource, /class="settings-category-nav"/, "Desktop settings must render the focused category navigation");
+assert.doesNotMatch(desktopSettingsSource, /settingsNavGroups|settings\.navCommon|settings\.navDataSafety|settings\.navAdvancedMaintenance/, "Desktop settings must not restore the old grouped long-page navigation");
 assert.match(desktopI18nSource, /"settings\.baseUrl": \{ "zh-CN": "自定义请求地址", "en-US": "Request address for custom proxy" \}/, "Desktop advanced request endpoint label must avoid API jargon");
 assert.match(desktopI18nSource, /"settings\.wsUrl": \{ "zh-CN": "自定义同步地址", "en-US": "Sync address for custom proxy" \}/, "Desktop advanced sync endpoint label must avoid WebSocket jargon");
 assert.doesNotMatch(desktopI18nSource, /"settings\.baseUrl": \{[^\n]*(API 地址|API URL)/, "Desktop advanced request endpoint label must not be API-first copy");
@@ -691,9 +692,8 @@ const desktopAutoSaveHelpers = sourceBetween(
   "function applyServerUrl",
 );
 assert.match(desktopI18nSource, /"settings\.autoSaved"/, "Desktop settings must name non-dangerous settings as auto-saved");
-assert.match(desktopI18nSource, /"settings\.autoSaveHint"/, "Desktop settings must explain that display and window preferences are saved immediately");
 assert.match(desktopSettingsSource, /settingsStore\.t\("settings\.autoSaved"\)/, "Desktop settings header must show the auto-save state instead of a manual global save");
-assert.match(desktopSettingsSource, /settingsStore\.t\("settings\.autoSaveHint"\)/, "Desktop settings header must explain the immediate-save model");
+assert.doesNotMatch(desktopSettingsSource, /settingsStore\.t\("settings\.(?:autoSaveHint|subtitle)"\)/, "Desktop settings header must not keep permanent explanatory copy");
 assert.doesNotMatch(desktopSettingsSource, /settingsStore\.t\("settings\.saveDisplayPreferences"\)/, "Desktop settings must not keep a mixed manual-save model for display and window settings");
 for (const key of ["setLanguage", "setDesktopTheme", "setDisplayTimeZone", "setAutoStart", "floatingVisibleOnStart", "floatingOpacity"]) {
   assert.match(desktopAutoSaveHelpers, new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `Desktop settings auto-save helper must persist ${key}`);
@@ -743,7 +743,7 @@ for (const [name, source] of [
 assert.match(desktopTaskViewSource, /TaskFilter = "all"[\s\S]*"trash"/, "Desktop task list must expose a trash/recycle-bin filter");
 assert.match(desktopTaskViewSource, /taskStore\.trashTasks/, "Desktop trash view must read deleted local tasks");
 assert.match(desktopTaskItemSource, /trash\?: boolean/, "Desktop task item must support a trash restore-only mode");
-assert.match(desktopTaskItemSource, /<button\s+v-if="!trash"[\s\S]{0,180}class="check-button"/, "Desktop trash rows must hide the completion checkbox-style button");
+assert.match(desktopTaskItemSource, /<button\s+v-if="!trash && !selectable"[\s\S]{0,180}class="check-button"/, "Desktop trash and selection rows must hide the completion checkbox-style button");
 assert.doesNotMatch(desktopTaskItemSource, /if \(props\.trash\)[\s\S]{0,120}emit\("restore"/, "Desktop trash rows must not use the completion button as restore");
 assert.match(desktopI18nSource, /"task\.trash"/, "Desktop i18n must name the trash view");
 assert.match(desktopTaskItemSource, /purge:\s*\[task: TaskRecord\]/, "Desktop trash rows must expose a permanent-delete event");
@@ -884,15 +884,14 @@ const desktopUpdateStatusSummary = sourceBetween(
   "const updateTechnicalDetail = computed(() => {",
 );
 assert.doesNotMatch(desktopUpdateStatusSummary, /updateStatus\.value\.(message|error)/, "Desktop update summary must not expose raw updater messages or errors");
-const desktopDataSession = sourceBetween(desktopSettingsSurfaceSource, '<section class="settings-section settings-data">', '<section class="settings-section settings-metadata">');
-const desktopDiagnosticsSection = sourceBetween(desktopDataSession, '<details class="settings-advanced-details"', '</details>');
-const desktopDefaultDataActions = sourceBetween(desktopDataSession, '<div class="settings-data-actions">', '</div>');
-assert.doesNotMatch(desktopDefaultDataActions, /settings\.exportDiagnostics/, "Desktop diagnostics export must not sit beside ordinary backup actions");
-assert.match(desktopSettingsSurfaceSource, /settings-section-nav/, "Desktop settings must provide quick navigation instead of one undifferentiated long page");
+const desktopDataSession = desktopSettingsDataPanelSource;
+const desktopDiagnosticsSection = desktopSettingsSyncRecoveryPanelSource;
+assert.doesNotMatch(desktopDataSession, /settings\.exportDiagnostics/, "Desktop diagnostics export must not sit beside ordinary backup actions");
+assert.match(desktopSettingsSource, /class="settings-category-nav"/, "Desktop settings must provide category navigation instead of one undifferentiated long page");
 assert.match(desktopI18nSource, /"settings\.clearLocalDataConfirmMessage"/, "Desktop clear-this-device confirmation must use a full risk explanation");
 assert.match(desktopSettingsSurfaceSource, /message:\s*settingsStore\.t\("settings\.clearLocalDataConfirmMessage"\)/, "Desktop clear-this-device dialog must not use the button label as the confirmation body");
 assert.doesNotMatch(
-  desktopDataSession.replace(desktopDiagnosticsSection, ""),
+  desktopDataSession,
   /settings\.deviceId/,
   "Desktop settings must not expose the raw device id in the default data section",
 );
@@ -918,11 +917,13 @@ assertOrder(
 );
 assert.match(desktopTaskViewSource, /primaryFilterOptions/, "Desktop task list must keep common filters in a short primary strip");
 assert.match(desktopTaskViewSource, /secondaryFilterOptions/, "Desktop task list must move uncommon filters into a secondary selector");
-assert.match(desktopTaskViewSource, /filter-advanced-details/, "Desktop project and tag filters must be hidden behind an advanced filter disclosure");
-const desktopFilterToolbar = sourceBetween(desktopTaskViewSource, '<div class="filter-toolbar">', '<div v-if="hasActiveFilters"');
-assert.doesNotMatch(desktopFilterToolbar.replace(/<details class="filter-advanced-details"[\s\S]*?<\/details>/, ""), /selectedProject|selectedTag/, "Desktop project and tag selectors must not sit in the default filter toolbar");
+assert.match(desktopTaskViewSource, /<details class="filter-menu">/, "Desktop secondary, project, and tag filters must be hidden behind one on-demand menu");
+const desktopFilterToolbar = sourceBetween(desktopTaskViewSource, '<div class="task-filter-toolbar">', '<div v-if="hasActiveFilters"');
+const desktopFilterMenu = sourceBetween(desktopFilterToolbar, '<details class="filter-menu">', '</details>');
+assert.match(desktopFilterMenu, /selectedProject[\s\S]*selectedTag/, "Desktop project and tag selectors must stay inside the filter menu");
+assert.doesNotMatch(desktopFilterToolbar.replace(/<details class="filter-menu">[\s\S]*?<\/details>/, ""), /selectedProject|selectedTag/, "Desktop project and tag selectors must not sit in the default filter toolbar");
 assert.match(desktopI18nSource, /"task\.projectTagFilters"/, "Desktop project/tag advanced filter must have a distinct label instead of repeating More filters");
-assert.match(desktopFilterToolbar, /settingsStore\.t\("task\.projectTagFilters"\)/, "Desktop project/tag advanced filter disclosure must avoid duplicating the secondary More filters label");
+assert.match(desktopFilterMenu, /settingsStore\.t\("task\.projectTagFilters"\)/, "Desktop project/tag filter section must remain clearly labelled inside the menu");
 assert.match(desktopTaskViewSource, /TaskListSection/, "Desktop task list sections must use one focused component instead of repeating TaskItem event wiring");
 assert.match(desktopTaskViewSource, /:aria-label="settingsStore\.t\('task\.search'\)"/, "Desktop task search input must have an accessible name");
 assert.match(desktopTaskViewSource, /:aria-pressed="filter === option\.value"/, "Desktop primary task filters must expose their pressed state");
@@ -939,15 +940,13 @@ assert.match(desktopTaskViewSource, /filter\.value === "today" \? "today" : "def
 assert.match(desktopTaskViewSource, /:create-preset="editorCreatePreset"/, "Desktop task editor must receive the current-view create preset");
 assert.match(desktopTaskViewSource, /bulkActionTargets/, "Desktop task list must expose current-view batch actions for dense lists");
 assert.match(desktopTaskViewSource, /async function completeVisibleTasks\(/, "Desktop task list must support completing visible open tasks in one action");
-assert.match(desktopTaskViewSource, /task\.completeVisibleConfirm/, "Desktop visible-task completion must ask for confirmation before batch changes");
-assert.match(desktopTaskViewSource, /async function completeVisibleTasks\([\s\S]{0,420}requestConfirmation/, "Desktop visible-task completion must confirm before completing any selected batch");
-assert.doesNotMatch(desktopTaskViewSource, /count > 5[\s\S]{0,320}requestConfirmation/, "Desktop visible-task completion must not skip confirmation for small selected batches");
+const desktopBatchComplete = sourceBetween(desktopTaskViewSource, "async function completeVisibleTasks", "async function deleteVisibleTasks");
+assert.doesNotMatch(desktopBatchComplete, /requestConfirmation|completeVisibleConfirm/, "Desktop selection mode must not ask for a second confirmation before a reversible batch completion");
 assert.match(desktopTaskViewSource, /taskStore\.batchComplete\(bulkActionTargets\.value\)/, "Desktop visible-task completion must use the existing batch completion store API");
 assert.match(desktopTaskViewSource, /async function deleteVisibleTasks\(/, "Desktop task list must support deleting visible open tasks in one action");
 assert.match(desktopTaskViewSource, /taskStore\.batchDelete\(bulkActionTargets\.value\)/, "Desktop visible-task deletion must use the existing batch delete store API");
 assert.match(desktopTaskViewSource, /settingsStore\.t\("task\.completeVisible"\)/, "Desktop visible-task completion must use localized button copy");
 assert.match(desktopTaskViewSource, /settingsStore\.t\("task\.deleteVisible"\)/, "Desktop visible-task deletion must use localized button copy");
-assert.match(desktopI18nSource, /"task\.completeVisibleConfirm"/, "Desktop i18n must include visible-task completion confirmation copy");
 assert.match(desktopTaskEditorSource, /createPreset\?: "default" \| "today"/, "Desktop task editor must accept contextual create presets");
 assert.match(desktopI18nSource, /"task\.list": \{ "zh-CN": "归类", "en-US": "Location" \}/, "Desktop task list-type field must be labeled as task location/category instead of checklist copy");
 assert.match(desktopTaskStoreSource, /listType:\s*draft\.listType \|\| "inbox"/, "Desktop quick add must not silently move every planned task into the Today list");
@@ -980,10 +979,13 @@ assert.match(desktopCssSource, /\.form-message-success/, "Desktop styles must in
 assert.match(desktopCssSource, /\.form-message-error/, "Desktop styles must include an error message state");
 assert.match(desktopCssSource, /\.form-message-info/, "Desktop styles must include a neutral information message state");
 assert.match(desktopMainSource, /minWidth:\s*760/, "Desktop native window minimum width must allow a narrower app window");
-assert.match(desktopCssSource, /\.app-shell[\s\S]{0,160}min-width:\s*720px/, "Desktop shell must allow a narrower app window");
-assert.doesNotMatch(desktopCssSource, /@media \(max-width: 960px\)[\s\S]{0,180}min-width:\s*760px/, "Desktop narrow layout must not force horizontal overflow at 760px");
-assert.match(desktopCssSource, /@media \(max-width: 820px\)[\s\S]*grid-template-columns:\s*1fr/, "Desktop narrow layout must collapse to one column before it overflows");
-assert.match(desktopCssSource, /prefers-reduced-motion:\s*reduce/, "Desktop styles must honor reduced-motion preferences");
+const desktopMediumWorkspaceCss = extractBalancedBlock(desktopWorkspaceCssSource, "@media (max-width: 1099px)");
+const desktopNarrowWorkspaceCss = extractBalancedBlock(desktopWorkspaceCssSource, "@media (max-width: 799px)");
+const desktopReducedMotionCss = extractBalancedBlock(desktopWorkspaceCssSource, "@media (prefers-reduced-motion: reduce)");
+assert.match(desktopWorkspaceCssSource, /\.focus-workspace\s*\{[^}]*grid-template-columns:\s*184px minmax\(0, 1fr\)/, "Desktop workspace must use the full 184px navigation at wide widths");
+assert.match(desktopMediumWorkspaceCss, /\.focus-workspace\s*\{[^}]*grid-template-columns:\s*72px minmax\(0, 1fr\)/, "Desktop workspace must collapse to icon navigation at medium widths");
+assert.match(desktopNarrowWorkspaceCss, /\.focus-workspace\s*\{[^}]*grid-template-columns:\s*64px minmax\(0, 1fr\)[^}]*overflow-x:\s*hidden/, "Desktop narrow workspace must keep its icon navigation without horizontal overflow");
+assert.match(desktopReducedMotionCss, /animation:\s*none !important/, "Desktop workspace must disable non-essential animation for reduced-motion users");
 assert.match(webStylesSource, /prefers-reduced-motion:\s*reduce/, "Web styles must honor reduced-motion preferences");
 const desktopThemedCss = sourceBetween(desktopCssSource, "\nbody,\n.login-shell", "\n@media (max-width: 960px)");
 assert.doesNotMatch(desktopThemedCss, /background:\s*#ffffff\b/, "Desktop tokenized theme layer must not fall back to hard-coded white backgrounds");
@@ -1101,7 +1103,7 @@ for (const token of [
   "cd TaskBridge\\deploy",
   "Copy-Item .env.local.example .env",
   "docker compose -f docker-compose.release.yml up -d",
-  "curl http://127.0.0.1:8000/ready",
+  "curl http://127.0.0.1:8080/ready",
 ]) {
   assert.match(webLocalTrialEnglishGuide, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `Web local trial English guide must include ${token}`);
 }
@@ -1598,7 +1600,7 @@ assert.doesNotMatch(
   "Android permanent delete failure must not tell users the delete was queued",
 );
 assert.match(androidSyncStatusBarSource, /SyncStatusMessage\.PurgeFailed/, "Android sync status bar must localize permanent-delete failure feedback");
-assert.match(androidTaskListSource, /if \(uiState\.syncMessage != SyncStatusMessage\.LocalCacheReady\)/, "Android task list should not reserve the main status bar for the normal healthy state");
+assert.match(androidTaskListSource, /if \(!localWorkspaceMode && uiState\.syncMessage != SyncStatusMessage\.LocalCacheReady\)/, "Android task list should hide online sync status in local mode and avoid reserving the main status bar for the normal healthy state");
 assert.match(androidI18nSource, /purge = "永久删除"/, "Android i18n must include permanent-delete copy");
 assert.match(androidTaskListSource, /pendingConflictAction/, "Android conflict actions must require confirmation before resolving");
 assert.match(androidTaskListSource, /ConflictActionConfirmationDialog/, "Android conflict resolution must explain the consequence before applying");
@@ -1808,7 +1810,7 @@ assert.match(
   "Deploy docs must provide a concrete first-account command for self-hosted production deployments",
 );
 assert.match(deployReadmeSource, /## 生产运维/, "Deploy docs must move monitoring and proxy trust details into a production operations section");
-assert.match(deployReadmeSource, /客户端填写服务器根地址[\s\S]{0,160}http:\/\/<服务器 IP 或域名>:8000[\s\S]{0,80}https:\/\/<域名>/, "Deploy connection docs must keep ordinary clients on the server root URL for HTTP or HTTPS");
+assert.match(deployReadmeSource, /客户端填写服务器根地址[\s\S]{0,160}http:\/\/<服务器 IP 或域名>:8080[\s\S]{0,80}https:\/\/<域名>/, "Deploy connection docs must keep ordinary clients on the unified server root URL for HTTP or HTTPS");
 assert.doesNotMatch(deployReadmeSource, /客户端使用：[\s\S]{0,80}https:\/\/<域名>\/api\/v1\//, "Deploy HTTPS docs must not tell ordinary clients to use the API path as the server URL");
 assertOrder(
   deployReadmeSource,
@@ -2315,9 +2317,19 @@ assert.match(
   /const connectionReady = await ensureConnectionReadyForAuth\(\);[\s\S]{0,120}if \(!connectionReady\) return;/,
   "Web login/register submit must automatically test the connection before authenticating",
 );
-assert.match(
+const webConnectionTestSource = sourceBetween(
   webAppSource,
-  /async function testConnection\(\)[\s\S]{0,900}return isConnectionReadyForAuth\(\);[\s\S]{0,700}catch \(error\)[\s\S]{0,700}return false;/,
+  "async function testConnection()",
+  "\nfunction persistTokens",
+);
+assert.match(
+  webConnectionTestSource,
+  /return isConnectionReadyForAuth\(\);/,
+  "Web connection test must return its successful readiness result for auth gating",
+);
+assert.match(
+  webConnectionTestSource,
+  /catch \(error\)[\s\S]*return false;/,
   "Web connection test must return a boolean result for auth gating",
 );
 assertOrder(
@@ -2495,34 +2507,34 @@ assert.match(
 );
 assert.match(
   desktopSettingsSource,
-  /settings\.navSyncRecovery[\s\S]{0,260}sectionId: "sync-recovery"[\s\S]{0,160}settings\.syncRecoveryCenter/,
+  /sectionId: "sync-recovery"[\s\S]{0,160}settings\.syncRecoveryCenter/,
   "Desktop settings navigation must include a direct sync recovery/support entry",
 );
 assert.match(
   desktopSettingsSource,
   /id="settings-sync-recovery"/,
-  "Desktop settings must expose an anchor for sync recovery/support details",
+  "Desktop settings must expose a stable sync recovery panel id",
 );
-assert.match(desktopSettingsSource, /nextTick/, "Desktop settings sync recovery jump must wait for the opened details to render");
+assert.doesNotMatch(desktopSettingsSource, /nextTick|scrollIntoView/, "Desktop settings category changes must not scroll through a hidden long page");
 assert.match(desktopSettingsSource, /const syncDiagnosticsOpen = ref\(false\)/, "Desktop settings must own sync diagnostics disclosure state");
 assert.match(
   desktopSettingsSource,
-  /sectionId === "sync-recovery"[\s\S]{0,180}syncDiagnosticsOpen\.value = true/,
-  "Desktop sync recovery navigation must open the diagnostics disclosure before scrolling",
+  /request\.sectionId === "sync-recovery"[\s\S]{0,120}syncDiagnosticsOpen\.value = true/,
+  "Desktop external sync recovery requests must open the diagnostics disclosure",
 );
 assert.match(
   desktopSettingsSource,
-  /:open="syncDiagnosticsOpen"/,
+  /v-model:diagnostics-open="syncDiagnosticsOpen"/,
   "Desktop sync diagnostics details must bind to the navigation-controlled open state",
 );
 assert.match(
-  desktopSettingsSource,
-  /function handleSyncDiagnosticsToggle\(event: Event\)/,
-  "Desktop settings must keep sync diagnostics manual toggles in sync through a typed handler",
+  desktopSettingsSyncRecoveryPanelSource,
+  /const diagnosticsOpen = defineModel<boolean>\("diagnosticsOpen"/,
+  "Desktop sync recovery panel must expose a typed diagnostics disclosure model",
 );
 assert.match(
-  desktopSettingsSource,
-  /@toggle="handleSyncDiagnosticsToggle"/,
+  desktopSettingsSyncRecoveryPanelSource,
+  /@toggle="onDiagnosticsToggle"/,
   "Desktop sync diagnostics details must keep manual toggles in sync",
 );
 
@@ -2848,7 +2860,7 @@ assert.match(desktopWorkspaceStatusBannerSource, /defineEmits<[\s\S]*retry:\s*\[
 assert.match(desktopWorkspaceStatusBannerSource, /aria-live="polite"/, "Desktop workspace status banner must announce changes politely");
 assert.match(desktopAppSource, /import \{ deriveWorkspaceStatus \} from "\.\.\/shared\/workspace-ui-policy"/, "Desktop app must import the shared workspace status policy");
 assert.match(desktopAppSource, /const workspaceStatus = computed\(\(\) =>[\s\S]{0,160}deriveWorkspaceStatus\(syncStore\.status, syncStore\.diagnostics\)/, "Desktop app must derive workspace status from sync state and diagnostics");
-assert.match(desktopAppSource, /<WorkspaceStatusBanner[\s\S]{0,160}v-if="workspaceStatus\.banner !== 'none'"/, "Desktop app must only render the workspace banner when it has a status to show");
+assert.match(desktopAppSource, /<WorkspaceStatusBanner[\s\S]{0,160}v-if="auth\.isAuthenticated && workspaceStatus\.banner !== 'none'"/, "Desktop app must only render an actionable workspace banner for authenticated sessions");
 for (const [name, source] of [
   ["Desktop all-tasks view", desktopTaskViewSource],
   ["Desktop Today view", desktopTodayViewSource],
@@ -2859,7 +2871,7 @@ assert.match(desktopI18nSource, /"sync\.offlineWorkspace"/, "Desktop i18n must i
 assert.match(desktopI18nSource, /"sync\.attentionWorkspace"/, "Desktop i18n must include attention workspace copy");
 assert.match(desktopI18nSource, /"sync\.retry"/, "Desktop i18n must include retry copy");
 assert.match(desktopI18nSource, /"sync\.details"/, "Desktop i18n must include sync details copy");
-assert.match(desktopI18nSource, /"settings\.navSyncRecovery": \{ "zh-CN": "同步问题", "en-US": "Sync issues" \}/, "Desktop settings navigation must use the shared sync-issues label");
+assert.doesNotMatch(desktopSettingsSource, /settings\.navSyncRecovery/, "Desktop settings navigation must not keep the old grouped sync label");
 assert.match(desktopI18nSource, /"settings\.syncRecoveryCenter": \{ "zh-CN": "同步问题", "en-US": "Sync issues" \}/, "Desktop sync recovery panel title must use the shared sync-issues label");
 assert.match(androidTaskListSource, /TaskFilterSummaryBar\(/, "Android task list must keep visible active-filter feedback near the list");
 assert.match(androidTaskListSource, /activeTaskFilterLabels\(/, "Android active-filter feedback must be derived through a focused helper");
@@ -2924,8 +2936,8 @@ assert.match(androidTaskListSource, /text = syncHealth\.title/, "Android task-li
 assert.match(androidTaskListSource, /text = syncHealth\.body/, "Android task-list sync health must always show the derived short body");
 assert.match(
   androidTaskListSource,
-  /if \(syncHealth\.needsAttention\) \{[\s\S]{0,180}TaskListSyncHealthBar/,
-  "Android task-list sync health must only interrupt the task workflow when an item needs attention",
+  /if \(!localWorkspaceMode && syncHealth\.needsAttention\) \{[\s\S]{0,180}TaskListSyncHealthBar/,
+  "Android task-list sync health must only interrupt an online task workflow when an item needs attention",
 );
 assert.match(androidI18nSource, /syncHealthAction/, "Android i18n must include task-list sync detail action copy");
 assert.match(androidI18nSource, /syncHealthTitle = "同步问题"/, "Android i18n must keep sync-problem wording consistent for settings and support surfaces");
@@ -3004,7 +3016,7 @@ assert.match(
 );
 assert.match(
   webLocalTrialGuideSource,
-  /Windows 桌面端[\s\S]{0,120}http:\/\/127\.0\.0\.1:8000/,
+  /Windows 桌面端[\s\S]{0,120}http:\/\/127\.0\.0\.1:8080/,
   "Web local-trial guide must give a plain same-computer Windows address",
 );
 assert.match(

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from "vue";
+import { ListChecks, SlidersHorizontal, X } from "lucide-vue-next";
 
 import AppToast from "../components/AppToast.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
@@ -30,6 +31,8 @@ const isSaving = ref(false);
 const editorSaveError = ref("");
 const editingTask = ref<TaskRecord | null>(null);
 const search = ref("");
+const taskSearchInput = useTemplateRef<HTMLInputElement>("taskSearchInput");
+const clearFiltersButton = useTemplateRef<HTMLButtonElement>("clearFiltersButton");
 type TaskFilter = "all" | "inbox" | "today" | "overdue" | "week" | "high" | "completed" | "pending" | "conflict" | "templates" | "trash";
 
 const filter = ref<TaskFilter>("all");
@@ -47,7 +50,9 @@ const {
   cancelRequestedAction,
 } = useConfirmDialog(() => settingsStore.language);
 
-const primaryFilterValues: TaskFilter[] = ["all", "today", "overdue", "completed"];
+type ActiveFilterKey = "filter" | "project" | "tag" | "search";
+type ActiveFilterItem = { key: ActiveFilterKey; label: string };
+
 const primaryFilterOptions = computed<Array<{ value: TaskFilter; label: string }>>(() => [
   { value: "all", label: settingsStore.t("nav.all") },
   { value: "today", label: settingsStore.t("nav.today") },
@@ -63,27 +68,21 @@ const secondaryFilterOptions = computed<Array<{ value: TaskFilter; label: string
   { value: "templates", label: settingsStore.t("task.template") },
   { value: "trash", label: settingsStore.t("task.trash") },
 ]);
-const secondaryFilter = computed<TaskFilter | "">({
-  get: () => (primaryFilterValues.includes(filter.value) ? "" : filter.value),
-  set: (value) => {
-    filter.value = value || "all";
-  },
-});
-const activeFilterLabels = computed(() => {
-  const labels: string[] = [];
+const activeFilterItems = computed<ActiveFilterItem[]>(() => {
+  const items: ActiveFilterItem[] = [];
   if (filter.value !== "all") {
     const option = [...primaryFilterOptions.value, ...secondaryFilterOptions.value].find((item) => item.value === filter.value);
-    if (option) labels.push(option.label);
+    if (option) items.push({ key: "filter", label: option.label });
   }
-  if (selectedProject.value) labels.push(`${settingsStore.t("task.project")}: ${selectedProject.value}`);
-  if (selectedTag.value) labels.push(`${settingsStore.t("task.tag")}: #${selectedTag.value}`);
+  if (selectedProject.value) items.push({ key: "project", label: `${settingsStore.t("task.project")}: ${selectedProject.value}` });
+  if (selectedTag.value) items.push({ key: "tag", label: `${settingsStore.t("task.tag")}: #${selectedTag.value}` });
   const keyword = search.value.trim();
   if (keyword) {
-    labels.push(settingsStore.language === "zh-CN" ? `搜索: ${keyword}` : `Search: ${keyword}`);
+    items.push({ key: "search", label: settingsStore.language === "zh-CN" ? `搜索: ${keyword}` : `Search: ${keyword}` });
   }
-  return labels;
+  return items;
 });
-const hasActiveFilters = computed(() => activeFilterLabels.value.length > 0);
+const hasActiveFilters = computed(() => activeFilterItems.value.length > 0);
 
 const filteredTasks = computed(() => {
   const keyword = search.value.trim().toLowerCase();
@@ -107,6 +106,7 @@ const completedFilteredTasks = computed(() =>
   sortCompletedTasksByRecency(filteredTasks.value.filter((task) => isCompletedStatus(task.status))),
 );
 const shouldGroupByCompletion = computed(() => filter.value !== "completed" && filter.value !== "trash");
+const selectionMode = ref(false);
 const selectedTaskIds = ref<Set<string>>(new Set());
 const selectableOpenTasks = computed(() =>
   filter.value === "trash"
@@ -117,7 +117,7 @@ const selectableOpenTasks = computed(() =>
 );
 const bulkActionTargets = computed(() => selectableOpenTasks.value.filter((task) => selectedTaskIds.value.has(task.localId)));
 const bulkActionCountLabel = computed(() =>
-  `${bulkActionTargets.value.length} ${settingsStore.t(filter.value === "trash" ? "task.selectedCountSuffix" : "task.openCountSuffix")}`,
+  `${bulkActionTargets.value.length} ${settingsStore.t("task.selectedCountSuffix")}`,
 );
 const canCreateIntoCurrentEmptyView = computed(
   () => createVisibleEmptyFilters.has(filter.value) && !selectedProject.value && !selectedTag.value && !search.value.trim(),
@@ -176,12 +176,39 @@ function openCreate(): void {
   editorOpen.value = true;
 }
 
-function resetTaskFilters(): void {
+async function resetTaskFilters(): Promise<void> {
   filter.value = "all";
   selectedProject.value = "";
   selectedTag.value = "";
   search.value = "";
   clearSelectedTasks();
+  await nextTick();
+  taskSearchInput.value?.focus();
+}
+
+function setTaskFilter(nextFilter: TaskFilter): void {
+  filter.value = nextFilter;
+  clearSelectedTasks();
+}
+
+async function clearActiveFilter(key: ActiveFilterKey): Promise<void> {
+  if (key === "filter") filter.value = "all";
+  if (key === "project") selectedProject.value = "";
+  if (key === "tag") selectedTag.value = "";
+  if (key === "search") search.value = "";
+  clearSelectedTasks();
+  await focusAfterActiveFilterRemoval();
+}
+
+async function focusAfterActiveFilterRemoval(): Promise<void> {
+  await nextTick();
+  (clearFiltersButton.value ?? taskSearchInput.value)?.focus();
+}
+
+async function clearSearch(): Promise<void> {
+  search.value = "";
+  await nextTick();
+  taskSearchInput.value?.focus();
 }
 
 function handleEmptyStateAction(): void {
@@ -278,18 +305,8 @@ async function purgeTask(task: TaskRecord): Promise<void> {
 
 async function completeVisibleTasks(): Promise<void> {
   if (bulkActionTargets.value.length === 0) return;
-  const count = bulkActionTargets.value.length;
-  if (
-    !(await requestConfirmation({
-      message: settingsStore.t("task.completeVisibleConfirm").replace("{count}", String(count)),
-      confirmText: settingsStore.t("task.completeVisible"),
-      danger: true,
-    }))
-  ) {
-    return;
-  }
   await taskStore.batchComplete(bulkActionTargets.value);
-  clearSelectedTasks();
+  exitSelectionMode();
   showNotice(settingsStore.t("task.feedbackBatchCompleted"), IMPORTANT_NOTICE_MS);
 }
 
@@ -306,7 +323,7 @@ async function deleteVisibleTasks(): Promise<void> {
     return;
   }
   await taskStore.batchDelete(bulkActionTargets.value);
-  clearSelectedTasks();
+  exitSelectionMode();
   showNotice(settingsStore.t("task.feedbackBatchDeleted"), IMPORTANT_NOTICE_MS);
 }
 
@@ -314,7 +331,7 @@ async function restoreSelectedTrashTasks(): Promise<void> {
   const count = bulkActionTargets.value.length;
   if (count === 0) return;
   await taskStore.batchRestore(bulkActionTargets.value);
-  clearSelectedTasks();
+  exitSelectionMode();
   showNotice(settingsStore.t("task.feedbackBatchRestored"), IMPORTANT_NOTICE_MS);
 }
 
@@ -331,7 +348,7 @@ async function purgeSelectedTrashTasks(): Promise<void> {
     return;
   }
   await taskStore.batchPurge(bulkActionTargets.value);
-  clearSelectedTasks();
+  exitSelectionMode();
   showNotice(settingsStore.t("task.feedbackBatchPurged"), IMPORTANT_NOTICE_MS);
 }
 
@@ -347,6 +364,16 @@ function setTaskSelected(task: TaskRecord, selected: boolean): void {
 
 function clearSelectedTasks(): void {
   selectedTaskIds.value = new Set();
+}
+
+function enterSelectionMode(): void {
+  selectionMode.value = true;
+  clearSelectedTasks();
+}
+
+function exitSelectionMode(): void {
+  clearSelectedTasks();
+  selectionMode.value = false;
 }
 
 async function resolveConflictUseServer(task: TaskRecord): Promise<void> {
@@ -438,88 +465,142 @@ function isoDate(value: string | null): string | null {
   <section class="view-shell">
     <header class="view-header">
       <div>
-        <p class="eyebrow">{{ settingsStore.t("task.allTitle") }}</p>
-        <h1>{{ taskStore.openTasks.length }} {{ settingsStore.t("task.openCountSuffix") }}</h1>
+        <h1>{{ settingsStore.t("task.allTitle") }}</h1>
+        <p class="view-subtitle">{{ taskStore.openTasks.length }} {{ settingsStore.t("task.openCountSuffix") }}</p>
       </div>
-      <button class="primary-button" type="button" @click="openCreate">{{ settingsStore.t("task.add") }}</button>
     </header>
 
-    <div class="toolbar search-toolbar">
-      <input
-        v-model="search"
-        type="search"
-        :aria-label="settingsStore.t('task.search')"
-        :placeholder="settingsStore.t('task.search')"
-      />
-      <button v-if="search.trim()" class="ghost-button" type="button" @click="search = ''">
-        {{ settingsStore.t("task.clearSearch") }}
-      </button>
-      <span>{{ settingsStore.t("task.completedCountPrefix") }} {{ taskStore.completedTasks.length }}</span>
+    <div class="task-command-bar">
+      <div class="task-search-field">
+        <input
+          ref="taskSearchInput"
+          v-model="search"
+          type="search"
+          :aria-label="settingsStore.t('task.search')"
+          :placeholder="settingsStore.t('task.search')"
+        />
+        <button
+          v-if="search.trim()"
+          class="icon-button"
+          type="button"
+          :aria-label="settingsStore.t('task.clearSearch')"
+          :title="settingsStore.t('task.clearSearch')"
+          @click="clearSearch"
+        >
+          <X :size="16" aria-hidden="true" />
+        </button>
+      </div>
+      <div class="task-command-actions">
+        <button
+          class="icon-button"
+          type="button"
+          :disabled="selectableOpenTasks.length === 0"
+          :aria-label="settingsStore.t('task.enterSelectionMode')"
+          :title="settingsStore.t('task.enterSelectionMode')"
+          @click="enterSelectionMode"
+        >
+          <ListChecks :size="17" aria-hidden="true" />
+        </button>
+        <button class="primary-button" type="button" @click="openCreate">{{ settingsStore.t("task.add") }}</button>
+      </div>
     </div>
 
-    <div class="filter-toolbar">
-      <div class="filter-strip" role="group" :aria-label="settingsStore.t('task.statusFilters')">
+    <div class="task-filter-toolbar">
+      <div class="segment-control task-filter-segments" role="group" :aria-label="settingsStore.t('task.statusFilters')">
         <button
           v-for="option in primaryFilterOptions"
           :key="option.value"
           type="button"
           :class="{ active: filter === option.value }"
           :aria-pressed="filter === option.value"
-          @click="filter = option.value"
+          @click="setTaskFilter(option.value)"
         >
           {{ option.label }}
         </button>
       </div>
-      <div class="filter-selects">
-        <select v-model="secondaryFilter" :aria-label="settingsStore.t('task.moreFilters')">
-          <option value="">{{ settingsStore.t("task.moreFilters") }}</option>
-          <option v-for="option in secondaryFilterOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-        </select>
-      </div>
-      <details class="filter-advanced-details">
-        <summary>{{ settingsStore.t("task.projectTagFilters") }}</summary>
-        <div class="filter-selects">
-          <select v-model="selectedProject" :aria-label="settingsStore.t('task.allProjects')">
-            <option value="">{{ settingsStore.t("task.allProjects") }}</option>
-            <option v-for="project in taskStore.projects" :key="project" :value="project">{{ project }}</option>
-          </select>
-          <select v-model="selectedTag" :aria-label="settingsStore.t('task.allTags')">
-            <option value="">{{ settingsStore.t("task.allTags") }}</option>
-            <option v-for="tag in taskStore.tags" :key="tag" :value="tag">#{{ tag }}</option>
-          </select>
+
+      <details class="filter-menu">
+        <summary :aria-label="settingsStore.t('task.moreFilters')">
+          <SlidersHorizontal :size="16" aria-hidden="true" />
+          <span>{{ settingsStore.t("task.moreFilters") }}</span>
+        </summary>
+        <div class="filter-menu-panel">
+          <section class="filter-menu-section">
+            <span class="filter-menu-label">{{ settingsStore.t("task.moreFilters") }}</span>
+            <button
+              v-for="option in secondaryFilterOptions"
+              :key="option.value"
+              type="button"
+              :class="{ active: filter === option.value }"
+              :aria-pressed="filter === option.value"
+              @click="setTaskFilter(option.value)"
+            >
+              {{ option.label }}
+            </button>
+          </section>
+          <section class="filter-menu-section">
+            <span class="filter-menu-label">{{ settingsStore.t("task.projectTagFilters") }}</span>
+            <div class="filter-selects">
+              <select
+                v-model="selectedProject"
+                :aria-label="settingsStore.t('task.allProjects')"
+                @change="clearSelectedTasks"
+              >
+                <option value="">{{ settingsStore.t("task.allProjects") }}</option>
+                <option v-for="project in taskStore.projects" :key="project" :value="project">{{ project }}</option>
+              </select>
+              <select
+                v-model="selectedTag"
+                :aria-label="settingsStore.t('task.allTags')"
+                @change="clearSelectedTasks"
+              >
+                <option value="">{{ settingsStore.t("task.allTags") }}</option>
+                <option v-for="tag in taskStore.tags" :key="tag" :value="tag">#{{ tag }}</option>
+              </select>
+            </div>
+          </section>
         </div>
       </details>
     </div>
 
     <div v-if="hasActiveFilters" class="active-filter-bar" aria-live="polite">
-      <span class="active-filter-label">{{ settingsStore.t("task.currentFilters") }}</span>
       <div class="active-filter-chips">
-        <span v-for="label in activeFilterLabels" :key="label" class="active-filter-chip">{{ label }}</span>
+        <button
+          v-for="item in activeFilterItems"
+          :key="item.key"
+          class="active-filter-chip"
+          type="button"
+          :aria-label="`${settingsStore.t('task.clearFilters')}: ${item.label}`"
+          @click="clearActiveFilter(item.key)"
+        >
+          <span>{{ item.label }}</span>
+          <X :size="14" aria-hidden="true" />
+        </button>
       </div>
-      <button class="text-button" type="button" @click="resetTaskFilters">
+      <button ref="clearFiltersButton" class="text-button" type="button" @click="resetTaskFilters">
         {{ settingsStore.t("task.clearFilters") }}
       </button>
     </div>
 
-    <div v-if="bulkActionTargets.length > 0" class="bulk-action-toolbar" role="group" :aria-label="settingsStore.t('task.bulkActions')">
+    <div v-if="selectionMode" class="bulk-action-toolbar" role="group" :aria-label="settingsStore.t('task.bulkActions')">
       <span>{{ bulkActionCountLabel }}</span>
       <template v-if="filter === 'trash'">
-        <button class="secondary-button" type="button" @click="restoreSelectedTrashTasks">
+        <button class="secondary-button" type="button" :disabled="bulkActionTargets.length === 0" @click="restoreSelectedTrashTasks">
           {{ settingsStore.t("task.restoreSelectedTrash") }}
         </button>
-        <button class="secondary-button danger-outline-button" type="button" @click="purgeSelectedTrashTasks">
+        <button class="secondary-button danger-outline-button" type="button" :disabled="bulkActionTargets.length === 0" @click="purgeSelectedTrashTasks">
           {{ settingsStore.t("task.purgeSelectedTrash") }}
         </button>
       </template>
       <template v-else>
-        <button class="secondary-button" type="button" @click="completeVisibleTasks">
+        <button class="secondary-button" type="button" :disabled="bulkActionTargets.length === 0" @click="completeVisibleTasks">
           {{ settingsStore.t("task.completeVisible") }}
         </button>
-        <button class="secondary-button danger-outline-button" type="button" @click="deleteVisibleTasks">
+        <button class="secondary-button danger-outline-button" type="button" :disabled="bulkActionTargets.length === 0" @click="deleteVisibleTasks">
           {{ settingsStore.t("task.deleteVisible") }}
         </button>
       </template>
-      <button class="text-button" type="button" @click="clearSelectedTasks">
+      <button class="text-button" type="button" @click="exitSelectionMode">
         {{ settingsStore.t("task.clearSelection") }}
       </button>
     </div>
@@ -549,6 +630,7 @@ function isoDate(value: string | null): string | null {
           :tasks="filteredTasks"
           trash
           selectable
+          :selection-mode="selectionMode"
           :selected-task-ids="selectedTaskIds"
           @selection-change="setTaskSelected"
           @restore="restoreTask"
@@ -561,6 +643,7 @@ function isoDate(value: string | null): string | null {
           :tasks="overdueFilteredTasks"
           tone="overdue"
           selectable
+          :selection-mode="selectionMode"
           :selected-task-ids="selectedTaskIds"
           @edit="openEdit"
           @selection-change="setTaskSelected"
@@ -580,6 +663,7 @@ function isoDate(value: string | null): string | null {
           :title="settingsStore.t('task.filterOpen')"
           :tasks="pendingOpenFilteredTasks"
           selectable
+          :selection-mode="selectionMode"
           :selected-task-ids="selectedTaskIds"
           @edit="openEdit"
           @selection-change="setTaskSelected"
