@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -9,8 +10,18 @@ import {
   normalizeLineEndings,
 } from "../scripts/script-helpers.mjs";
 
+const userExperienceCheckerSource = await readFile(
+  new URL("../scripts/check-user-experience-optimizations.mjs", import.meta.url),
+  "utf8",
+);
+
 test("source contract helpers normalize Windows and legacy line endings", () => {
   assert.equal(normalizeLineEndings("first\r\nsecond\rthird\nfourth"), "first\nsecond\nthird\nfourth");
+});
+
+test("the cross-client source checker normalizes every loaded file", () => {
+  assert.match(userExperienceCheckerSource, /normalizeLineEndings/);
+  assert.match(userExperienceCheckerSource, /\.map\(normalizeLineEndings\)/);
 });
 
 test("extractBalancedBlock stays inside the requested nested CSS block", () => {

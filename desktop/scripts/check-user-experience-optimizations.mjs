@@ -1,7 +1,7 @@
 ﻿import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { extractBalancedBlock, workspacePaths } from "./script-helpers.mjs";
+import { extractBalancedBlock, normalizeLineEndings, workspacePaths } from "./script-helpers.mjs";
 
 const { desktopRoot, repoRoot } = workspacePaths(import.meta.url);
 
@@ -104,7 +104,7 @@ const [
   syncDesignDocSource,
   versionSource,
   rootPackageSource,
-] = await Promise.all([
+] = (await Promise.all([
   readFile(resolve(repoRoot, "web/app.js"), "utf8"),
   readFile(resolve(repoRoot, "web/index.html"), "utf8"),
   readFile(resolve(repoRoot, "web/styles.css"), "utf8"),
@@ -186,7 +186,7 @@ const [
   readFile(resolve(repoRoot, "docs/sync-design.md"), "utf8"),
   readFile(resolve(repoRoot, "VERSION"), "utf8"),
   readFile(resolve(repoRoot, "package.json"), "utf8"),
-]);
+])).map(normalizeLineEndings);
 
 const desktopSettingsSurfaceSource = [
   desktopSettingsSource,
