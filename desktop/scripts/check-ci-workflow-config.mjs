@@ -108,6 +108,16 @@ assert.match(
   /TASKBRIDGE_SKIP_NATIVE_REBUILD:\s*"1"/,
   "release desktop npm ci must skip Electron native rebuild",
 );
+assert.match(
+  ciSource,
+  /- name: Rebuild Electron native dependencies[\s\S]{0,160}run: npm run rebuild:native/,
+  "CI must rebuild native dependencies for Electron after npm ci",
+);
+assert.match(
+  releaseSource,
+  /- name: Rebuild Electron native dependencies[\s\S]{0,160}run: npm run rebuild:native/,
+  "release must rebuild native dependencies for Electron after npm ci",
+);
 assert.match(releaseSource, /Release version must match VERSION/, "release workflow must reject tags that do not match VERSION");
 assert.match(ciSource, /^\s+android:\s*$/m, "CI workflow must include an Android job");
 assert.match(ciSource, /runs-on:\s+ubuntu-latest[\s\S]*working-directory:\s+android/, "CI Android job must run from android/");
@@ -159,9 +169,15 @@ console.log("CI workflow desktop check coverage passed");
 
 function assertDesktopCheckOrder(workflowName, source, terminalCommand) {
   const installIndex = source.indexOf("npm ci");
+  const nativeRebuildIndex = source.indexOf("npm run rebuild:native");
+  const unitTestIndex = source.indexOf("npm run test:unit");
   const terminalIndex = source.indexOf(terminalCommand);
   const webUnitTestIndex = source.indexOf("npm --prefix .. run test:web");
   assert.ok(installIndex >= 0, `${workflowName} workflow desktop job must install dependencies with npm ci`);
+  assert.ok(
+    nativeRebuildIndex > installIndex && nativeRebuildIndex < unitTestIndex,
+    `${workflowName} workflow must rebuild Electron native dependencies before desktop unit tests`,
+  );
   assert.ok(terminalIndex > installIndex, `${workflowName} workflow must run ${terminalCommand} after npm ci`);
   assert.ok(
     webUnitTestIndex > installIndex && webUnitTestIndex < terminalIndex,

@@ -363,6 +363,9 @@ jobs:
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
 
+      - name: Rebuild Electron native dependencies
+        run: npm run rebuild:native
+
       - name: Verify desktop endpoint config
         run: npm run check:desktop-endpoint-config
 
