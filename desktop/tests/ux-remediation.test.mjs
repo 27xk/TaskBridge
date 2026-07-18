@@ -4,11 +4,13 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { normalizeLineEndings } from "../scripts/script-helpers.mjs";
+
 const desktopRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const repoRoot = resolve(desktopRoot, "..");
 
 async function source(path) {
-  return readFile(resolve(repoRoot, path), "utf8");
+  return normalizeLineEndings(await readFile(resolve(repoRoot, path), "utf8"));
 }
 
 test("desktop navigation protects dirty task editors", async () => {

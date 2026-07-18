@@ -8,13 +8,14 @@ import {
   extractBalancedBlock,
   extractOpeningTag,
   hasLiteralBooleanAttribute,
+  normalizeLineEndings,
 } from "../scripts/script-helpers.mjs";
 
 const desktopRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const repoRoot = resolve(desktopRoot, "..");
 
 async function source(path) {
-  return readFile(resolve(repoRoot, path), "utf8");
+  return normalizeLineEndings(await readFile(resolve(repoRoot, path), "utf8"));
 }
 
 function sourceSection(value, startMarker, endMarker) {

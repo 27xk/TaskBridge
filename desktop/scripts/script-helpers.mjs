@@ -17,6 +17,10 @@ export function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+export function normalizeLineEndings(value) {
+  return String(value).replace(/\r\n?/g, "\n");
+}
+
 export function extractBalancedBlock(source, marker) {
   const markerIndex = findMarkerOutsideComments(source, marker);
   if (markerIndex < 0) throw new Error(`Missing block marker: ${marker}`);

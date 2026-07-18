@@ -6,7 +6,12 @@ import {
   extractOpeningTag,
   findUnexpectedRuntimeLogLines,
   hasLiteralBooleanAttribute,
+  normalizeLineEndings,
 } from "../scripts/script-helpers.mjs";
+
+test("source contract helpers normalize Windows and legacy line endings", () => {
+  assert.equal(normalizeLineEndings("first\r\nsecond\rthird\nfourth"), "first\nsecond\nthird\nfourth");
+});
 
 test("extractBalancedBlock stays inside the requested nested CSS block", () => {
   const css = `
