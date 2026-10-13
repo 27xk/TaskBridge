@@ -17,7 +17,7 @@
   "scripts": {
     "postinstall": "node ./scripts/rebuild-native.mjs",
     "predev": "node ./scripts/ensure-native.mjs",
-    "predist": "node ./scripts/ensure-native.mjs",
+    "predist": "node ./scripts/validate-release-endpoints.mjs && node ./scripts/ensure-native.mjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "dev": "electron-vite dev",
     "build": "vue-tsc --noEmit && electron-vite build",
@@ -73,6 +73,7 @@
     "electron-updater": "^6.8.3"
   },
   "devDependencies": {
+    "@tanstack/vue-virtual": "^3.13.40",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.9.0",
     "@vitejs/plugin-vue": "^5.2.1",

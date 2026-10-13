@@ -5,7 +5,7 @@ export interface ConnectionEndpoints {
 }
 
 export function normalizeServerUrl(value: string): string {
-  const trimmed = value.trim().replace(/\/+$/, "");
+  const trimmed = value.trim();
   if (!trimmed) throw new Error("server_url_required");
   const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   const url = new URL(candidate);
@@ -16,7 +16,7 @@ export function normalizeServerUrl(value: string): string {
   url.password = "";
   url.search = "";
   url.hash = "";
-  url.pathname = url.pathname.replace(/\/api\/v1\/?$/, "") || "/";
+  url.pathname = url.pathname.replace(/\/+$/, "").replace(/\/api\/v1$/, "") || "/";
   return url.toString().replace(/\/+$/, "");
 }
 
