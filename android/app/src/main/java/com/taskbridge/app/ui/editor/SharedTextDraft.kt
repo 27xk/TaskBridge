@@ -9,7 +9,7 @@ data class SharedTextEditorDraft(
 
 fun sharedTextToEditorDraft(text: String): SharedTextEditorDraft {
     val trimmed = text.trim()
-    if (trimmed.length <= MAX_SHARED_TITLE_LENGTH && !trimmed.contains('\n') && !trimmed.contains('\r')) {
+    if (trimmed.codePointLength() <= MAX_SHARED_TITLE_LENGTH && !trimmed.contains('\n') && !trimmed.contains('\r')) {
         return SharedTextEditorDraft(title = trimmed)
     }
 
@@ -19,8 +19,15 @@ fun sharedTextToEditorDraft(text: String): SharedTextEditorDraft {
         .firstOrNull(String::isNotBlank)
         .orEmpty()
     val title = firstLine
-        .ifBlank { trimmed.take(80).trim() }
-        .take(MAX_SHARED_TITLE_LENGTH)
+        .ifBlank { trimmed.takeCodePoints(80).trim() }
+        .takeCodePoints(MAX_SHARED_TITLE_LENGTH)
 
     return SharedTextEditorDraft(title = title, content = trimmed)
+}
+
+private fun String.codePointLength(): Int = codePointCount(0, length)
+
+private fun String.takeCodePoints(maxCodePoints: Int): String {
+    if (codePointLength() <= maxCodePoints) return this
+    return substring(0, offsetByCodePoints(0, maxCodePoints))
 }

@@ -19,7 +19,13 @@ object QuickAddParser {
     private val priorityRegex = Regex("""(?i)\bP([0-5])\b""")
     private val tagRegex = Regex("""#([\p{L}\p{N}_-]{1,32})""")
     private val projectRegex = Regex("""@([\p{L}\p{N}_-]{1,64})""")
-    private val timeRegex = Regex("""(?:(上午|下午|晚上|中午)\s*)?(\d{1,2})(?::(\d{2}))?\s*(点|:)?""")
+    private val dateTimeRegex = Regex(
+        """(今天|明天|后天|今晚)\s*(?:(上午|下午|晚上|中午)\s*)?(\d{1,2})(?::(\d{2}))?\s*(点|:)?(?=\s|$)""",
+    )
+    private val dateRegex = Regex("今天|明天|后天|今晚")
+    private val timeRegex = Regex(
+        """(?<![\p{L}\p{N}_])(?=(?:上午|下午|晚上|中午)\s*\d|\d{1,2}(?::\d{2}(?!\d)|\s*点))(?:(上午|下午|晚上|中午)\s*)?(\d{1,2})(?::(\d{2}))?\s*点?(?![\d:])""",
+    )
 
     fun parse(
         input: String,
@@ -38,34 +44,32 @@ object QuickAddParser {
         val project = projectRegex.find(working)?.groupValues?.getOrNull(1)
         working = working.replace(projectRegex, "").trim()
 
-        val date = when {
-            working.contains("后天") -> now.toLocalDate().plusDays(2)
-            working.contains("明天") -> now.toLocalDate().plusDays(1)
-            working.contains("今天") -> now.toLocalDate()
-            working.contains("今晚") -> now.toLocalDate()
-            else -> null
-        }
-        working = working
-            .replace("后天", "")
-            .replace("明天", "")
-            .replace("今天", "")
-            .replace("今晚", "")
-            .trim()
-
-        val timeMatch = timeRegex.find(working)
-        val parsedTime = timeMatch?.let { match ->
-            val period = match.groupValues.getOrNull(1).orEmpty()
-            val hourRaw = match.groupValues.getOrNull(2)?.toIntOrNull() ?: return@let null
-            val minute = match.groupValues.getOrNull(3)?.toIntOrNull() ?: 0
-            val hour = when {
-                period in listOf("下午", "晚上") && hourRaw < 12 -> hourRaw + 12
-                period == "中午" && hourRaw < 12 -> hourRaw + 12
-                else -> hourRaw
-            }.coerceIn(0, 23)
-            LocalTime.of(hour, minute.coerceIn(0, 59))
-        }
-        if (timeMatch != null) {
-            working = working.replace(timeMatch.value, "").trim()
+        val dateTimeMatch = dateTimeRegex.find(working)
+        val date: java.time.LocalDate?
+        val timeMatch: MatchResult?
+        val parsedTime: LocalTime?
+        if (dateTimeMatch != null) {
+            date = dateFromKeyword(dateTimeMatch.groupValues[1], now)
+            parsedTime = parseClock(
+                period = dateTimeMatch.groupValues.getOrNull(2).orEmpty(),
+                hourText = dateTimeMatch.groupValues.getOrNull(3).orEmpty(),
+                minuteText = dateTimeMatch.groupValues.getOrNull(4).orEmpty(),
+            )
+            timeMatch = dateTimeMatch
+            working = working.removeRange(dateTimeMatch.range).trim()
+        } else {
+            val dateMatch = dateRegex.find(working)
+            date = dateMatch?.let { dateFromKeyword(it.value, now) }
+            if (dateMatch != null) working = working.removeRange(dateMatch.range).trim()
+            timeMatch = timeRegex.find(working)
+            parsedTime = timeMatch?.let { match ->
+                parseClock(
+                    period = match.groupValues.getOrNull(1).orEmpty(),
+                    hourText = match.groupValues.getOrNull(2).orEmpty(),
+                    minuteText = match.groupValues.getOrNull(3).orEmpty(),
+                )
+            }
+            if (timeMatch != null) working = working.removeRange(timeMatch.range).trim()
         }
 
         val plannedDate = date?.format(DateTimeFormatter.ISO_LOCAL_DATE)
@@ -111,5 +115,25 @@ object QuickAddParser {
         if (match.groupValues.getOrNull(1).orEmpty().isNotBlank()) return false
         val hourRaw = match.groupValues.getOrNull(2)?.toIntOrNull() ?: return false
         return hourRaw in 1..11
+    }
+
+    private fun dateFromKeyword(keyword: String, now: LocalDateTime): java.time.LocalDate {
+        return when (keyword) {
+            "后天" -> now.toLocalDate().plusDays(2)
+            "明天" -> now.toLocalDate().plusDays(1)
+            else -> now.toLocalDate()
+        }
+    }
+
+    private fun parseClock(period: String, hourText: String, minuteText: String): LocalTime? {
+        if (hourText.isBlank()) return null
+        val hourRaw = hourText.toIntOrNull() ?: return null
+        val minute = minuteText.toIntOrNull() ?: 0
+        val hour = when {
+            period in listOf("下午", "晚上") && hourRaw < 12 -> hourRaw + 12
+            period == "中午" && hourRaw < 12 -> hourRaw + 12
+            else -> hourRaw
+        }.coerceIn(0, 23)
+        return LocalTime.of(hour, minute.coerceIn(0, 59))
     }
 }

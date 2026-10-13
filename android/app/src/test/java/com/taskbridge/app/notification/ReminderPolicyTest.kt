@@ -2,6 +2,7 @@ package com.taskbridge.app.notification
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.Instant
 
 class ReminderPolicyTest {
     @Test
@@ -9,6 +10,29 @@ class ReminderPolicyTest {
         assertEquals("2026-07-15T08:00:00Z", reminderTrigger("2026-07-15T08:00:00Z", "2026-07-15T09:00:00Z"))
         assertEquals("2026-07-15T09:00:00Z", reminderTrigger(null, "2026-07-15T09:00:00Z"))
         assertEquals(null, reminderTrigger(null, null))
+    }
+
+    @Test
+    fun futureSnoozeOverridesTheOldReminderUntilItExpires() {
+        val now = Instant.parse("2026-07-15T08:00:00Z")
+        assertEquals(
+            "2026-07-15T09:00:00Z",
+            reminderTrigger(
+                remindTime = "2026-07-15T08:30:00Z",
+                dueTime = "2026-07-15T10:00:00Z",
+                snoozedUntil = "2026-07-15T09:00:00Z",
+                now = now,
+            ),
+        )
+        assertEquals(
+            "2026-07-15T08:30:00Z",
+            reminderTrigger(
+                remindTime = "2026-07-15T08:30:00Z",
+                dueTime = "2026-07-15T10:00:00Z",
+                snoozedUntil = "2026-07-15T07:00:00Z",
+                now = now,
+            ),
+        )
     }
 
     @Test

@@ -27,19 +27,21 @@ fun isTaskOverdue(
     dueTime: String?,
     now: Instant,
     displayTimeZone: String = ShanghaiTime.DEFAULT_ZONE_ID,
+    snoozedUntil: String? = null,
 ): Boolean {
     if (TaskStatus.fromWire(statusWire) == TaskStatus.Completed) return false
+    if (ShanghaiTime.parseInstant(snoozedUntil)?.isAfter(now) == true) return false
     val dueLocal = ShanghaiTime.localDateTime(dueTime, displayTimeZone) ?: return false
     val nowLocal = now.atZone(ShanghaiTime.zone(displayTimeZone)).toLocalDateTime()
     return dueLocal.isBefore(nowLocal)
 }
 
 fun Task.isOverdueAt(now: Instant): Boolean {
-    return isTaskOverdue(status.wireName, dueTime, now)
+    return isTaskOverdue(status.wireName, dueTime, now, snoozedUntil = snoozedUntil)
 }
 
 fun Task.isOverdueAt(now: Instant, displayTimeZone: String): Boolean {
-    return isTaskOverdue(status.wireName, dueTime, now, displayTimeZone)
+    return isTaskOverdue(status.wireName, dueTime, now, displayTimeZone, snoozedUntil)
 }
 
 fun taskTimelineSortKey(
@@ -47,6 +49,7 @@ fun taskTimelineSortKey(
     dueTime: String?,
     plannedDate: String?,
     completedAt: String?,
+    snoozedUntil: String? = null,
     priority: Int,
     sortOrder: Int,
     updatedAt: String?,
@@ -58,20 +61,24 @@ fun taskTimelineSortKey(
     val plannedMillis = plannedDateStartMillis(plannedDate, displayTimeZone)
     val updatedAtMillis = ShanghaiTime.parseInstant(updatedAt)?.toEpochMilli()
     val completedAtMillis = ShanghaiTime.parseInstant(completedAt)?.toEpochMilli()
+    val snoozedUntilInstant = ShanghaiTime.parseInstant(snoozedUntil)
+    val isSnoozed = !isCompleted && snoozedUntilInstant?.isAfter(now) == true
     val completedRecencyMillis = completedAtMillis
         ?: updatedAtMillis
         ?: dueInstant?.toEpochMilli()
         ?: plannedMillis
-    val isOverdue = isTaskOverdue(statusWire, dueTime, now, displayTimeZone)
+    val isOverdue = isTaskOverdue(statusWire, dueTime, now, displayTimeZone, snoozedUntil)
     val scheduleRank = when {
-        isCompleted -> 4
+        isCompleted -> 5
+        isSnoozed -> 3
         isOverdue -> 0
         dueInstant != null -> 1
         plannedMillis != null -> 2
-        else -> 3
+        else -> 4
     }
     val scheduleMillis = when {
         isCompleted -> completedRecencyMillis?.let { -it } ?: Long.MAX_VALUE
+        isSnoozed -> snoozedUntilInstant?.toEpochMilli() ?: Long.MAX_VALUE
         dueInstant != null -> dueInstant.toEpochMilli()
         plannedMillis != null -> plannedMillis
         else -> Long.MAX_VALUE
@@ -97,6 +104,7 @@ fun List<Task>.sortedByTaskTimeline(
             dueTime = task.dueTime,
             plannedDate = task.plannedDate,
             completedAt = task.completedAt,
+            snoozedUntil = task.snoozedUntil,
             priority = task.priority,
             sortOrder = task.sortOrder,
             updatedAt = task.updatedAt,

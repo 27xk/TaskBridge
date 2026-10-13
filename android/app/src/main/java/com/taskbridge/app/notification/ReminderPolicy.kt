@@ -7,7 +7,16 @@ private val reminderRebuildActions = setOf(
     "android.intent.action.TIMEZONE_CHANGED",
 )
 
-fun reminderTrigger(remindTime: String?, dueTime: String?): String? {
+fun reminderTrigger(
+    remindTime: String?,
+    dueTime: String?,
+    snoozedUntil: String? = null,
+    now: java.time.Instant = java.time.Instant.now(),
+): String? {
+    val snooze = snoozedUntil?.takeIf { it.isNotBlank() }?.let { value ->
+        runCatching { java.time.Instant.parse(value) }.getOrNull()
+    }
+    if (snooze != null && snooze.isAfter(now)) return snoozedUntil
     return remindTime?.takeIf { it.isNotBlank() } ?: dueTime?.takeIf { it.isNotBlank() }
 }
 

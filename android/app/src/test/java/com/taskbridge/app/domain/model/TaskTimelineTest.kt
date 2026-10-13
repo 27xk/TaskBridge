@@ -60,6 +60,20 @@ class TaskTimelineTest {
     }
 
     @Test
+    fun futureSnoozedOverdueTasksMoveBehindActionableWork() {
+        val tasks = listOf(
+            task("snoozed-overdue", dueTime = "2026-05-20T07:00:00Z", snoozedUntil = "2026-05-20T10:00:00Z"),
+            task("upcoming", dueTime = "2026-05-20T09:00:00Z"),
+            task("planned", plannedDate = "2026-05-20"),
+        )
+
+        val sorted = tasks.sortedByTaskTimeline(now, "Asia/Shanghai")
+
+        assertEquals(listOf("upcoming", "planned", "snoozed-overdue"), sorted.map { it.localId })
+        assertFalse(tasks.first().isOverdueAt(now, "Asia/Shanghai"))
+    }
+
+    @Test
     fun sortsCompletedTasksByClosestRecentTimeFirst() {
         val tasks = listOf(
             task(
@@ -118,6 +132,7 @@ class TaskTimelineTest {
         dueTime: String? = null,
         plannedDate: String? = null,
         completedAt: String? = null,
+        snoozedUntil: String? = null,
         updatedAt: String = "2026-05-19T00:00:00Z",
     ): Task {
         return Task(
@@ -135,7 +150,7 @@ class TaskTimelineTest {
             repeatRule = null,
             plannedDate = plannedDate,
             completedAt = completedAt,
-            snoozedUntil = null,
+            snoozedUntil = snoozedUntil,
             parentServerId = null,
             checklistJson = "[]",
             isTemplate = false,
