@@ -16,28 +16,28 @@ const [rootReadme, desktopReadme, deployReadme, troubleshootingReadme, androidRe
 
 assert.match(
   rootReadme,
-  /桌面端安装后可以在「设置」里修改服务器地址/,
-  "README.md must explain installed desktop users can edit the server address in Settings",
+  /Windows 和 Android 发布包固定使用构建时写入的服务地址/,
+  "README.md must explain packaged endpoint configuration",
 );
 assert.match(
   rootReadme,
-  /Android 端可以在登录 \/ 注册页的「连接设置」或设置页修改服务器地址/,
-  "README.md must explain Android users can edit the server address before sign-in or in Settings",
+  /普通使用不需要配置服务器地址/,
+  "README.md must keep endpoint setup out of ordinary sign-in",
 );
 assert.match(
   deployReadme,
-  /桌面端可以在设置页修改服务器地址/,
-  "deploy/README.md must explain installed desktop users can edit the server address in Settings",
+  /发布版桌面和 Android 客户端固定使用构建时注入的 API \/ WebSocket 地址/,
+  "deployment docs must describe fixed release endpoints",
 );
 assert.match(
   troubleshootingReadme,
-  /桌面端可以在设置页直接修改服务器地址/,
-  "docs/troubleshooting.md must explain installed desktop users can edit the server address in Settings",
+  /普通用户无法在发布包内修改服务地址/,
+  "troubleshooting docs must direct endpoint changes to the publisher",
 );
 assert.match(
   androidReadme,
-  /安装后也可以在登录 \/ 注册页的「连接设置」或 App 设置页修改服务器地址/,
-  "android/README.md must describe installed Android endpoint edits as server address edits",
+  /Release 包固定使用构建地址/,
+  "Android docs must describe bundled endpoints",
 );
 for (const source of [rootReadme, deployReadme, troubleshootingReadme, androidReadme]) {
   assert.doesNotMatch(
@@ -45,7 +45,7 @@ for (const source of [rootReadme, deployReadme, troubleshootingReadme, androidRe
     /修改 API 地址和 WebSocket 地址|修改这两个地址/,
     "user-facing docs must not describe normal connection setup as editing two technical endpoints",
   );
-  assert.match(source, /服务器地址/, "user-facing docs must mention server address");
+  assert.match(source, /服务(?:器)?地址/, "docs must explain how the service address is provided");
 }
 assert.match(
   developmentReadme,
@@ -92,13 +92,13 @@ for (const script of [
 }
 assert.match(
   deployReadme,
-  /构建时注入的地址会作为首次启动默认值/,
-  "deploy/README.md must describe build-time desktop endpoints as editable defaults",
+  /服务入口变更后应重新构建并发布客户端/,
+  "deployment docs must require a new release when the endpoint changes",
 );
 assert.match(
   troubleshootingReadme,
-  /发布版会把构建时注入的地址作为默认值/,
-  "docs/troubleshooting.md must describe build-time desktop endpoints as editable defaults",
+  /如果发布包内置地址有误，更新仓库 Variables 并重新构建安装包/,
+  "troubleshooting docs must require rebuilding an incorrectly configured release",
 );
 assert.match(
   desktopReadme,

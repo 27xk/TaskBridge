@@ -26,11 +26,12 @@ assert.match(desktopStateSource, /FALLBACK_BASE_URL = ""/, "desktop runtime must
 assert.match(desktopStateSource, /FALLBACK_WS_URL = ""/, "desktop runtime must prompt for an unconfigured websocket address");
 assert.match(androidBuildSource, /TASKBRIDGE_BASE_URL", "https:\/\/taskbridge\.example\.invalid\/api\/v1\/"/, "Android fallback must be a non-routable HTTPS placeholder");
 assert.match(androidBuildSource, /TASKBRIDGE_WS_URL", "wss:\/\/taskbridge\.example\.invalid\/ws\/sync"/, "Android websocket fallback must be a non-routable WSS placeholder");
-assert.match(androidBuildSource, /releaseEndpointLooksPlaceholder/, "Android release build must reject placeholder endpoints");
+assert.match(androidBuildSource, /requiresSignedRelease && !releaseEndpointsValid/, "Android packaging must reject invalid or missing endpoints");
+assert.match(androidBuildSource, /validReleaseEndpoint\(taskBridgeBaseUrl/, "Android must validate the bundled API endpoint");
 assert.match(
   androidBuildSource,
   /manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*true/,
-  "Android builds must allow users to enter HTTP or WS endpoints at runtime",
+  "Android builds must support explicitly configured HTTP or WS deployments",
 );
 assert.doesNotMatch(
   androidBuildSource,

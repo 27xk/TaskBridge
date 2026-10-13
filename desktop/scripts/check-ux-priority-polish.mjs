@@ -71,6 +71,20 @@ assert.doesNotMatch(desktopOrdinaryEntry, /Docker|10\.0\.2\.2|局域网 IP|HTTPS
 const androidOrdinaryEntry = sourceBetween(androidReadmeSource, "## 普通用户入口", "## 开发者说明");
 assert.doesNotMatch(androidOrdinaryEntry, /Docker|10\.0\.2\.2|局域网 IP|HTTPS/, "Android ordinary entry must stay focused on download, server address, and login");
 
+const webOrdinaryAuthActionsSource = sourceBetween(webHtmlSource, '<div class="form-actions">', "</div>");
+const desktopOrdinaryAuthActionsSource = sourceBetween(
+  desktopLoginSource,
+  '<button class="primary-button" type="submit"',
+  '<details v-if="showAdvancedConnectionEntry"',
+);
+const desktopAdvancedConnectionSource = sourceBetween(
+  desktopLoginSource,
+  '<details v-if="showAdvancedConnectionEntry"',
+  "</details>",
+);
+const androidOrdinaryConnectionSource = sourceBetween(androidLoginSource, "            if (BuildConfig.DEBUG) AppPanel {", "                if (advancedConnectionOpen) {");
+const androidAdvancedConnectionSource = sourceBetween(androidLoginSource, "                if (advancedConnectionOpen) {", "                Text(\n                    text = strings.savedBeforeSignIn");
+
 assert.match(webHtmlSource, /class="mobile-quick-actions"/, "Web mobile sidebar must expose a compact quick-actions strip");
 assert.match(webHtmlSource, /id="mobileQuickCreateButton"/, "Web mobile quick actions must include a new-task shortcut");
 assert.match(webHtmlSource, /id="mobileQuickTaskListButton"/, "Web mobile quick actions must include a task-list shortcut");
@@ -78,18 +92,10 @@ assert.match(webAppSource, /mobileQuickCreateButton/, "Web app must bind the mob
 assert.match(webAppSource, /mobileQuickTaskListButton/, "Web app must bind the mobile task-list shortcut");
 assert.match(webStylesSource, /\.mobile-quick-actions/, "Web mobile quick actions must have a dedicated responsive style");
 
-assertOrder(
-  webHtmlSource,
-  'id="authSubmitButton"',
-  'id="testConnectionButton"',
-  "Web login must be the first primary auth action; checking connection is a secondary troubleshooting action",
-);
-assert.match(webHtmlSource, /id="authSubmitButton"[^>]*class="primary-button"/, "Web login submit button must be primary before a connection check has run");
-assert.match(webHtmlSource, /id="testConnectionButton"[^>]*class="secondary-button"/, "Web connection check must be visually secondary on the first screen");
-assert.match(webAppSource, /"auth\.loginAutoChecksConnection"/, "Web auth copy must explain that login automatically checks the connection");
+assert.match(webOrdinaryAuthActionsSource, /id="authSubmitButton"[^>]*class="primary-button"/, "Web login submit button must be the ordinary primary action");
+assert.doesNotMatch(webOrdinaryAuthActionsSource, /testConnectionButton/, "Web ordinary login actions must not include connection testing");
 assert.doesNotMatch(webAppSource, /setStatus\(nodes\.authMessage,\s*pendingHelp\)/, "Web registration availability help must not duplicate into the login result message");
-assert.match(webAppSource, /nodes\.authSubmitButton\.className = "primary-button"/, "Web auth render logic must keep login/register as the primary action");
-assert.match(webAppSource, /nodes\.testConnectionButton\.className = "secondary-button"/, "Web auth render logic must keep connection testing secondary");
+assert.doesNotMatch(webHtmlSource, /id="(?:serverBaseUrl|apiBaseUrl|advancedConnectionSettings)"/, "Web sign-in must not expose editable endpoints");
 assert.doesNotMatch(webAppSource, /nodes\.authSubmitButton\.className = isConnectionReadyForAuth/, "Web auth submit priority must not depend on a prior manual connection check");
 
 assert.match(webAppSource, /nodes\.taskSyncHealthBar\.hidden = tone === "ready"/, "Web task-list sync health must stay out of the way when sync is healthy");
@@ -103,7 +109,8 @@ assert.match(desktopAppSource, /v-if="auth\.isAuthenticated && workspaceStatus\.
 assert.match(desktopWorkspaceStatusBannerSource, /aria-live="polite"/, "Desktop workspace status banner must announce sync status changes politely");
 
 assert.doesNotMatch(desktopLoginSource, /authPrimaryActionReady/, "Desktop login priority must not depend on a prior manual connection check");
-assert.match(desktopLoginSource, /class="secondary-button"[\s\S]{0,360}settingsStore\.t\("settings\.checkAndSaveConnection"\)/, "Desktop connection check must be secondary");
+assert.doesNotMatch(desktopOrdinaryAuthActionsSource, /checkAndSaveConnection|settings\.checkAndSaveConnection/, "Desktop ordinary login actions must not include connection testing");
+assert.match(desktopAdvancedConnectionSource, /class="secondary-button"[\s\S]{0,360}settingsStore\.t\("settings\.checkAndSaveConnection"\)/, "Desktop connection testing must live in advanced troubleshooting");
 assert.match(desktopLoginSource, /class="primary-button" type="submit"/, "Desktop login submit must stay primary by default");
 
 assert.doesNotMatch(desktopLoginSource, /TaskBridge Docker 本机试用/, "Desktop login fallback copy must not lead with Docker terminology");
@@ -112,14 +119,16 @@ assert.doesNotMatch(desktopI18nSource, /同步异常恢复/, "Desktop sync recov
 assert.match(androidTaskListSource, /listToolsOpen/, "Android task list must let search and filters collapse behind a list tools control");
 assert.match(androidTaskListSource, /if \(!localWorkspaceMode && syncHealth\.needsAttention\) \{[\s\S]{0,180}TaskListSyncHealthBar/, "Android task-list sync health must only appear for online workspaces when action is needed");
 assert.doesNotMatch(androidLoginSource, /connectionReadyForAuth/, "Android login priority must not depend on a prior manual connection check");
+assert.doesNotMatch(androidOrdinaryConnectionSource, /viewModel\.testConnection\(\)/, "Android ordinary login actions must not include connection testing");
+assert.match(androidAdvancedConnectionSource, /viewModel\.testConnection\(\)/, "Android connection testing must live in advanced troubleshooting");
 assert.match(androidTaskListSource, /TaskListSyncHealthBar\([\s\S]{0,140}syncHealth = syncHealth/, "Android task list must render actionable sync health near the list");
 assert.match(androidEditorSource, /bottomBar = \{[\s\S]{0,260}EditorBottomActions/, "Android editor must keep save and cancel actions available at the bottom");
 assert.doesNotMatch(androidSettingsSource, /"Troubleshooting" else "问题排查"/, "Android settings navigation must use the shared sync-issues wording");
 assert.match(androidSettingsSource, /"Sync issues" else "同步问题"/, "Android settings navigation must use consistent sync-issues wording");
 
-assert.match(readmeSource, /登录会自动检查连接/, "README ordinary path must tell users that login automatically checks the connection");
-assert.match(userQuickStartSource, /登录会自动检查连接/, "ordinary quick start must tell users that login automatically checks the connection");
-assert.match(desktopReadmeSource, /登录会自动检查连接/, "desktop README ordinary entry must tell users that login automatically checks the connection");
-assert.match(androidReadmeSource, /登录会自动检查连接/, "Android README ordinary entry must tell users that login automatically checks the connection");
+assert.match(readmeSource, /普通使用不需要配置服务器地址/, "README must describe configured clients");
+assert.match(userQuickStartSource, /服务地址由 Web 访问入口或安装包决定/, "ordinary quick start must describe direct sign-in");
+assert.match(desktopReadmeSource, /服务地址已在构建时写入/, "desktop README must describe bundled endpoints");
+assert.match(androidReadmeSource, /服务地址已在构建时写入/, "Android README must describe bundled endpoints");
 
 console.log("priority UX polish check passed");

@@ -7,12 +7,15 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { inflateSync } from "node:zlib";
 
+import { measureDesktopGlass } from "./desktop-glass-benchmark.mjs";
 import { findUnexpectedRuntimeLogLines, workspacePaths } from "./script-helpers.mjs";
 
 const { desktopRoot, repoRoot } = workspacePaths(import.meta.url);
 const electronPath = resolve(desktopRoot, "node_modules/electron/dist/electron.exe");
 const mainPath = resolve(desktopRoot, "out/main/index.js");
-const screenshotDirectory = resolve(repoRoot, "docs/assets");
+const screenshotDirectory = process.env.TASKBRIDGE_VISUAL_OUTPUT
+  ? resolve(process.env.TASKBRIDGE_VISUAL_OUTPUT)
+  : resolve(repoRoot, "docs/assets");
 const apiRequests = [];
 const unexpectedApiPaths = new Set();
 const runtimeLogs = [];
@@ -43,6 +46,7 @@ async function main() {
     await cdp.send("Page.enable");
     await cdp.send("Runtime.enable");
     await cdp.send("Accessibility.enable");
+    await cdp.send("Page.bringToFront");
     await cdp.send("Emulation.setEmulatedMedia", {
       features: [{ name: "prefers-reduced-motion", value: "reduce" }],
     });
@@ -52,8 +56,36 @@ async function main() {
     await installDomHelpers();
     await loginThroughUserInterface();
 
+    if (process.argv.includes("--settings-only")) {
+      await verifySettingsWorkspace();
+      await assertNoRuntimeErrors();
+      return;
+    }
+
+    if (process.argv.includes("--benchmark")) {
+      await setWindowSize(1440, 1000);
+      const measurement = await measureDesktopGlass(cdp);
+      const gpuEnabled = process.env.TASKBRIDGE_ENABLE_GPU === "1";
+      const report = { recordedAt: new Date().toISOString(), gpuEnabled, renderingCapabilities: await cdp.evaluate("window.taskBridge.app.getRenderingCapabilities()"), versions: await cdp.evaluate("window.taskBridge.versions"), ...measurement };
+      await mkdir(screenshotDirectory, { recursive: true });
+      const filename = `desktop-glass-${gpuEnabled ? "gpu" : "software"}.json`;
+      await writeFile(join(screenshotDirectory, filename), JSON.stringify(report, null, 2), "utf8");
+      console.log(`${filename}: ${JSON.stringify(report.modes)}`);
+      await assertNoRuntimeErrors();
+      return;
+    }
+
     await verifyTodayWorkspace();
     await verifyAllTasksWorkspace();
+    if (process.argv.includes("--workflow")) {
+      const { verifyDesktopWorkflow } = await import("./desktop-workflow-check.mjs");
+      await verifyDesktopWorkflow(cdp, {
+        setWindowSize,
+        cdpPort,
+        connectCdp: (target) => CdpClient.connect(target.webSocketDebuggerUrl, target.id),
+        captureScreenshot: captureVerifiedScreenshot,
+      });
+    }
     await verifySettingsWorkspace();
     await verifyStatusAndMotionStates();
     await assertNoRuntimeErrors();
@@ -137,6 +169,8 @@ async function main() {
 
 function createApiServer() {
   const tasks = buildServerTasks();
+  let nextServerId = 1000;
+  const createdTaskIds = new Map();
   const user = {
     id: 1,
     username: "desktop-reviewer",
@@ -226,7 +260,7 @@ function createApiServer() {
         return sendEnvelope(response, {
           results: changes.map((change, index) => ({
             local_id: change.local_id,
-            server_id: 1000 + index,
+            server_id: change.server_id ?? (createdTaskIds.get(change.local_id) ?? (() => { const id = nextServerId++; createdTaskIds.set(change.local_id, id); return id; })()),
             action: change.action,
             status: "applied",
             version: Math.max(1, Number(change.version ?? 0) + 1),
@@ -347,6 +381,8 @@ function launchElectron(cdpPort) {
     [
       `--remote-debugging-port=${cdpPort}`,
       `--user-data-dir=${userDataDirectory}`,
+      // Interaction checks need deterministic timers even while the test terminal occludes the window.
+      ...(process.argv.includes("--workflow") ? ["--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"] : []),
       mainPath,
     ],
     {
@@ -435,7 +471,7 @@ async function assertNoRuntimeErrors() {
 
 async function loginThroughUserInterface() {
   await cdp.evaluate(`(() => {
-    window.__taskBridgeVisual.setValue('.auth-main-form input[autocomplete="email"]', 'desktop-reviewer');
+    window.__taskBridgeVisual.setValue('.auth-main-form input[autocomplete="username"]', 'desktop-reviewer');
     window.__taskBridgeVisual.setValue('.auth-main-form input[autocomplete="current-password"]', 'visual-check-password');
     window.__taskBridgeVisual.click('.auth-main-form button.primary-button[type="submit"]');
   })()`);
@@ -453,7 +489,7 @@ async function verifyTodayWorkspace() {
 
   const drawerMetrics = await cdp.evaluate(`(() => {
     const list = document.querySelector('.today-view .task-list');
-    const opener = document.querySelector('.today-view .view-header .primary-button');
+    const opener = document.querySelector('.today-view .workspace-quick-add button[type="button"]');
     window.__taskBridgeVisual.drawerOpener = opener;
     window.__taskBridgeVisual.listWidthBeforeDrawer = list.getBoundingClientRect().width;
     opener.focus();
@@ -461,6 +497,7 @@ async function verifyTodayWorkspace() {
     return { listWidth: window.__taskBridgeVisual.listWidthBeforeDrawer };
   })()`);
   await cdp.waitFor("Boolean(document.querySelector('.side-panel'))", "today editor drawer");
+  await cdp.waitFor("document.querySelector('.today-view .task-list').getBoundingClientRect().right <= document.querySelector('.side-panel').getBoundingClientRect().left", "wide details layout settlement");
   const drawerState = await cdp.evaluate(`(() => {
     const panel = document.querySelector('.side-panel');
     const list = document.querySelector('.today-view .task-list');
@@ -471,30 +508,30 @@ async function verifyTodayWorkspace() {
       right: rect.right,
       viewport: innerWidth,
       listWidth: list.getBoundingClientRect().width,
+      listRight: list.getBoundingClientRect().right,
+      panelLeft: rect.left,
+      viewWidth: document.querySelector(".today-view").getBoundingClientRect().width,
+      viewClass: document.querySelector(".today-view").className,
       titleFocused: document.activeElement === title,
     };
   })()`);
   assert.ok(drawerState.width <= 440.5, `wide drawer must not exceed 440px: ${drawerState.width}`);
   assert.ok(Math.abs(drawerState.right - drawerState.viewport) <= 1, "drawer must align with the workspace edge");
-  assert.ok(Math.abs(drawerState.listWidth - drawerMetrics.listWidth) <= 1, "drawer must overlay instead of shrinking the list");
+  assert.ok(drawerState.listRight <= drawerState.panelLeft, `wide details must sit beside the list: ${JSON.stringify({ before: drawerMetrics.listWidth, ...drawerState })}`);
+  assert.equal(await cdp.evaluate("document.querySelector('.side-panel').getAttribute('role')"), "complementary");
+  assert.equal(await cdp.evaluate("Boolean(document.querySelector('.drawer-scrim'))"), false);
   assert.equal(drawerState.titleFocused, true, "drawer must focus the title input");
 
   await setEditorTitle("未保存的焦点恢复验收草稿");
   await cdp.evaluate("window.__taskBridgeVisual.click('.side-panel .panel-header .ghost-button')");
-  await cdp.waitFor("Boolean(document.querySelector('.confirm-dialog'))", "discard confirmation");
-  assert.equal(await cdp.evaluate("Boolean(document.querySelector('.side-panel input').value)"), true);
-  await cdp.evaluate("window.__taskBridgeVisual.click('.confirm-dialog-actions .secondary-button')");
-  await cdp.waitFor("!document.querySelector('.confirm-dialog') && Boolean(document.querySelector('.side-panel'))", "discard cancellation");
-  assert.equal(
-    await cdp.evaluate("document.querySelector('.side-panel input[type=\"text\"]').value"),
-    "未保存的焦点恢复验收草稿",
-  );
-  await closeDirtyEditorAndConfirm();
-  assert.equal(
-    await cdp.evaluate("document.activeElement === window.__taskBridgeVisual.drawerOpener"),
-    true,
-    "drawer close must restore focus to its opener",
-  );
+  await cdp.waitFor("!document.querySelector('.side-panel')", "shared draft editor close");
+  assert.equal(await cdp.evaluate("document.querySelector('.workspace-quick-add input').value"), "未保存的焦点恢复验收草稿");
+  await cdp.evaluate("window.__taskBridgeVisual.click('.today-view .workspace-quick-add button[type=button]')");
+  await cdp.waitFor("Boolean(document.querySelector('.side-panel input'))", "shared draft reopen");
+  assert.equal(await cdp.evaluate("document.querySelector('.side-panel input[type=text]').value"), "未保存的焦点恢复验收草稿");
+  await cdp.evaluate("window.__taskBridgeVisual.click('.side-panel .panel-header .ghost-button')");
+  await cdp.waitFor("!document.querySelector('.side-panel')", "shared draft close");
+  assert.equal(await cdp.evaluate("document.activeElement === window.__taskBridgeVisual.drawerOpener"), true, "closing detail restores opener focus");
 
   await verifyEditorSaveFailurePreservesDraft();
   await verifySuccessToast();
@@ -506,7 +543,7 @@ async function verifyEditorSaveFailurePreservesDraft() {
     const taskStore = pinia._s.get('task');
     window.__taskBridgeVisual.originalAddTask = taskStore.addTask;
     taskStore.addTask = async () => { throw new Error('visual save failure'); };
-    const opener = document.querySelector('.today-view .view-header .primary-button');
+    const opener = document.querySelector('.today-view .workspace-quick-add button[type="button"]');
     window.__taskBridgeVisual.drawerOpener = opener;
     opener.focus();
     opener.click();
@@ -527,7 +564,9 @@ async function verifyEditorSaveFailurePreservesDraft() {
     const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
     pinia._s.get('task').addTask = window.__taskBridgeVisual.originalAddTask;
   })()`);
-  await closeDirtyEditorAndConfirm();
+  await cdp.evaluate("window.__taskBridgeVisual.click('.side-panel .panel-header .ghost-button')");
+  await cdp.waitFor("!document.querySelector('.side-panel')", "failed draft retained after close");
+  assert.equal(await cdp.evaluate("document.querySelector('.workspace-quick-add input').value"), "保存失败后必须保留的草稿");
 }
 
 async function verifySuccessToast() {
@@ -543,22 +582,23 @@ async function verifySuccessToast() {
 async function verifyAllTasksWorkspace() {
   await cdp.evaluate("window.__taskBridgeVisual.click('.nav-list button[aria-label=\"全部\"]')");
   await cdp.waitFor("document.querySelector('.view-header h1')?.textContent.trim() === '全部待办'", "all tasks view");
+  await verifyAllTasksResponsiveLayout();
   const metrics = await setWindowSize(1024, 768);
-  await assertWorkspaceLayout(72, metrics, "tasks-medium");
+  await assertWorkspaceLayout(184, metrics, "tasks-medium");
   await assertAccountMenuInsideViewport();
 
   assert.equal(await cdp.evaluate("Boolean(document.querySelector('.bulk-action-toolbar'))"), false);
   await cdp.evaluate("window.__taskBridgeVisual.click('.task-command-actions button[aria-label=\"批量选择任务\"]')");
   await cdp.waitFor("Boolean(document.querySelector('.bulk-action-toolbar')) && Boolean(document.querySelector('.task-selection-checkbox input'))", "selection mode");
   assert.equal(
-    await cdp.evaluate("[...document.querySelectorAll('.bulk-action-toolbar button.secondary-button')].every((button) => button.disabled)"),
+    await cdp.evaluate("[...document.querySelectorAll('.bulk-action-toolbar > button.secondary-button, .batch-schedule-actions > button.secondary-button')].every((button) => button.disabled)"),
     true,
     "selection actions must start disabled before a task is selected",
   );
   await cdp.evaluate("window.__taskBridgeVisual.click('.task-selection-checkbox input')");
   await cdp.waitFor("document.querySelector('.bulk-action-toolbar span')?.textContent.includes('1 条已选')", "selected task count");
   assert.equal(
-    await cdp.evaluate("[...document.querySelectorAll('.bulk-action-toolbar button.secondary-button')].every((button) => !button.disabled)"),
+    await cdp.evaluate("[...document.querySelectorAll('.bulk-action-toolbar > button.secondary-button, .batch-schedule-actions > button.secondary-button')].filter(window.__taskBridgeVisual.visible).every((button) => !button.disabled)"),
     true,
     "selection actions must enable after selecting a task",
   );
@@ -573,10 +613,10 @@ async function verifyAllTasksWorkspace() {
   await assertElementInsideViewport(".filter-menu-panel", "filter menu");
   await cdp.evaluate("window.__taskBridgeVisual.click('.filter-menu > summary')");
 
-  await cdp.evaluate("window.__taskBridgeVisual.click('.task-menu > summary')");
-  await cdp.waitFor("Boolean(document.querySelector('.task-menu[open] .task-menu-panel'))", "task menu");
+  await cdp.evaluate("window.__taskBridgeVisual.click('.task-menu-trigger')");
+  await cdp.waitFor("Boolean(document.querySelector('.task-menu-panel'))", "task menu");
   await assertElementInsideViewport(".task-menu-panel", "task menu");
-  await cdp.evaluate("window.__taskBridgeVisual.click('.task-menu > summary')");
+  await verifyTaskMenuDismissal();
 
   const longContentState = await cdp.evaluate(`(() => {
     const rows = [...document.querySelectorAll('.task-row')];
@@ -605,6 +645,45 @@ async function verifyAllTasksWorkspace() {
   await verifyNarrowTaskInteractions();
 }
 
+async function verifyAllTasksResponsiveLayout() {
+  const viewports = [
+    { width: 1440, height: 900, navLabelsVisible: true },
+    { width: 1024, height: 768, navLabelsVisible: true },
+    { width: 800, height: 700, navLabelsVisible: false },
+  ];
+
+  for (const viewport of viewports) {
+    await setWindowSize(viewport.width, viewport.height);
+    const responsiveState = await cdp.evaluate(`(() => {
+      const navLabels = [...document.querySelectorAll('.nav-list .nav-label')];
+      const taskEditEntries = [...document.querySelectorAll('.task-edit-trigger')];
+      return {
+        navLabelsVisible: navLabels.every((label) => window.__taskBridgeVisual.visible(label)),
+        horizontalOverflow: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth,
+        taskEditEntriesNamed: taskEditEntries.length > 0 && taskEditEntries.every((entry) =>
+          entry instanceof HTMLButtonElement &&
+          entry.type === 'button' &&
+          Boolean(entry.getAttribute('aria-label')?.trim())
+        ),
+      };
+    })()`);
+    assert.equal(
+      responsiveState.navLabelsVisible,
+      viewport.navLabelsVisible,
+      `${viewport.width}px navigation label visibility`,
+    );
+    assert.ok(
+      responsiveState.horizontalOverflow <= 1,
+      `${viewport.width}px all-tasks horizontal overflow: ${responsiveState.horizontalOverflow}`,
+    );
+    assert.equal(
+      responsiveState.taskEditEntriesNamed,
+      true,
+      `${viewport.width}px task edit entries must be named native buttons`,
+    );
+  }
+}
+
 async function verifyNarrowTaskInteractions() {
   const metrics = await setWindowSize(799, 700);
   await assertWorkspaceLayout(64, metrics, "tasks-narrow");
@@ -615,11 +694,40 @@ async function verifyNarrowTaskInteractions() {
   await assertNoUnnamedInteractiveControls("all tasks filter menu");
   await cdp.evaluate("window.__taskBridgeVisual.click('.filter-menu > summary')");
 
-  await cdp.evaluate("window.__taskBridgeVisual.click('.task-menu > summary')");
-  await cdp.waitFor("Boolean(document.querySelector('.task-menu[open] .task-menu-panel'))", "narrow task menu");
+  await cdp.evaluate("window.__taskBridgeVisual.click('.task-menu-trigger')");
+  await cdp.waitFor("Boolean(document.querySelector('.task-menu-panel'))", "narrow task menu");
   await assertElementInsideViewport(".task-menu-panel", "narrow task menu");
   await assertNoUnnamedInteractiveControls("all tasks task menu");
-  await cdp.evaluate("window.__taskBridgeVisual.click('.task-menu > summary')");
+  await cdp.evaluate("window.__taskBridgeVisual.click('.task-menu-trigger')");
+
+  await cdp.evaluate("window.__taskBridgeVisual.click('.task-command-actions button[aria-label=\"批量选择任务\"]')");
+  await cdp.waitFor("Boolean(document.querySelector('.bulk-action-toolbar')) && Boolean(document.querySelector('.task-row.selectable'))", "narrow selection mode");
+  const narrowSelectionState = await cdp.evaluate(`(() => {
+    const row = document.querySelector('.task-row.selectable');
+    const checkbox = row.querySelector('.task-selection-checkbox');
+    const body = row.querySelector('.task-body');
+    const actions = row.querySelector('.task-actions');
+    const rowRect = row.getBoundingClientRect();
+    const checkboxRect = checkbox.getBoundingClientRect();
+    const bodyRect = body.getBoundingClientRect();
+    const actionsRect = actions.getBoundingClientRect();
+    return {
+      rowInside: rowRect.left >= -1 && rowRect.right <= innerWidth + 1,
+      checkboxBeforeBody: checkboxRect.right <= bodyRect.left + 1,
+      bodyBeforeActions: bodyRect.right <= actionsRect.left + 1,
+      bodyWidth: bodyRect.width,
+      rowOverflow: row.scrollWidth - row.clientWidth,
+      horizontalOverflow: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth,
+    };
+  })()`);
+  assert.equal(narrowSelectionState.rowInside, true, "narrow selectable task row must stay inside the viewport");
+  assert.equal(narrowSelectionState.checkboxBeforeBody, true, "narrow selection checkbox must precede task content");
+  assert.equal(narrowSelectionState.bodyBeforeActions, true, "narrow task content must precede row actions");
+  assert.ok(narrowSelectionState.bodyWidth >= 180, `narrow selectable task body is too small: ${narrowSelectionState.bodyWidth}`);
+  assert.ok(narrowSelectionState.rowOverflow <= 1, `narrow selectable task row overflow: ${narrowSelectionState.rowOverflow}`);
+  assert.ok(narrowSelectionState.horizontalOverflow <= 1, `narrow selection horizontal overflow: ${narrowSelectionState.horizontalOverflow}`);
+  await cdp.evaluate("window.__taskBridgeVisual.click('.bulk-action-toolbar .text-button')");
+  await cdp.waitFor("!document.querySelector('.bulk-action-toolbar') && !document.querySelector('.task-row.selectable')", "narrow selection mode exit");
 
   const drawerMetrics = await cdp.evaluate(`(() => {
     const list = document.querySelector('.task-list');
@@ -665,7 +773,7 @@ async function verifySettingsWorkspace() {
   await cdp.evaluate("window.__taskBridgeVisual.click('.nav-list button[aria-label=\"设置\"]')");
   await cdp.waitFor("Boolean(document.querySelector('.settings-workspace'))", "settings view");
   const mediumMetrics = await setWindowSize(1024, 768);
-  await assertWorkspaceLayout(72, mediumMetrics, "settings-medium");
+  await assertWorkspaceLayout(184, mediumMetrics, "settings-medium");
   const mediumSettingsLayout = await cdp.evaluate(`(() => {
     const nav = document.querySelector('.settings-category-nav').getBoundingClientRect();
     const content = document.querySelector('.settings-content').getBoundingClientRect();
@@ -776,6 +884,8 @@ async function verifyStatusAndMotionStates() {
 }
 
 async function setWindowSize(width, height) {
+  await cdp.evaluate("window.taskBridge.window.openMain()");
+  await cdp.send("Page.bringToFront");
   await cdp.evaluate(`window.resizeTo(${width}, ${height}); true`);
   await cdp.waitFor(
     `outerWidth === ${width} && outerHeight === ${height}`,
@@ -806,6 +916,11 @@ async function assertWorkspaceLayout(expectedSidebarWidth, metrics, context) {
         const rect = button.getBoundingClientRect();
         return rect.left >= -1 && rect.right <= innerWidth + 1;
       }),
+      outsideControls: visibleButtons.filter((button) => {
+        const rect = button.getBoundingClientRect();
+        return rect.left < -1 || rect.right > innerWidth + 1;
+      }).map((button) => ({ text: button.textContent.trim().slice(0, 60), className: button.className,
+        left: button.getBoundingClientRect().left, right: button.getBoundingClientRect().right })),
       accountNameSingleLine:
         !window.__taskBridgeVisual.visible(accountName) ||
         (accountNameStyle.whiteSpace === 'nowrap' &&
@@ -818,7 +933,7 @@ async function assertWorkspaceLayout(expectedSidebarWidth, metrics, context) {
   assert.ok(Math.abs(state.sidebarWidth - expectedSidebarWidth) <= 0.5, `${context} sidebar width: ${state.sidebarWidth}`);
   assert.ok(state.shellOverflow <= 1, `${context} shell horizontal overflow: ${state.shellOverflow}`);
   assert.ok(state.documentOverflow <= 1, `${context} document horizontal overflow: ${state.documentOverflow}`);
-  assert.equal(state.controlsInside, true, `${context} controls must stay inside the viewport`);
+  assert.equal(state.controlsInside, true, `${context} controls must stay inside the viewport: ${JSON.stringify(state.outsideControls)}`);
   assert.equal(state.accountNameSingleLine, true, `${context} account name must stay on one line`);
   assert.equal(state.navigationIsVertical, true, `${context} primary navigation must remain vertical`);
   assert.equal(state.navigationButtonsUsable, true, `${context} primary navigation buttons must remain usable`);
@@ -844,13 +959,30 @@ async function assertAccountMenuInsideViewport() {
 
 async function assertElementInsideViewport(selector, label) {
   const rect = await cdp.evaluate(`(() => {
-    const value = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
-    return { left: value.left, top: value.top, right: value.right, bottom: value.bottom, width: value.width, height: value.height };
+    const element = document.querySelector(${JSON.stringify(selector)});
+    const value = element.getBoundingClientRect();
+    return { left: value.left, top: value.top, right: value.right, bottom: value.bottom, width: value.width, height: value.height,
+      inlineStyle: element.getAttribute('style'), computedLeft: getComputedStyle(element).left,
+      computedPosition: getComputedStyle(element).position, computedRight: getComputedStyle(element).right, visibility: document.visibilityState,
+      animations: element.getAnimations().map(animation => animation.effect?.getKeyframes()),
+      parent: element.parentElement.className, parentDisplay: getComputedStyle(element.parentElement).display };
   })()`);
   assert.ok(rect.left >= -1, `${label} left edge is outside the viewport: ${rect.left}`);
   assert.ok(rect.top >= -1, `${label} top edge is outside the viewport: ${rect.top}`);
-  assert.ok(rect.right <= (await cdp.evaluate("innerWidth")) + 1, `${label} right edge is outside the viewport: ${rect.right}`);
+  assert.ok(rect.right <= (await cdp.evaluate("innerWidth")) + 1, `${label} right edge is outside the viewport: ${JSON.stringify(rect)}`);
   assert.ok(rect.bottom <= (await cdp.evaluate("innerHeight")) + 1, `${label} bottom edge is outside the viewport: ${rect.bottom}`);
+}
+
+async function verifyTaskMenuDismissal() {
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await cdp.waitFor("!document.querySelector('.task-menu-panel')", "Escape closes task menu");
+  assert.equal(await cdp.evaluate("document.activeElement === document.querySelector('.task-menu-trigger')"), true, "Escape restores the task trigger");
+  await cdp.evaluate("window.__taskBridgeVisual.click('.task-menu-trigger')");
+  await cdp.waitFor("Boolean(document.querySelector('.task-menu-panel'))", "task menu reopened");
+  await cdp.evaluate("document.querySelector('.view-header').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))");
+  await cdp.waitFor("!document.querySelector('.task-menu-panel')", "outside press closes task menu");
+  assert.equal(await cdp.evaluate("document.activeElement === document.querySelector('.task-menu-trigger')"), true, "outside dismissal restores the task trigger");
 }
 
 async function assertNoUnnamedInteractiveControls(context) {

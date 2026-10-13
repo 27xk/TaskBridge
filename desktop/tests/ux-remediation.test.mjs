@@ -71,15 +71,16 @@ test("desktop settings connection drafts participate in navigation protection", 
   assert.match(i18n, /"settings\.discardConnectionChangesConfirm"/);
 });
 
-test("desktop task drawers implement modal keyboard and focus behavior once", async () => {
+test("desktop task drawers share adaptive modal and docked keyboard behavior", async () => {
   const [drawer, taskView, todayView] = await Promise.all([
     source("desktop/src/components/EditorDrawer.vue"),
     source("desktop/src/views/TaskView.vue"),
     source("desktop/src/views/TodayView.vue"),
   ]);
 
-  assert.match(drawer, /role="dialog"/);
-  assert.match(drawer, /aria-modal="true"/);
+  assert.match(drawer, /:role="docked \? 'complementary' : 'dialog'"/);
+  assert.match(drawer, /:aria-modal="docked \? undefined : true"/);
+  assert.match(drawer, /event\.key === "Tab" && !docked\.value/);
   assert.match(drawer, /event\.key === "Escape"/);
   assert.match(drawer, /trapDialogFocus/);
   assert.match(drawer, /previousActiveElement/);
@@ -116,7 +117,7 @@ test("desktop auth mode buttons use button-group semantics", async () => {
   assert.doesNotMatch(loginView, /role="tab(?:list)?"|aria-selected/);
 });
 
-test("desktop and web server fields let application code normalize missing protocols", async () => {
+test("development desktop fields accept address input while Web uses its deployed origin", async () => {
   const [desktopLogin, desktopConnection, webHtml] = await Promise.all([
     source("desktop/src/views/LoginView.vue"),
     source("desktop/src/components/settings/SettingsConnectionPanel.vue"),
@@ -125,7 +126,7 @@ test("desktop and web server fields let application code normalize missing proto
 
   assert.match(desktopLogin, /v-model\.trim="serverUrlDraft"[\s\S]{0,120}type="text"[\s\S]{0,120}inputmode="url"/);
   assert.doesNotMatch(desktopConnection, /type="url"/);
-  assert.match(webHtml, /id="serverBaseUrl"[\s\S]{0,160}type="text"[\s\S]{0,160}inputmode="url"/);
+  assert.doesNotMatch(webHtml, /id="serverBaseUrl"/);
 });
 
 test("desktop bootstrap leaves an unconfigured server visibly empty", async () => {
@@ -152,7 +153,7 @@ test("login forms put sign-in controls before optional setup guidance", async ()
   ]);
 
   assert.ok(desktopLogin.indexOf("auth-main-form") < desktopLogin.indexOf("first-use-guide"));
-  assert.ok(webHtml.indexOf('id="authForm"') < webHtml.indexOf('id="serverSetupHelp"'));
+  assert.doesNotMatch(webHtml, /id="serverSetupHelp"/);
   assert.ok(androidLogin.indexOf("SignInPanel(") < androidLogin.indexOf("FirstUseGuide("));
 });
 

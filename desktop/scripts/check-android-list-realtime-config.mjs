@@ -20,6 +20,8 @@ const [
   registerScreenSource,
   mainActivitySource,
   settingsScreenSource,
+  taskListDataSource,
+  taskListPagerSource,
 ] = await Promise.all([
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/data/repository/TaskRepository.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/sync/WebSocketClient.kt"), "utf8"),
@@ -35,12 +37,19 @@ const [
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/login/RegisterScreen.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/MainActivity.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/settings/SettingsScreen.kt"), "utf8"),
+  readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/data/local/TaskListDataSource.kt"), "utf8"),
+  readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/task/TaskListPager.kt"), "utf8"),
 ]);
 
-assert.match(taskRepositorySource, /ACTIVE_TASK_LIMIT = 5_000/, "Android active task list must not silently stop at 200");
-assert.match(taskRepositorySource, /TODAY_TASK_LIMIT = 5_000/, "Android today task list must not silently stop at 120");
-assert.match(taskRepositorySource, /SEARCH_TASK_LIMIT = 500/, "Android search should allow realistic result sets");
-assert.doesNotMatch(taskRepositorySource, /ACTIVE_TASK_LIMIT = 200|TODAY_TASK_LIMIT = 120/, "legacy Android task limits must be removed");
+assert.doesNotMatch(taskRepositorySource, /(?:ACTIVE|TODAY|SEARCH)_TASK_LIMIT/, "Android list and search must not use a fixed total limit");
+assert.match(taskRepositorySource, /fun observeTaskPage\(query: TaskListQuery\)/, "Android task lists must expose complete pagination");
+assert.match(taskRepositorySource, /TaskListDataSource\(database\)\.observe\(workspace\.id, query\)/, "Android pages must retain workspace isolation");
+assert.match(taskListDataSource, /visible AS \(SELECT \* FROM normalized WHERE \$where\)/, "Android filters and search must run before pagination");
+assert.match(taskListDataSource, /SELECT COUNT\(\*\) total/, "Android task counts must include the full filtered result");
+assert.match(taskListDataSource, /LIMIT \? OFFSET \?/, "Android task pages must use bounded SQL reads");
+assert.match(taskListPagerSource, /\.flatMapLatest\(load\)/, "Android view changes must cancel the previous page subscription");
+assert.match(taskListPagerSource, /WhileSubscribed\(stopTimeoutMillis = 0, replayExpirationMillis = 0\)/, "Android pages must release unused subscriptions immediately");
+assert.match(taskListScreenSource, /val page by viewModel\.page\.collectAsStateWithLifecycle\(\)/, "Android list screens must collect only the current page");
 
 assert.match(websocketSource, /private var reconnectJob: Job\? = null/, "Android websocket must track a reconnect job");
 assert.match(websocketSource, /private var reconnectAttempt = 0/, "Android websocket must track reconnect attempts");

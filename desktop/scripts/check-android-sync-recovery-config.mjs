@@ -45,8 +45,8 @@ for (const token of [
   "retryExhaustedSyncQueue",
   "syncRecoverySummaryText",
   "syncRecoveryRetryButtonText",
-  "syncManager.enqueueNetworkSync()",
-  "syncManager.syncNow()",
+  "syncManager.requestSync()",
+  "syncManager.requestSync(followUpIfRunning = true)",
 ]) {
   assert.match(settingsScreenSource, new RegExp(escapeRegExp(token)), `Android settings must expose ${token}`);
 }
