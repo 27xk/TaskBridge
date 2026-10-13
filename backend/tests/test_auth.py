@@ -33,6 +33,9 @@ def test_register_login_refresh_and_me(client: TestClient) -> None:
     login_body = login_response.json()
     assert login_body["code"] == 0
     assert login_body["data"]["access_token"]
+    assert login_response.cookies["taskbridge_refresh"] == login_body["data"]["refresh_token"]
+    assert "HttpOnly" in login_response.headers["set-cookie"]
+    assert "SameSite=lax" in login_response.headers["set-cookie"]
 
     refresh_response = client.post(
         "/api/v1/auth/refresh",
@@ -52,6 +55,39 @@ def test_register_login_refresh_and_me(client: TestClient) -> None:
 
     assert me_response.status_code == 200
     assert me_response.json()["data"]["email"] == "alice@example.com"
+
+
+def test_web_session_refreshes_from_cookie_and_logout_clears_it(client: TestClient) -> None:
+    login_response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "cookie-session",
+            "email": "cookie-session@example.com",
+            "password": "password123",
+            "device_id": "cookie-web",
+        },
+    )
+    pair = login_response.json()["data"]
+
+    refresh_response = client.post(
+        "/api/v1/auth/refresh",
+        json={"device_id": "cookie-web"},
+    )
+
+    assert refresh_response.status_code == 200
+    refreshed_pair = refresh_response.json()["data"]
+    assert refreshed_pair["access_token"]
+    assert refreshed_pair["refresh_token"] != pair["refresh_token"]
+
+    logout_response = client.delete(
+        "/api/v1/auth/session",
+        headers={"Authorization": f"Bearer {refreshed_pair['access_token']}"},
+    )
+
+    assert logout_response.status_code == 200
+    assert logout_response.json()["data"] == {"revoked": True}
+    assert "Max-Age=0" in logout_response.headers["set-cookie"]
+    assert client.post("/api/v1/auth/refresh", json={"device_id": "cookie-web"}).status_code == 401
 
 
 def test_current_user_can_change_password_and_revoke_other_sessions(client: TestClient) -> None:

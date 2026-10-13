@@ -377,14 +377,18 @@
             "title": "Device Id"
           },
           "refresh_token": {
-            "minLength": 16,
-            "title": "Refresh Token",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
           }
         },
-        "required": [
-          "refresh_token"
-        ],
         "title": "RefreshTokenRequest",
         "type": "object"
       },
@@ -2183,6 +2187,30 @@
           }
         },
         "summary": "Registration Status",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/session": {
+      "delete": {
+        "operationId": "logout_current_session_api_v1_auth_session_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Logout Current Session",
         "tags": [
           "auth"
         ]

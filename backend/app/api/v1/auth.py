@@ -28,6 +28,8 @@ from app.services.auth_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+REFRESH_COOKIE_NAME = "taskbridge_refresh"
+REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 
 @router.get("/registration")
@@ -47,7 +49,7 @@ def register(payload: UserCreate, request: Request, db: Session = Depends(get_db
         window_seconds=300,
     )
     token_pair = register_user(db, payload)
-    return api_success(token_pair, status_code=201)
+    return _token_response(token_pair, request, status_code=201)
 
 
 @router.post("/login")
@@ -60,7 +62,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         window_seconds=300,
     )
     token_pair = login_user(db, payload)
-    return api_success(token_pair)
+    return _token_response(token_pair, request)
 
 
 @router.post("/refresh")
@@ -72,8 +74,29 @@ def refresh(payload: RefreshTokenRequest, request: Request, db: Session = Depend
         limit=60,
         window_seconds=300,
     )
-    token_pair = refresh_token_pair(db, payload.refresh_token, payload.device_id)
-    return api_success(token_pair)
+    refresh_token = payload.refresh_token or request.cookies.get(REFRESH_COOKIE_NAME)
+    if not refresh_token:
+        raise AppException(status_code=401, message="invalid refresh token")
+    token_pair = refresh_token_pair(db, refresh_token, payload.device_id)
+    return _token_response(token_pair, request)
+
+
+@router.delete("/session")
+def logout_current_session(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_session: CurrentUserSession = Depends(get_current_user_session),
+):
+    revoke_refresh_session(db, current_session.user, current_session.refresh_token.id)
+    response = api_success({"revoked": True})
+    response.delete_cookie(
+        REFRESH_COOKIE_NAME,
+        path=REFRESH_COOKIE_PATH,
+        secure=request.url.scheme == "https",
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 @router.get("/me")
@@ -161,3 +184,17 @@ def create_ws_ticket(
             payload.device_id,
         ),
     )
+
+
+def _token_response(token_pair, request: Request, *, status_code: int = 200):
+    response = api_success(token_pair, status_code=status_code)
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        token_pair.refresh_token,
+        max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
+        path=REFRESH_COOKIE_PATH,
+        secure=request.url.scheme == "https",
+        httponly=True,
+        samesite="lax",
+    )
+    return response
