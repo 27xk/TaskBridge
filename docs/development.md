@@ -13,7 +13,7 @@ Web/PWA：http://127.0.0.1:8080
 后端 API：http://127.0.0.1:8000
 ```
 
-使用 Release Compose 让手机或其他电脑访问时，普通客户端填写统一入口：
+使用 Release Compose 让手机或其他电脑访问时，Web 从统一入口打开；Windows / Android 发布包在构建时写入对应服务地址：
 
 ```text
 http://192.168.1.10:8080
@@ -82,7 +82,7 @@ python -m http.server 8080 -d web
 http://127.0.0.1:8080
 ```
 
-需要在后端设置允许的浏览器来源。仅本机试用可以使用 `WEB_CORS_ORIGINS=*`，方便手机、局域网电脑和 Web/PWA 同时访问开发后端；正式部署不要使用通配来源。
+需要在后端设置允许的浏览器来源。仅本机试用可以使用 `WEB_CORS_ORIGINS=*`，方便手机、局域网电脑和 Web/PWA 同时访问开发后端；跨源 Web 页面会使用当前页面会话 Token，不依赖 Cookie 持久恢复。正式部署不要使用通配来源；若希望浏览器重开后免登录，优先让 Web 与 API 通过同一入口提供服务。
 
 明确来源示例：
 
@@ -91,7 +91,7 @@ WEB_CORS_ORIGINS=http://taskbridge.example.com
 WEB_CORS_ORIGINS=https://taskbridge.example.com
 ```
 
-Web/PWA 支持登录、注册、任务新建、编辑、完成、删除、恢复、搜索和同步状态查看。有效登录会话断网时，恢复联网后会自动同步；浏览器会话结束后可通过“继续离线使用”打开按“规范化 API 地址 + 用户 ID”隔离、且已写入 `cache_ready` 标记的 IndexedDB，并继续把修改写入队列，但恢复联网后必须重新登录才能上传。Windows 和 Android 在刷新会话被拒绝时也保留工作区身份，但会停止同步 Worker 和 WebSocket。旧版仅按用户 ID 分库的数据会迁移到当前服务器工作区。Web Token 只在 `sessionStorage`，`localStorage` 仅保存带 `api_base_url` 的最小离线身份摘要。
+Web/PWA 支持登录、注册、任务新建、编辑、完成、删除、恢复、搜索和同步状态查看。有效登录会话断网时，恢复联网后会自动同步；同源浏览器重开时优先通过服务端签发的 HttpOnly Refresh Cookie 恢复登录，多标签页通过临时广播和浏览器刷新锁共享轮换结果。Cookie 失效或被撤销后，可通过“继续离线使用”打开按“规范化 API 地址 + 用户 ID”隔离、且已写入 `cache_ready` 标记的 IndexedDB，并继续把修改写入队列，但恢复联网后必须重新登录才能上传。Windows 和 Android 在刷新会话被拒绝时也保留工作区身份，但会停止同步 Worker 和 WebSocket。旧版仅按用户 ID 分库的数据会迁移到当前服务器工作区。Web 当前页面 Token 只在 `sessionStorage`，`localStorage` 仅保存带 `api_base_url` 的最小离线身份摘要和主动退出抑制标记。
 
 ## 开发者技术栈
 

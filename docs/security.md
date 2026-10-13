@@ -17,13 +17,16 @@
 - 默认会写入基础安全响应头，减少浏览器端误用和嵌入风险。
 - `/metrics` 暴露 Prometheus 文本指标，至少包含按 method / path / status 标记的 HTTP 请求量、错误响应量和请求耗时直方图；生产或预发环境如果启用指标，必须配置 `METRICS_TOKEN`，采集时使用 `Authorization: Bearer <token>`。
 - `/api/v1/observability/client-error` 接收已登录客户端的错误上报，并在 `/metrics` 中计入 `taskbridge_client_error_reports_total`；上报载荷应包含客户端版本、路由、`trace_id`、在线状态、页面可见性、浏览器类型和脱敏后的错误堆栈，响应中的 `request_id` 用于和服务端日志关联。上报前会移除查询参数、hash、令牌和 token 类字段，避免把完整链接或认证信息写入日志。
-- Web/PWA 的 `access_token` 和 `refresh_token` 都只保存在 `sessionStorage`，不会写入 `localStorage`。任务草稿也仅保存在当前浏览器会话中，避免长期落盘保存用户可能输入的敏感内容。
-- 为提供“继续离线使用”，Web/PWA 会在 `localStorage` 保存最小离线身份摘要 `{id, username, email, api_base_url}`，仅用于选择“规范化 API 地址 + 用户 ID”对应的 IndexedDB；摘要不包含 Token、密码、角色或权限信息。这样可避免同一浏览器连接两套服务器、且两边用户 ID 相同时混用缓存。主动退出或清除此设备数据会删除该摘要。
+- Web/PWA 把当前页面使用的 `access_token` 和响应中的 `refresh_token` 保存在 `sessionStorage`，不会写入 `localStorage`。服务端还会把 Refresh Token 写入带 `HttpOnly`、`SameSite=Lax` 和限定认证路径的 Cookie，用于浏览器重开后恢复登录；JavaScript 无法读取该 Cookie。同源标签页通过 `BroadcastChannel` 临时同步轮换后的 Token 对，并用 `Web Locks` 串行刷新，避免普通多标签页并发被误判为 Token 重放；广播内容不落盘。浏览器不支持 Web Locks 时，页面会在 `localStorage` 保存短期刷新租约，仅包含锁名、随机 owner 和过期时间，不包含 Token。任务草稿仍仅保存在当前浏览器会话中，避免长期落盘保存用户可能输入的敏感内容。
+- Web/PWA 的同源认证请求使用 `credentials: include`，跨源请求使用 `credentials: omit`，避免与开发环境的 `WEB_CORS_ORIGINS=*` 组合时被浏览器拒绝；跨源当前页面仍通过 `sessionStorage` 中的 Token 工作。浏览器重开时，同源页面会用 HttpOnly Cookie 请求新 Token；主动退出会尝试调用 `DELETE /api/v1/auth/session` 撤销当前服务端会话并清除 Cookie。即使网络故障导致服务端未确认撤销，页面仍会完成本地退出，并明确提示撤销状态。离线退出无法联系服务器时会写入本地抑制标记，避免下次打开时自动恢复旧会话。
+- 为提供“继续离线使用”，Web/PWA 会在 `localStorage` 保存最小离线身份摘要 `{id, username, email, api_base_url}`，仅用于选择“规范化 API 地址 + 用户 ID”对应的 IndexedDB；摘要不包含 Token、密码、角色或权限信息。这样可避免同一浏览器连接两套服务器、且两边用户 ID 相同时混用缓存。主动退出或清除此设备数据会删除该摘要，并写入不含 Token 的持久会话抑制标记。标记按 API 地址、设备和用户限定，既能防止旧 Cookie 或迟到的标签页广播恢复已退出会话，也不会阻断同源另一账号仍然有效的当前标签页。
 - 离线恢复入口只会在摘要中的服务器与当前连接地址一致、对应 IndexedDB 已存在且写入 `cache_ready` 标记后显示。升级时会把旧版仅按用户 ID 命名的数据库迁移到当前服务器工作区，迁移完成后删除旧库。
-- “继续离线使用”只允许读取本机缓存并把修改写入本机队列，不代表恢复了在线身份。网络恢复后必须重新登录，队列才会发送到服务器。
+- “继续离线使用”只在持久 Cookie 无法恢复在线身份时开放，仅允许读取本机缓存并把修改写入本机队列。网络恢复后必须重新登录，队列才会发送到服务器。
 - Web/PWA 的任务快照和离线队列保存在浏览器 IndexedDB 中，并按规范化 API 地址和用户 ID 隔离。共享设备上的其他本机用户或具有浏览器配置访问权限的人可能读取这些数据；在公共设备上使用后应先确认队列已同步，再执行“清除此设备数据”。
+- “清除此设备数据”会先关闭并删除当前账号的 IndexedDB，再尝试撤销服务端会话，避免删除失败时误报清理完成。若其他 TaskBridge 标签页仍占用数据库，页面会等待连接释放后自动继续；撤销未获服务器确认时仍会清除本机数据，但会显示未确认提示。
 - Web/PWA 的生产静态托管应使用 HTTP 响应头下发 CSP 和基础安全头，参考 `web/_headers.example`；`web/index.html` 不再内嵌开发 CSP，避免把 `localhost` / `127.0.0.1` 连接策略误带到公开站点。
-- 限流默认只信任直连客户端 IP；只有 `TRUSTED_PROXY_IPS` 命中的反向代理才能提供 `X-Forwarded-For` / `X-Real-IP`。
+- 限流默认只信任直连客户端 IP；只有 `TRUSTED_PROXY_IPS` 命中的反向代理才能提供 `X-Forwarded-For` / `X-Real-IP`。容器入口还会把 `FORWARDED_ALLOW_IPS` 传给 Uvicorn，只有该列表中的代理能提供 `X-Forwarded-Proto`，确保 HTTPS 入口签发的 Refresh Cookie 带 `Secure`。
+- Release Compose 的内层 Nginx 为识别外层 TLS 会保留 `X-Forwarded-Proto`。生产环境必须把 Web 入口绑定到 `127.0.0.1:8080`，并由受控的外层代理覆盖该请求头；不要一边公开暴露内层 `8080`，一边透传客户端提供的协议头。本机试用和受控内网仍可直接使用 HTTP / WS。
 - CSV 导出会转义公式前缀，降低表格软件公式注入风险。
 - 生产环境启动时会拒绝默认 `JWT_SECRET` 和默认数据库密码。
 

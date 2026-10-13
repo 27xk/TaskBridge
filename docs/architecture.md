@@ -6,7 +6,7 @@ TaskBridge 由后端服务、Web/PWA、Android App 和 Windows 桌面端组成�
 
 - **后端服务：** 负责账号、设备、任务持久化、同步顺序、同步日志和 WebSocket 通知。
 - **Android App：** 负责移动端任务管理、本地缓存、后台同步、系统提醒和桌面小组件；会话失效后保留工作区身份，但不再调度同步或连接 WebSocket。
-- **Web/PWA：** 负责浏览器端任务查看、新建、编辑、搜索、完成、删除、恢复和后端同步状态查看；远程任务列表通过 `cursor_id` / `cursor_updated_at` 分页拉取，避免只展示第一页；通过按“规范化 API 地址 + 用户 ID”分库的 IndexedDB 保存任务快照和离线队列。浏览器会话结束后，只有当前服务器匹配且缓存已完成初始化时，才可用最小身份摘要重新打开本机缓存；必须重新登录后才会上传队列。
+- **Web/PWA：** 负责浏览器端任务查看、新建、编辑、搜索、完成、删除、恢复和后端同步状态查看；远程任务列表通过 `cursor_id` / `cursor_updated_at` 分页拉取，避免只展示第一页；通过按“规范化 API 地址 + 用户 ID”分库的 IndexedDB 保存任务快照和离线队列。同源页面浏览器重开时优先通过 HttpOnly Refresh Cookie 恢复在线会话；跨源请求不携带 Cookie，但当前页面仍使用 `sessionStorage` Token；Cookie 无法恢复时，只有当前服务器匹配且缓存已完成初始化，才可用最小身份摘要重新打开本机缓存，重新登录后才会上传队列。
 - **Windows 桌面端：** 负责桌面端任务管理、本地缓存、托盘、悬浮窗、全局快捷键和常驻 WebSocket；刷新会话被拒绝时只删除 Token，保留当前数据库工作区供本机模式继续使用。
 
 ## 架构原则
@@ -24,10 +24,11 @@ TaskBridge 由后端服务、Web/PWA、Android App 和 Windows 桌面端组成�
 11. Web/PWA 的远端刷新必须对当前筛选范围执行缓存对账：删除服务器已不再返回的陈旧快照，同时保留待同步和冲突记录。
 12. Android、Windows 和 Web 的本地数据库、同步队列与同步游标都以“规范化服务器 Origin + 用户 ID”作为工作区边界；切换任一项都必须切换工作区，不能复用上一服务器的数据。
 13. 直接创建任务使用稳定 `client_request_id`，离线重放不能因响应丢失产生重复任务。
+14. 重复任务后继由服务端按父任务 ID 幂等生成；客户端不为尚无 `server_id` 的任务自行创建后继。
 
 ## 跨端排序契约
 
-任务列表默认按“逾期、即将到期、计划日期、无时间、已完成”排序；完成状态读取时同时接受 `completed` 和历史别名 `done`，写入时统一写 canonical `completed`。`shared/task-timeline-fixtures.json` 是这套行为的共享测试向量：
+任务列表默认按“逾期、即将到期、计划日期、稍后、无时间、已完成”排序；未来的 `snoozed_until` 会暂时取消逾期状态。完成状态读取时同时接受 `completed` 和历史别名 `done`，写入时统一写 canonical `completed`。`shared/task-timeline-fixtures.json` 是这套行为的共享测试向量：
 
 - 后端通过 `backend/tests/test_task_timeline_fixtures.py` 验证 `/api/v1/tasks` 普通列表、cursor 分页、today 视图和 meta 计数。
 - Android 通过 `TaskTimelineTest` 和 `TodayTaskWidgetRepositoryTest` 验证领域排序和小组件 raw projection 排序。
@@ -121,7 +122,7 @@ Android 和 Windows 都需要按服务器与用户工作区分别维护：
 - 等待上传的本地变更队列。
 - 任务本地状态和同步状态。
 
-Web/PWA 只在当前浏览器会话中维护 Access Token 和 Refresh Token。`localStorage` 仅保存 `{id, username, email, api_base_url}` 最小身份摘要，用于重新定位该服务器和账号对应的 IndexedDB；数据库以规范化 API 地址和用户 ID 共同隔离，并用 `cache_ready` 元数据标记可恢复状态。旧版仅按用户 ID 命名的数据库会在首次读取时迁移。未重新登录时，本机修改只进入离线队列。
+Web/PWA 在当前浏览器会话的 `sessionStorage` 中维护页面使用的 Access Token 和 Refresh Token；同源请求同时通过限定认证路径的 HttpOnly Cookie 保存可轮换的 Refresh Token，使浏览器重开后可恢复在线会话。同源标签页通过 `BroadcastChannel` 接收同一次轮换的 Token 对，并用同一把 `Web Locks` 锁串行刷新；Token 广播只存在于页面内存，不写入持久存储。跨源请求使用 `credentials: omit`，避免通配 CORS 被浏览器拒绝，因此跨源页面关闭后需要重新登录。`localStorage` 仅保存 `{id, username, email, api_base_url}` 最小身份摘要和主动退出抑制标记，用于重新定位该服务器和账号对应的 IndexedDB；数据库以规范化 API 地址和用户 ID 共同隔离，并用 `cache_ready` 元数据标记可恢复状态。旧版仅按用户 ID 命名的数据库会在首次读取时迁移。Cookie 无法恢复且未重新登录时，本机修改只进入离线队列。
 
 Android 和 Windows 使用同样的会话 / 工作区分离原则：刷新令牌被服务器拒绝时清除加密 Token，但保留“服务器 Origin + 用户 ID”工作区身份；本机读写继续落在原 Room / SQLite 数据库。主动退出或切换服务器才清除工作区身份。同步管理器、后台 Worker 和 WebSocket 在 Access Token 为空时必须短路。
 

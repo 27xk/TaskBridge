@@ -43,6 +43,7 @@ python -m tools.openapi_contract --check
 POST /api/v1/auth/register
 POST /api/v1/auth/login
 POST /api/v1/auth/refresh
+DELETE /api/v1/auth/session
 GET  /api/v1/auth/me
 PUT  /api/v1/auth/password
 GET  /api/v1/auth/sessions
@@ -60,7 +61,8 @@ POST /api/v1/auth/ws-ticket
 - 删除设备会撤销该设备关联的 Refresh Token。
 - 用户可以查看当前账号的活跃 Refresh Token 会话，撤销单个会话，或按当前 `device_id` 一键撤销其他设备会话。
 - `PUT /api/v1/auth/password` 需要 `current_password` 和 `new_password`，成功后保留当前会话并撤销其他活跃会话。
-- `POST /api/v1/auth/refresh` 建议传入当前设备的 `device_id`，旧 Token 首次刷新时会补齐设备绑定。
+- `POST /api/v1/auth/refresh` 建议传入当前设备的 `device_id`，旧 Token 首次刷新时会补齐设备绑定。同源 Web/PWA 可省略请求体中的 `refresh_token`，由服务端读取限定认证路径的 HttpOnly Cookie；跨源 Web 应继续传入页面会话中的 `refresh_token`。
+- 注册、登录和刷新都会更新 Refresh Cookie；`DELETE /api/v1/auth/session` 撤销当前 Refresh Token 会话并清除该 Cookie。
 - WebSocket 建议使用短期 Ticket 建连，避免在 URL 中暴露长期 Access Token。
 
 注册请求示例：
@@ -80,6 +82,14 @@ POST /api/v1/auth/ws-ticket
 {
   "refresh_token": "<refresh_token>",
   "device_id": "android-001"
+}
+```
+
+Web/PWA 使用 Cookie 刷新时，请求体只需保留设备 ID，并携带浏览器凭据：
+
+```json
+{
+  "device_id": "web-browser-001"
 }
 ```
 

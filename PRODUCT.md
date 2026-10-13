@@ -27,7 +27,7 @@ Avoid marketing-first landing-page patterns inside the product UI, including ove
 - Hide complexity until it is useful: schedule, reminder, priority, template, repeat, and checklist controls should remain available without dominating the first screen.
 - Keep destructive or secondary actions out of the main path: completion and recovery are primary list actions; editing, template use, and deletion can sit behind a secondary menu.
 - Preserve self-hosting clarity: server setup and connection language should help non-developers choose the right entry point without duplicate decision trees.
-- Give regular users one server URL: Release Compose clients use the shared `8080` entry; direct API and WebSocket endpoints remain an advanced deployment option.
+- Keep endpoint configuration with the deployer: Web uses its same-origin gateway; packaged desktop and Android clients use build-time API and WebSocket addresses.
 - Keep healthy infrastructure quiet: sync panels should remain visible only when a user needs to make a decision or recover an item.
 - Make installed-version and update discovery available inside each packaged client instead of requiring users to infer it from filenames.
 
