@@ -19,6 +19,8 @@ import java.time.Instant
 
 private val syncRepositoryGson = Gson()
 
+data class SyncChanges(val workspaceId: String?, val localIds: Set<String>)
+
 class SyncRepository(
     private val apiService: ApiService,
     private val database: AppDatabase,
@@ -31,6 +33,7 @@ class SyncRepository(
         syncQueueDao,
         tokenDataStore,
     ),
+    private val onTasksChanged: suspend (workspaceId: String, localIds: Set<String>) -> Unit = { _, _ -> },
 ) {
     private companion object {
         const val PUSH_BATCH_SIZE = 100
@@ -38,12 +41,19 @@ class SyncRepository(
         const val PULL_PAGE_SIZE = 200
     }
 
-    suspend fun syncNow(deviceId: String): Result<Unit> {
+    suspend fun syncNow(deviceId: String): Result<SyncChanges> {
         return runCatching {
-            val workspace = activeWorkspace() ?: return@runCatching
-            ensureDeviceRegistered(deviceId, workspace)
-            pushPendingChanges(deviceId, workspace)
-            pullChanges(workspace)
+            val workspace = activeWorkspace() ?: return@runCatching SyncChanges(null, emptySet())
+            val changedIds = mutableSetOf<String>()
+            try {
+                ensureDeviceRegistered(deviceId, workspace)
+                pushPendingChanges(deviceId, workspace, changedIds)
+                pullChanges(workspace, changedIds)
+                SyncChanges(workspace.id, changedIds.toSet())
+            } finally {
+                // Earlier committed pages still need effects if a later network request fails.
+                if (changedIds.isNotEmpty()) onTasksChanged(workspace.id, changedIds)
+            }
         }
     }
 
@@ -71,10 +81,15 @@ class SyncRepository(
 
     suspend fun pullChanges() {
         val workspace = activeWorkspace() ?: return
-        pullChanges(workspace)
+        val changedIds = mutableSetOf<String>()
+        try {
+            pullChanges(workspace, changedIds)
+        } finally {
+            if (changedIds.isNotEmpty()) onTasksChanged(workspace.id, changedIds)
+        }
     }
 
-    private suspend fun pullChanges(workspace: WorkspaceIdentity) {
+    private suspend fun pullChanges(workspace: WorkspaceIdentity, changedIds: MutableSet<String>) {
         val lastSyncTime = tokenDataStore.lastSyncTimeFor(workspace) ?: "1970-01-01T00:00:00Z"
         var cursorUpdatedAt: String? = null
         var cursorId: Int? = null
@@ -89,26 +104,44 @@ class SyncRepository(
             ).data ?: return
 
             val remoteTasks = data.changedTasks + data.deletedTasks
-            val existingByServerId: Map<Int, TaskEntity> = if (remoteTasks.isEmpty()) {
-                emptyMap()
-            } else {
-                taskDao.getByServerIds(workspace.id, remoteTasks.map { it.id })
-                    .mapNotNull { entity -> entity.serverId?.let { serverId -> serverId to entity } }
-                    .toMap()
-            }
-            val entities = remoteTasks.map { remoteTask ->
-                remoteTask.toEntity(
-                    workspaceId = workspace.id,
-                    ownerUserId = workspace.userId,
-                    localId = existingByServerId[remoteTask.id]?.localId ?: remoteTaskLocalId(workspace, remoteTask.id),
-                    syncStatus = SyncStatus.Synced,
-                    lastSyncAt = data.serverTime,
-                )
-            }
-            if (entities.isNotEmpty()) {
-                database.withTransaction {
-                    taskDao.upsertAll(entities)
+            if (remoteTasks.isNotEmpty()) {
+                ensureWorkspaceUnchanged(workspace)
+                val pageChanges = database.withTransaction {
+                    val existingByServerId = taskDao.getByServerIds(workspace.id, remoteTasks.map { it.id })
+                        .mapNotNull { entity -> entity.serverId?.let { serverId -> serverId to entity } }
+                        .toMap()
+                    val entities = remoteTasks.map { remoteTask ->
+                        val existing = existingByServerId[remoteTask.id]
+                        if (existing != null && (remoteTask.version < existing.version ||
+                            (remoteTask.version == existing.version && shouldPreserveLocalTaskOnPull(existing)))) {
+                            // A pending edit is based on this acknowledged version, not a conflict with it.
+                            existing
+                        } else if (existing != null && shouldPreserveLocalTaskOnPull(existing)) {
+                            existing.copy(
+                                serverId = remoteTask.id,
+                                version = remoteTask.version,
+                                syncStatus = SyncStatus.Conflict.wireName,
+                                conflictServerJson = syncRepositoryGson.toJson(remoteTask),
+                                conflictLocalJson = existing.conflictLocalJson ?: syncRepositoryGson.toJson(existing),
+                                lastSyncAt = data.serverTime,
+                            )
+                        } else {
+                            remoteTask.toEntity(
+                                workspaceId = workspace.id,
+                                ownerUserId = workspace.userId,
+                                localId = existing?.localId ?: remoteTaskLocalId(workspace, remoteTask.id),
+                                syncStatus = SyncStatus.Synced,
+                                lastSyncAt = data.serverTime,
+                            )
+                        }
+                    }.filter { entity ->
+                        val previous = existingByServerId[entity.serverId]
+                        previous == null || entity.copy(lastSyncAt = previous.lastSyncAt) != previous
+                    }
+                    if (entities.isNotEmpty()) taskDao.upsertAll(entities)
+                    entities.map { it.localId }
                 }
+                changedIds += pageChanges
             }
 
             if (!data.hasMore) {
@@ -123,7 +156,7 @@ class SyncRepository(
         }
     }
 
-    private suspend fun pushPendingChanges(deviceId: String, workspace: WorkspaceIdentity) {
+    private suspend fun pushPendingChanges(deviceId: String, workspace: WorkspaceIdentity, changedIds: MutableSet<String>) {
         var processedBatches = 0
 
         while (processedBatches < MAX_PUSH_BATCHES) {
@@ -141,9 +174,37 @@ class SyncRepository(
             ensureWorkspaceUnchanged(workspace)
 
             val pendingByLocalId = pending.associateBy { it.localId }
+            val batchChanges = mutableSetOf<String>()
             database.withTransaction {
                 data.results.forEach { result ->
                     val queued = pendingByLocalId[result.localId] ?: return@forEach
+                    val currentQueue = syncQueueDao.getLatestForTask(workspace.id, result.localId) ?: return@forEach
+                    if (currentQueue.id != queued.id) {
+                        // The user replaced the sent snapshot while its response was in flight.
+                        // Keep every newer field and only advance the acknowledged server identity.
+                        if (result.status == "applied") {
+                            val current = taskDao.getByLocalId(workspace.id, result.localId) ?: return@forEach
+                            val serverId = result.serverId ?: result.task?.id ?: current.serverId
+                            val version = result.version ?: result.task?.version ?: current.version
+                            taskDao.upsert(current.copy(
+                                serverId = serverId,
+                                version = version,
+                                syncStatus = when {
+                                    currentQueue.action == "delete" -> SyncStatus.PendingDelete.wireName
+                                    serverId == null -> SyncStatus.PendingCreate.wireName
+                                    else -> SyncStatus.PendingUpdate.wireName
+                                },
+                                lastSyncAt = data.serverTime,
+                            ))
+                            syncQueueDao.enqueue(currentQueue.copy(
+                                serverId = serverId,
+                                version = version,
+                                action = if (currentQueue.action == "create" && serverId != null) "update" else currentQueue.action,
+                            ))
+                            batchChanges += result.localId
+                        }
+                        return@forEach
+                    }
                     when (result.status) {
                         "applied" -> {
                             result.task?.let { task ->
@@ -165,6 +226,7 @@ class SyncRepository(
                                 syncedAt = data.serverTime,
                             )
                             syncQueueDao.deleteById(workspace.id, queued.id)
+                            batchChanges += result.localId
                         }
 
                         "conflict" -> {
@@ -196,6 +258,7 @@ class SyncRepository(
                                 } ?: taskDao.updateSyncStatus(workspace.id, result.localId, SyncStatus.Conflict.wireName)
                             }
                             syncQueueDao.deleteById(workspace.id, queued.id)
+                            batchChanges += result.localId
                         }
 
                         "failed" -> {
@@ -212,12 +275,14 @@ class SyncRepository(
                                 taskDao.updateSyncStatus(workspace.id, result.localId, SyncStatus.Failed.wireName)
                             }
                             syncQueueDao.incrementAttempt(workspace.id, queued.id)
+                            batchChanges += result.localId
                         }
 
                         else -> syncQueueDao.incrementAttempt(workspace.id, queued.id)
                     }
                 }
             }
+            changedIds += batchChanges
 
             processedBatches += 1
             if (pending.size < PUSH_BATCH_SIZE) return

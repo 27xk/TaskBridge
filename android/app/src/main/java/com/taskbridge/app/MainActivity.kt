@@ -8,12 +8,15 @@ import android.os.Build
 import android.os.Bundle
 import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
@@ -119,8 +122,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val container = AppContainer(applicationContext)
-        container.reminderManager.ensureChannel()
+        enableEdgeToEdge()
+        val container = appContainer
         TodayTaskWidgetUpdateWorker.enqueue(this)
         val widgetLaunchHandled = savedInstanceState?.getBoolean(WIDGET_LAUNCH_HANDLED_STATE_KEY) == true
         widgetLaunchState = mutableStateOf(
@@ -322,8 +325,7 @@ fun TaskBridgeApp(
                         val imported = container.taskRepository.importBackupJson(pendingBackupText)
                         if (imported > 0) {
                             TodayTaskWidgetUpdateWorker.enqueue(appContext)
-                            container.syncManager.enqueueNetworkSync()
-                            container.syncManager.syncNow()
+                            container.syncManager.requestSync(followUpIfRunning = true)
                         }
                         sharedTextState.value = null
                     }
@@ -620,8 +622,7 @@ private fun TaskBridgeNavHost(
                 onEditClick = { navController.navigate(Routes.editTask(it)) },
                 onTaskChanged = {
                     TodayTaskWidgetUpdateWorker.enqueue(context.applicationContext)
-                    container.syncManager.enqueueNetworkSync()
-                    container.syncManager.syncNow()
+                    container.syncManager.requestSync(followUpIfRunning = true)
                 },
             )
         }
@@ -802,7 +803,22 @@ private fun ForegroundWebSocketLifecycle(container: AppContainer) {
 
 @Composable
 private fun TaskBridgeTheme(content: @Composable () -> Unit) {
-    val colors = lightColorScheme(
+    val colors = if (isSystemInDarkTheme()) darkColorScheme(
+        primary = Color(0xFF79D1BC),
+        onPrimary = Color(0xFF00382E),
+        primaryContainer = Color(0xFF155044),
+        onPrimaryContainer = Color(0xFFA0F2DB),
+        secondary = Color(0xFFB4CCC5),
+        onSecondary = Color(0xFF203532),
+        tertiary = Color(0xFFE4C17A),
+        surface = Color(0xFF111917),
+        surfaceVariant = Color(0xFF26322F),
+        background = Color(0xFF0D1513),
+        onSurface = Color(0xFFE0E9E5),
+        onSurfaceVariant = Color(0xFFB6C9C2),
+        outline = Color(0xFF81918C),
+        outlineVariant = Color(0xFF3D4A46),
+    ) else lightColorScheme(
         primary = Color(0xFF116C5B),
         onPrimary = Color.White,
         primaryContainer = Color(0xFFD8EFE9),

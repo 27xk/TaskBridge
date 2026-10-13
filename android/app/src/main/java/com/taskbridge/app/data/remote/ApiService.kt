@@ -155,7 +155,10 @@ interface ApiService {
     ): ApiEnvelope<TaskDto>
 
     @POST("tasks/{task_id}/next-occurrence")
-    suspend fun createNextOccurrence(@Path("task_id") taskId: Int): ApiEnvelope<TaskDto>
+    suspend fun createNextOccurrence(
+        @Path("task_id") taskId: Int,
+        @Header(INTERNAL_WORKSPACE_HEADER) expectedWorkspaceId: String? = null,
+    ): ApiEnvelope<TaskDto>
 
     @POST("tasks/templates/{template_id}/instantiate")
     suspend fun instantiateTemplate(

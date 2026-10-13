@@ -3,6 +3,7 @@ package com.taskbridge.app.ui.login
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.taskbridge.app.BuildConfig
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.datastore.deriveNetworkEndpoints
 import com.taskbridge.app.data.datastore.inferServerBaseUrlFromApi
@@ -173,8 +174,7 @@ class RegisterViewModel(
             }
             authRepository.register(state.username.trim(), state.email.trim(), state.password)
                 .onSuccess {
-                    syncManager.enqueueNetworkSync()
-                    syncManager.syncNow()
+                    syncManager.requestSync()
                     syncManager.connectForegroundWebSocket()
                     onSuccess()
                 }
@@ -220,6 +220,14 @@ class RegisterViewModel(
 
     private fun resolveConnectionStateOrReport(resetRegistrationStatus: Boolean = true): RegisterUiState? {
         val current = _uiState.value
+        if (!BuildConfig.DEBUG) {
+            return current.copy(
+                serverBaseUrl = inferServerBaseUrlFromApi(BuildConfig.TASKBRIDGE_BASE_URL),
+                apiBaseUrl = BuildConfig.TASKBRIDGE_BASE_URL,
+                webSocketUrl = BuildConfig.TASKBRIDGE_WS_URL,
+                advancedEndpointsEdited = false,
+            )
+        }
         if (!current.advancedEndpointsEdited) {
             return applyServerBaseUrlOrReport(resetRegistrationStatus)
         }
@@ -251,6 +259,7 @@ class RegisterViewModel(
     }
 
     private suspend fun saveConnectionStateOrReport(state: RegisterUiState): Boolean {
+        if (!BuildConfig.DEBUG) return true
         return runCatching {
             if (state.advancedEndpointsEdited) {
                 tokenDataStore.saveNetworkEndpoints(state.apiBaseUrl, state.webSocketUrl)

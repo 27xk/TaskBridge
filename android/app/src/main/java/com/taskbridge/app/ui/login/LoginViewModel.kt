@@ -3,6 +3,7 @@ package com.taskbridge.app.ui.login
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.taskbridge.app.BuildConfig
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.datastore.deriveNetworkEndpoints
 import com.taskbridge.app.data.datastore.inferServerBaseUrlFromApi
@@ -98,6 +99,7 @@ class LoginViewModel(
     }
 
     fun saveConnectionSettings() {
+        if (!BuildConfig.DEBUG) return
         viewModelScope.launch {
             val state = resolveConnectionStateOrReport(resetRegistrationStatus = false) ?: return@launch
             saveConnectionStateOrReport(state)
@@ -169,8 +171,7 @@ class LoginViewModel(
             }
             authRepository.login(state.usernameOrEmail.trim(), state.password)
                 .onSuccess {
-                    syncManager.enqueueNetworkSync()
-                    syncManager.syncNow()
+                    syncManager.requestSync()
                     syncManager.connectForegroundWebSocket()
                     onSuccess()
                 }
@@ -216,6 +217,14 @@ class LoginViewModel(
 
     private fun resolveConnectionStateOrReport(resetRegistrationStatus: Boolean = true): LoginUiState? {
         val current = _uiState.value
+        if (!BuildConfig.DEBUG) {
+            return current.copy(
+                serverBaseUrl = inferServerBaseUrlFromApi(BuildConfig.TASKBRIDGE_BASE_URL),
+                apiBaseUrl = BuildConfig.TASKBRIDGE_BASE_URL,
+                webSocketUrl = BuildConfig.TASKBRIDGE_WS_URL,
+                advancedEndpointsEdited = false,
+            )
+        }
         if (!current.advancedEndpointsEdited) {
             return applyServerBaseUrlOrReport(resetRegistrationStatus)
         }
@@ -247,6 +256,7 @@ class LoginViewModel(
     }
 
     private suspend fun saveConnectionStateOrReport(state: LoginUiState): Boolean {
+        if (!BuildConfig.DEBUG) return true
         return runCatching {
             if (state.advancedEndpointsEdited) {
                 tokenDataStore.saveNetworkEndpoints(state.apiBaseUrl, state.webSocketUrl)

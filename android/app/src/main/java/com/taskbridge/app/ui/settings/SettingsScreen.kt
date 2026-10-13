@@ -223,6 +223,7 @@ fun SettingsScreen(
     var sessionNote by remember { mutableStateOf("") }
     var sessionNoteIsError by remember { mutableStateOf(false) }
     var selectedSection by remember(initialSection) { mutableStateOf(initialSettingsSection(initialSection)) }
+    var settingsSectionMenuOpen by remember { mutableStateOf(false) }
     val isEnglish = language == AppLanguage.English
 
     suspend fun refreshAccountSessions() {
@@ -381,8 +382,7 @@ fun SettingsScreen(
                 .onSuccess {
                     syncManager.disconnectForegroundWebSocket()
                     syncManager.connectForegroundWebSocket()
-                    syncManager.enqueueNetworkSync()
-                    syncManager.syncNow()
+                    syncManager.requestSync()
                     connectionNoteIsError = false
                     connectionNote = if (isEnglish) {
                         "Connection is ready."
@@ -448,8 +448,7 @@ fun SettingsScreen(
             val result = taskRepository.importBackupJsonDetailed(raw)
             refreshSyncDiagnostics()
             TodayTaskWidgetUpdateWorker.enqueue(context.applicationContext)
-            syncManager.enqueueNetworkSync()
-            syncManager.syncNow()
+            syncManager.requestSync(followUpIfRunning = true)
             lastImportedBackupLocalIds = result.importedLocalIds
             lastImportedBackupUndoItems = result.importedUndoItems
             if (result.importedUndoItems.isEmpty()) {
@@ -485,8 +484,7 @@ fun SettingsScreen(
             tokenDataStore.clearLastBackupImportUndoItems()
             refreshSyncDiagnostics()
             TodayTaskWidgetUpdateWorker.enqueue(context.applicationContext)
-            syncManager.enqueueNetworkSync()
-            syncManager.syncNow()
+            syncManager.requestSync(followUpIfRunning = true)
             backupImportNote = backupImportUndoResultText(
                 undoneCount = result.undoneCount,
                 skippedChangedCount = result.skippedChangedCount,
@@ -771,50 +769,16 @@ fun SettingsScreen(
                 },
             )
 
-            AppPanel {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    SettingsSectionButton(
-                        text = if (isEnglish) "Preferences" else "偏好",
-                        selected = selectedSection == SettingsSection.Preferences,
-                        onClick = { selectedSection = SettingsSection.Preferences },
-                    )
-                    SettingsSectionButton(
-                        text = if (isEnglish) "Connection" else "连接",
-                        selected = selectedSection == SettingsSection.Connection,
-                        onClick = { selectedSection = SettingsSection.Connection },
-                    )
-                    SettingsSectionButton(
-                        text = if (isEnglish) "Account" else "账号",
-                        selected = selectedSection == SettingsSection.Account,
-                        onClick = { selectedSection = SettingsSection.Account },
-                    )
-                    SettingsSectionButton(
-                        text = if (isEnglish) "Data and backups" else "数据与备份",
-                        selected = selectedSection == SettingsSection.Data,
-                        onClick = { selectedSection = SettingsSection.Data },
-                    )
-                    SettingsSectionButton(
-                        text = if (isEnglish) "Sync issues" else "同步问题",
-                        selected = selectedSection == SettingsSection.Troubleshooting,
-                        onClick = { selectedSection = SettingsSection.Troubleshooting },
-                    )
-                }
-                Text(
-                    text = settingsSectionStatusText(
-                        section = selectedSection,
-                        isEnglish = isEnglish,
-                        connectionHasError = connectionNoteIsError,
-                        syncIssueCount = recoverableSyncIssueCount,
-                        conflictTaskCount = conflictTaskCount,
-                        undoImportAvailable = lastImportedBackupLocalIds.isNotEmpty(),
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+            val sectionOptions = settingsSectionOptions(isEnglish)
+            AppDropdownField(
+                label = if (isEnglish) "Settings category" else "设置分类",
+                selectedLabel = sectionOptions.first { it.value == selectedSection }.label,
+                expanded = settingsSectionMenuOpen,
+                options = sectionOptions,
+                onExpandedChange = { settingsSectionMenuOpen = it },
+                onSelect = { selectedSection = it },
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             if (selectedSection == SettingsSection.Preferences) {
                 AppSection(
@@ -989,6 +953,39 @@ fun SettingsScreen(
                     title = if (isEnglish) "Connection and sync" else "连接与同步",
                 ) {
                     AppPanel {
+                    if (!BuildConfig.DEBUG) {
+                        Text(
+                            text = if (isEnglish) {
+                                "If sync is unavailable, check the connection or contact the administrator."
+                            } else {
+                                "无法同步时，可检查连接；若持续失败，请联系管理员。"
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    testConnection = true
+                                    authRepository.testConnection()
+                                        .onSuccess {
+                                            connectionNoteIsError = false
+                                            connectionNote = if (isEnglish) "Connection is ready." else "连接可用。"
+                                        }
+                                        .onFailure { error -> setConnectionFailure(error) }
+                                    testConnection = false
+                                }
+                            },
+                            enabled = !testConnection,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (testConnection) {
+                                if (isEnglish) "Testing..." else "测试中..."
+                            } else {
+                                if (isEnglish) "Test connection" else "检查连接"
+                            })
+                        }
+                    } else {
                     OutlinedTextField(
                         value = serverBaseUrlDraft,
                         onValueChange = {
@@ -1095,6 +1092,7 @@ fun SettingsScreen(
                         ) {
                             Text(if (isEnglish) "Test connection" else "检查连接")
                         }
+                    }
                     }
                     if (connectionNote.isNotBlank()) {
                         AppDynamicStatusText(
@@ -1429,7 +1427,6 @@ fun SettingsScreen(
                                 onClick = {
                                     scope.launch {
                                         taskRepository.retryExhaustedSyncQueue()
-                                        syncManager.enqueueNetworkSync()
                                         val syncResult = syncManager.syncNowAndWait()
                                         refreshSyncDiagnostics()
                                         syncRecoveryNoteIsError = syncResult is SyncRunState.Failure
@@ -1494,58 +1491,15 @@ private fun readBackupTextWithLimit(input: InputStream, maxBytes: Int = MAX_SELE
     return if (value.isBlank()) BackupTextReadResult.Empty else BackupTextReadResult.Success(value)
 }
 
-private fun settingsSectionStatusText(
-    section: SettingsSection,
-    isEnglish: Boolean,
-    connectionHasError: Boolean,
-    syncIssueCount: Int,
-    conflictTaskCount: Int,
-    undoImportAvailable: Boolean,
-): String {
-    return when (section) {
-        SettingsSection.Preferences -> if (isEnglish) {
-            "Language, time zone, and widget options save as you change them."
-        } else {
-            "语言、时区和小组件选项会在修改后保存。"
-        }
-        SettingsSection.Connection -> if (connectionHasError) {
-            if (isEnglish) "Connection needs attention. Save and test the server URL again." else "连接需要处理，请重新保存并检查服务器地址。"
-        } else {
-            if (isEnglish) "Use the server URL first. Advanced URLs are only for custom proxies." else "优先填写服务器地址；高级地址只适合自定义代理。"
-        }
-        SettingsSection.Account -> if (syncIssueCount > 0 || conflictTaskCount > 0) {
-            if (isEnglish) "Some local changes have not reached other devices yet. Review sync before signing out." else "仍有修改未同步到其他设备，退出前请先查看同步状态。"
-        } else {
-            if (isEnglish) "Signing out keeps local data on this device." else "退出登录会保留这台设备上的本机数据。"
-        }
-        SettingsSection.Data -> if (undoImportAvailable) {
-            if (isEnglish) "The last backup import can still be undone." else "上次备份导入仍可撤销。"
-        } else {
-            if (isEnglish) "Export a local backup before switching accounts or devices." else "切换账号或设备前，建议先导出本机备份。"
-        }
-        SettingsSection.Troubleshooting -> if (syncIssueCount > 0 || conflictTaskCount > 0) {
-            if (isEnglish) "There are sync items that may need a retry or conflict decision." else "存在可能需要重试或处理冲突的同步项。"
-        } else {
-            if (isEnglish) "No manual sync recovery is required right now." else "当前通常不需要手动处理同步恢复。"
-        }
-    }
-}
-
-@Composable
-private fun SettingsSectionButton(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    if (selected) {
-        Button(onClick = onClick) {
-            Text(text)
-        }
-    } else {
-        TextButton(onClick = onClick) {
-            Text(text)
-        }
-    }
+private fun settingsSectionOptions(isEnglish: Boolean): List<AppUiOption<SettingsSection>> {
+    val labels = settingsCategoryLabels(isEnglish)
+    return listOf(
+        SettingsSection.Preferences to labels[0],
+        SettingsSection.Connection to labels[1],
+        SettingsSection.Account to labels[2],
+        SettingsSection.Data to labels[3],
+        SettingsSection.Troubleshooting to labels[4],
+    ).map { (section, label) -> AppUiOption(section, label) }
 }
 
 private data class TimeZoneOption(

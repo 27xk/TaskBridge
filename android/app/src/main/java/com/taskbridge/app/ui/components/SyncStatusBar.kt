@@ -22,6 +22,7 @@ sealed interface SyncStatusMessage {
     object DeleteQueued : SyncStatusMessage
     object Purged : SyncStatusMessage
     object PurgeFailed : SyncStatusMessage
+    object PurgeRequiresConnection : SyncStatusMessage
     data class BatchCompleted(val count: Int) : SyncStatusMessage
     data class BatchDeleted(val count: Int) : SyncStatusMessage
     data class BatchRestored(val count: Int) : SyncStatusMessage
@@ -66,6 +67,7 @@ fun syncStatusMessageText(message: SyncStatusMessage, language: AppLanguage): St
             SyncStatusMessage.DeleteQueued -> "已删除，等待同步"
             SyncStatusMessage.Purged -> "已永久删除"
             SyncStatusMessage.PurgeFailed -> "永久删除失败，请稍后重试"
+            SyncStatusMessage.PurgeRequiresConnection -> "这条任务已同步，请联网后再永久删除"
             is SyncStatusMessage.BatchCompleted -> "已批量完成 ${message.count} 条任务"
             is SyncStatusMessage.BatchDeleted -> "已批量删除 ${message.count} 条任务"
             is SyncStatusMessage.BatchRestored -> "已批量恢复 ${message.count} 条任务"
@@ -89,6 +91,7 @@ fun syncStatusMessageText(message: SyncStatusMessage, language: AppLanguage): St
             SyncStatusMessage.DeleteQueued -> "Delete queued for sync"
             SyncStatusMessage.Purged -> "Permanently deleted"
             SyncStatusMessage.PurgeFailed -> "Permanent delete failed. Try again."
+            SyncStatusMessage.PurgeRequiresConnection -> "This task is synced. Connect before deleting it permanently."
             is SyncStatusMessage.BatchCompleted -> "Completed ${message.count} tasks"
             is SyncStatusMessage.BatchDeleted -> "Deleted ${message.count} tasks"
             is SyncStatusMessage.BatchRestored -> "Restored ${message.count} tasks"

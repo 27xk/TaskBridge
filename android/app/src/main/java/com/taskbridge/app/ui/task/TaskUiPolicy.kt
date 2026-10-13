@@ -114,6 +114,29 @@ fun getDeleteConfirmationMessage(taskTitle: String, languageCode: String): Strin
     }
 }
 
+fun toggleOpenTaskSelection(selectedIds: Set<String>, taskId: String): Set<String> {
+    return if (taskId in selectedIds) selectedIds - taskId else selectedIds + taskId
+}
+
+fun selectAllVisibleOpenTasks(visibleOpenTaskIds: Collection<String>): Set<String> {
+    return visibleOpenTaskIds.toSet()
+}
+
+fun retainVisibleOpenTaskSelection(
+    selectedIds: Set<String>,
+    visibleOpenTaskIds: Collection<String>,
+): Set<String> {
+    return selectedIds.intersect(visibleOpenTaskIds.toSet())
+}
+
+fun getDeleteSelectedConfirmationMessage(count: Int, languageCode: String): String {
+    return if (languageCode == "en-US") {
+        "Delete $count selected tasks? You can restore them from the recycle bin."
+    } else {
+        "确认删除所选的 $count 个任务？删除后可以在回收站恢复。"
+    }
+}
+
 fun getTaskPriorityLabel(priority: Int, languageCode: String): String {
     val labels = priorityLabelsFor(languageCode)
     return labels[priority.coerceIn(0, labels.lastIndex)]
@@ -159,7 +182,6 @@ fun getSyncStatusLabel(status: SyncStatus, languageCode: String): String? {
 }
 
 fun taskListSyncHealthText(tasks: List<Task>, languageCode: String): TaskListSyncHealthUi {
-    val isEnglish = languageCode == "en-US"
     val distinctTasks = tasks.distinctBy { it.localId }
     val errorCount = distinctTasks.count {
         it.syncStatus == SyncStatus.Failed || it.syncStatus == SyncStatus.Conflict
@@ -169,6 +191,11 @@ fun taskListSyncHealthText(tasks: List<Task>, languageCode: String): TaskListSyn
             it.syncStatus == SyncStatus.PendingUpdate ||
             it.syncStatus == SyncStatus.PendingDelete
     }
+    return taskListSyncHealthText(errorCount, pendingCount, languageCode)
+}
+
+fun taskListSyncHealthText(errorCount: Int, pendingCount: Int, languageCode: String): TaskListSyncHealthUi {
+    val isEnglish = languageCode == "en-US"
     return when {
         errorCount > 0 -> TaskListSyncHealthUi(
             title = if (isEnglish) "Sync needs attention" else "同步需要处理",

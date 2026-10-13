@@ -13,6 +13,10 @@ import com.taskbridge.app.MainActivity
 import com.taskbridge.app.R
 
 class TodayTaskWidgetProvider : AppWidgetProvider() {
+    override fun onDisabled(context: Context) {
+        androidx.work.WorkManager.getInstance(context).cancelUniqueWork(WidgetConstants.UPDATE_WORK_NAME)
+    }
+
     override fun onUpdate(
         context: Context,
         appWidgetManager: AppWidgetManager,

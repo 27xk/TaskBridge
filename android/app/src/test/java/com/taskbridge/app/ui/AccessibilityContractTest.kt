@@ -38,4 +38,22 @@ class AccessibilityContractTest {
         assertTrue(password.contains("isError = isError"))
         assertTrue(syncStatus.contains("liveRegion = LiveRegionMode.Polite"))
     }
+
+    @Test
+    fun repeatedTaskControlsIncludeTheTaskTitleAndLongTitlesRemainReadable() {
+        val source = androidSource("src/main/java/com/taskbridge/app/ui/task/TaskListScreen.kt")
+
+        assertTrue(source.contains("taskActionAccessibilityLabel(actionsLabel, task.title)"))
+        assertTrue(source.contains("taskSelectionAccessibilityLabel(task.title, languageCode)"))
+        assertTrue(source.contains("taskCompletionAccessibilityLabel(task.title, task.status, languageCode)"))
+        assertTrue(source.contains("maxLines = 2"))
+    }
+
+    @Test
+    fun applicationThemeFollowsTheSystemDarkMode() {
+        val source = androidSource("src/main/java/com/taskbridge/app/MainActivity.kt")
+
+        assertTrue(source.contains("isSystemInDarkTheme()"))
+        assertTrue(source.contains("darkColorScheme("))
+    }
 }

@@ -3,10 +3,7 @@ package com.taskbridge.app.notification
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.taskbridge.app.AppContainer
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import com.taskbridge.app.appContainer
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 
@@ -14,9 +11,9 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val localId = intent.getStringExtra(ReminderManager.EXTRA_TASK_LOCAL_ID) ?: return
         val pendingResult = goAsync()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        context.appContainer.applicationScope.launch {
             try {
-                val container = AppContainer(context.applicationContext)
+                val container = context.appContainer
                 val expectedWorkspaceId = intent.getStringExtra(ReminderManager.EXTRA_WORKSPACE_ID)
                 if (
                     expectedWorkspaceId != null &&

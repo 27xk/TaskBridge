@@ -5,7 +5,10 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Upsert
+import androidx.sqlite.db.SupportSQLiteQuery
+import com.taskbridge.app.domain.model.TaskSyncCounts
 import kotlinx.coroutines.flow.Flow
 
 data class TodayWidgetTaskProjection(
@@ -15,10 +18,12 @@ data class TodayWidgetTaskProjection(
     val priority: Int,
     val dueTime: String?,
     val remindTime: String?,
+    val snoozedUntil: String? = null,
     val plannedDate: String?,
     val completedAt: String?,
     val sortOrder: Int,
     val updatedAt: String,
+    val listType: String = "inbox",
 )
 
 data class SyncQueueCounts(
@@ -27,101 +32,47 @@ data class SyncQueueCounts(
     val exhausted: Int,
 )
 
+data class ReminderTaskProjection(
+    val localId: String,
+    val status: String,
+    val isDeleted: Boolean,
+    val dueTime: String?,
+    val remindTime: String?,
+    val snoozedUntil: String?,
+)
+
 @Dao
 interface TaskDao {
-    @Query(
-        """
-        SELECT * FROM tasks
-        WHERE workspaceId = :workspaceId
-          AND isDeleted = 0
-        ORDER BY
-            CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
-            CASE
-                WHEN status IN ('completed', 'done') THEN 4
-                WHEN status NOT IN ('completed', 'done') AND dueTime IS NOT NULL AND datetime(dueTime) < datetime(:nowTime) THEN 0
-                WHEN dueTime IS NOT NULL THEN 1
-                WHEN plannedDate IS NOT NULL THEN 2
-                ELSE 3
-            END,
-            CASE WHEN status IN ('completed', 'done') THEN datetime(COALESCE(completedAt, updatedAt, dueTime, plannedDate)) END DESC,
-            CASE WHEN status NOT IN ('completed', 'done') AND dueTime IS NULL THEN 1 ELSE 0 END,
-            CASE WHEN status NOT IN ('completed', 'done') THEN dueTime END ASC,
-            CASE WHEN status NOT IN ('completed', 'done') THEN plannedDate END ASC,
-            sortOrder ASC,
-            priority DESC,
-            updatedAt DESC
-        LIMIT :limit
-        """,
-    )
-    fun observeActiveTasks(workspaceId: String, limit: Int, nowTime: String): Flow<List<TaskEntity>>
+    @Query("SELECT localId FROM tasks WHERE workspaceId = :workspaceId")
+    suspend fun getAllLocalIds(workspaceId: String): List<String>
+    @Query("""
+        SELECT localId, status, isDeleted, dueTime, remindTime, snoozedUntil FROM tasks
+        WHERE workspaceId = :workspaceId AND localId IN (:localIds)
+    """)
+    suspend fun getReminderTasks(workspaceId: String, localIds: List<String>): List<ReminderTaskProjection>
 
-    @Query(
-        """
-        SELECT * FROM tasks
-        WHERE workspaceId = :workspaceId
-          AND isDeleted = 1
-        ORDER BY updatedAt DESC
-        LIMIT :limit
-        """,
-    )
-    fun observeDeletedTasks(workspaceId: String, limit: Int): Flow<List<TaskEntity>>
+    @Query("""
+        SELECT localId, status, isDeleted, dueTime, remindTime, snoozedUntil FROM tasks
+        WHERE workspaceId = :workspaceId AND isDeleted = 0 AND lower(status) NOT IN ('completed', 'done')
+          AND (dueTime IS NOT NULL OR remindTime IS NOT NULL OR snoozedUntil IS NOT NULL)
+    """)
+    suspend fun getReminderCandidates(workspaceId: String): List<ReminderTaskProjection>
 
-    @Query(
-        """
-        SELECT * FROM tasks
-        WHERE workspaceId = :workspaceId
-          AND isDeleted = 0
-          AND (
-              (dueTime IS NOT NULL AND datetime(dueTime) >= datetime(:startTime) AND datetime(dueTime) < datetime(:endTime))
-              OR (remindTime IS NOT NULL AND datetime(remindTime) >= datetime(:startTime) AND datetime(remindTime) < datetime(:endTime))
-              OR plannedDate = :today
-              OR listType = 'today'
-              OR (status NOT IN ('completed', 'done') AND dueTime IS NOT NULL AND datetime(dueTime) < datetime(:nowTime))
-        )
-        ORDER BY
-            CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END,
-            CASE
-                WHEN status IN ('completed', 'done') THEN 4
-                WHEN status NOT IN ('completed', 'done') AND dueTime IS NOT NULL AND datetime(dueTime) < datetime(:nowTime) THEN 0
-                WHEN dueTime IS NOT NULL THEN 1
-                WHEN listType = 'today' THEN 2
-                WHEN plannedDate IS NOT NULL THEN 2
-                ELSE 3
-            END,
-            CASE WHEN status IN ('completed', 'done') THEN datetime(COALESCE(completedAt, updatedAt, dueTime, plannedDate)) END DESC,
-            CASE WHEN status NOT IN ('completed', 'done') THEN dueTime END ASC,
-            CASE WHEN status NOT IN ('completed', 'done') THEN plannedDate END ASC,
-            sortOrder ASC,
-            priority DESC,
-            updatedAt DESC
-        LIMIT :limit
-        """,
-    )
-    fun observeTodayTasks(
-        workspaceId: String,
-        today: String,
-        startTime: String,
-        endTime: String,
-        nowTime: String,
-        limit: Int,
-    ): Flow<List<TaskEntity>>
+    @Query("SELECT COUNT(*) FROM tasks WHERE workspaceId = :workspaceId")
+    fun observeWorkspaceTaskInvalidations(workspaceId: String): Flow<Int>
 
-    @Query(
-        """
-        SELECT * FROM tasks
-        WHERE workspaceId = :workspaceId
-          AND isDeleted = 0
-          AND (
-              title LIKE '%' || :keyword || '%'
-              OR content LIKE '%' || :keyword || '%'
-              OR tag LIKE '%' || :keyword || '%'
-              OR project LIKE '%' || :keyword || '%'
-        )
-        ORDER BY sortOrder ASC, updatedAt DESC
-        LIMIT :limit
-        """,
-    )
-    fun observeSearchTasks(workspaceId: String, keyword: String, limit: Int): Flow<List<TaskEntity>>
+    @RawQuery
+    suspend fun getTaskPage(query: SupportSQLiteQuery): List<TaskEntity>
+
+    @RawQuery
+    suspend fun getTaskListCounts(query: SupportSQLiteQuery): TaskListCounts
+
+    @Query("""
+        SELECT COALESCE(SUM(CASE WHEN syncStatus IN ('sync_failed', 'conflict') THEN 1 ELSE 0 END), 0) errors,
+               COALESCE(SUM(CASE WHEN syncStatus IN ('pending_create', 'pending_update', 'pending_delete') THEN 1 ELSE 0 END), 0) pending
+        FROM tasks WHERE workspaceId = :workspaceId
+    """)
+    suspend fun getTaskSyncCounts(workspaceId: String): TaskSyncCounts
 
     @Query("SELECT * FROM tasks WHERE workspaceId = :workspaceId AND localId = :localId LIMIT 1")
     suspend fun getByLocalId(workspaceId: String, localId: String): TaskEntity?
@@ -132,20 +83,13 @@ interface TaskDao {
         WHERE workspaceId = :workspaceId
           AND isDeleted = 0
         ORDER BY updatedAt DESC
-        LIMIT :limit
         """,
     )
-    suspend fun getBackupTasks(workspaceId: String, limit: Int): List<TaskEntity>
-
-    @Query(
-        "SELECT * FROM tasks WHERE workspaceId = :workspaceId " +
-            "ORDER BY updatedAt DESC LIMIT :limit",
-    )
-    suspend fun getTasksForReminderRebuild(workspaceId: String, limit: Int): List<TaskEntity>
+    suspend fun getBackupTasks(workspaceId: String): List<TaskEntity>
 
     @Query(
         """
-        SELECT localId, title, status, priority, dueTime, remindTime, plannedDate, completedAt, sortOrder, updatedAt FROM tasks
+        SELECT localId, title, status, priority, dueTime, remindTime, snoozedUntil, plannedDate, completedAt, sortOrder, updatedAt, listType FROM tasks
         WHERE workspaceId = :workspaceId
           AND isDeleted = 0
           AND (
@@ -185,7 +129,7 @@ interface TaskDao {
 
     @Query(
         """
-        SELECT localId, title, status, priority, dueTime, remindTime, plannedDate, completedAt, sortOrder, updatedAt FROM tasks
+        SELECT localId, title, status, priority, dueTime, remindTime, snoozedUntil, plannedDate, completedAt, sortOrder, updatedAt, listType FROM tasks
         WHERE workspaceId = :workspaceId
           AND isDeleted = 0
         ORDER BY
@@ -281,6 +225,9 @@ interface TaskDao {
 
 @Dao
 interface SyncQueueDao {
+    @Query("SELECT * FROM sync_queue WHERE workspaceId = :workspaceId AND localId = :localId ORDER BY id DESC LIMIT 1")
+    suspend fun getLatestForTask(workspaceId: String, localId: String): SyncQueueEntity?
+
     @Query("SELECT * FROM sync_queue WHERE workspaceId = :workspaceId AND attemptCount < 8 ORDER BY attemptCount ASC, id ASC LIMIT :limit")
     suspend fun pendingChanges(workspaceId: String, limit: Int): List<SyncQueueEntity>
 

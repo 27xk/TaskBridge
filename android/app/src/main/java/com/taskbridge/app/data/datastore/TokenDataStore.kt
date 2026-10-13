@@ -36,19 +36,23 @@ class TokenDataStore(context: Context) {
     private val tokenRevision = MutableStateFlow(0L)
 
     val currentUserId: Flow<String?> = appContext.syncPreferences.data.map { preferences ->
-        preferences[CURRENT_USER_ID]
+        workspaceFromPreferences(preferences)?.userId
     }
 
     val serverBaseUrl: Flow<String> = appContext.syncPreferences.data.map { preferences ->
-        normalizeStoredServerBaseUrl(preferences[SERVER_BASE_URL] ?: inferServerBaseUrlFromApi(preferences[API_BASE_URL]))
+        if (BuildConfig.DEBUG) {
+            normalizeStoredServerBaseUrl(preferences[SERVER_BASE_URL] ?: inferServerBaseUrlFromApi(preferences[API_BASE_URL]))
+        } else {
+            defaultServerBaseUrl()
+        }
     }
 
     val apiBaseUrl: Flow<String> = appContext.syncPreferences.data.map { preferences ->
-        normalizeApiBaseUrl(preferences[API_BASE_URL])
+        normalizeApiBaseUrl(if (BuildConfig.DEBUG) preferences[API_BASE_URL] else BuildConfig.TASKBRIDGE_BASE_URL)
     }
 
     val webSocketUrl: Flow<String> = appContext.syncPreferences.data.map { preferences ->
-        normalizeWebSocketUrl(preferences[WEB_SOCKET_URL])
+        normalizeWebSocketUrl(if (BuildConfig.DEBUG) preferences[WEB_SOCKET_URL] else BuildConfig.TASKBRIDGE_WS_URL)
     }
 
     val currentWorkspace: Flow<WorkspaceIdentity?> = appContext.syncPreferences.data.map { preferences ->
@@ -100,7 +104,7 @@ class TokenDataStore(context: Context) {
     val lastBackupImportUndoItems: Flow<String?> = appContext.syncPreferences.data.map { preferences ->
         val workspace = workspaceFromPreferences(preferences)
         workspace?.let {
-            preferences[lastBackupImportUndoItemsKey(it)] ?: preferences[LAST_BACKUP_IMPORT_UNDO_ITEMS]
+            preferences[lastBackupImportUndoItemsKey(it)] ?: legacyBackupImportUndoItemsFromPreferences(preferences, it)
         }
     }
 
@@ -113,7 +117,7 @@ class TokenDataStore(context: Context) {
         val workspace = workspaceFromPreferences(preferences)
         return RequestAuthContext(
             workspace = workspace,
-            apiBaseUrl = normalizeApiBaseUrl(preferences[API_BASE_URL]),
+            apiBaseUrl = normalizeApiBaseUrl(if (BuildConfig.DEBUG) preferences[API_BASE_URL] else BuildConfig.TASKBRIDGE_BASE_URL),
             accessToken = workspace?.let { scopedToken(ACCESS_TOKEN, it) },
         )
     }
@@ -121,7 +125,7 @@ class TokenDataStore(context: Context) {
     suspend fun initializeLegacyWorkspaceOwnership() {
         appContext.syncPreferences.edit { preferences ->
             if (preferences[LEGACY_WORKSPACE_OWNERSHIP_INITIALIZED] == true) return@edit
-            workspaceFromPreferences(preferences)?.let { workspace ->
+            storedWorkspaceFromPreferences(preferences)?.let { workspace ->
                 val userOwnerKey = legacyWorkspaceOwnerKey(workspace.userId)
                 if (preferences[userOwnerKey].isNullOrBlank()) {
                     preferences[userOwnerKey] = workspace.id
@@ -155,9 +159,11 @@ class TokenDataStore(context: Context) {
     }
 
     suspend fun saveTokens(accessToken: String, refreshToken: String, userId: Int? = null) {
-        currentWorkspace.first()?.let { claimLegacySyncCursor(it) }
+        initializeLegacyWorkspaceOwnership()
+        val previousWorkspace = currentWorkspace.first()
+        previousWorkspace?.let { claimLegacySyncCursor(it) }
         val resolvedUserId = userId?.toString()
-            ?: currentUserId.first()?.takeIf { it.isNotBlank() }
+            ?: previousWorkspace?.userId
             ?: throw IllegalStateException("active user required")
         val workspace = WorkspaceIdentity.create(serverBaseUrl.first(), resolvedUserId)
         withContext(Dispatchers.IO) {
@@ -169,6 +175,19 @@ class TokenDataStore(context: Context) {
                 .apply()
         }
         appContext.syncPreferences.edit { preferences ->
+            storedWorkspaceFromPreferences(preferences)?.takeIf { it != workspace }?.let { previous ->
+                legacyBackupImportUndoItemsFromPreferences(preferences, previous)?.let { legacyUndo ->
+                    if (preferences[lastBackupImportUndoItemsKey(previous)] == null) {
+                        preferences[lastBackupImportUndoItemsKey(previous)] = legacyUndo
+                    }
+                    preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
+                }
+            }
+            if (!BuildConfig.DEBUG) {
+                preferences[SERVER_BASE_URL] = defaultServerBaseUrl()
+                preferences[API_BASE_URL] = normalizeApiBaseUrl(BuildConfig.TASKBRIDGE_BASE_URL)
+                preferences[WEB_SOCKET_URL] = normalizeWebSocketUrl(BuildConfig.TASKBRIDGE_WS_URL)
+            }
             preferences[CURRENT_USER_ID] = resolvedUserId
         }
         tokenRevision.value += 1
@@ -184,7 +203,7 @@ class TokenDataStore(context: Context) {
         appContext.syncPreferences.edit { preferences ->
             preferences[lastSyncTimeKey(workspace)] = serverTime
             val legacyClaim = preferences[LEGACY_SYNC_CURSOR_CLAIMED_WORKSPACE]
-            if (legacyClaim == null || legacyClaim == workspace.id) {
+            if (legacyClaim == workspace.id) {
                 preferences[LEGACY_SYNC_CURSOR_CLAIMED_WORKSPACE] = workspace.id
                 preferences.remove(LAST_SYNC_TIME)
             }
@@ -221,6 +240,7 @@ class TokenDataStore(context: Context) {
     }
 
     suspend fun saveNetworkEndpoints(apiBaseUrl: String, webSocketUrl: String) {
+        check(BuildConfig.DEBUG) { "connection_locked" }
         val normalizedApiBaseUrl = validateApiBaseUrl(apiBaseUrl)
         saveNetworkEndpoints(
             NetworkEndpoints(
@@ -240,7 +260,9 @@ class TokenDataStore(context: Context) {
             } else {
                 preferences[lastBackupImportUndoItemsKey(workspace)] = value
             }
-            preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
+            if (legacyBackupImportUndoItemsFromPreferences(preferences, workspace) != null) {
+                preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
+            }
         }
     }
 
@@ -248,11 +270,14 @@ class TokenDataStore(context: Context) {
         val workspace = currentWorkspace.first()
         appContext.syncPreferences.edit { preferences ->
             workspace?.let { preferences.remove(lastBackupImportUndoItemsKey(it)) }
-            preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
+            if (workspace != null && legacyBackupImportUndoItemsFromPreferences(preferences, workspace) != null) {
+                preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
+            }
         }
     }
 
     suspend fun saveServerBaseUrl(serverBaseUrl: String) {
+        check(BuildConfig.DEBUG) { "connection_locked" }
         saveNetworkEndpoints(deriveNetworkEndpoints(serverBaseUrl))
     }
 
@@ -322,7 +347,6 @@ class TokenDataStore(context: Context) {
             }.apply()
         }
         appContext.syncPreferences.edit { preferences ->
-            preferences.remove(LAST_SYNC_TIME)
             preferences.remove(CURRENT_USER_ID)
         }
         tokenRevision.value += 1
@@ -332,15 +356,20 @@ class TokenDataStore(context: Context) {
     private suspend fun saveNetworkEndpoints(endpoints: NetworkEndpoints) {
         val currentServerUrl = serverBaseUrl.first()
         val resetSession = shouldResetSessionForServerChange(currentServerUrl, endpoints.serverBaseUrl)
-        if (resetSession) currentWorkspace.first()?.let { claimLegacySyncCursor(it) }
+        val previousWorkspace = if (resetSession) currentWorkspace.first() else null
+        previousWorkspace?.let { claimLegacySyncCursor(it) }
         appContext.syncPreferences.edit { preferences ->
             preferences[SERVER_BASE_URL] = endpoints.serverBaseUrl
             preferences[API_BASE_URL] = endpoints.apiBaseUrl
             preferences[WEB_SOCKET_URL] = endpoints.webSocketUrl
             if (resetSession) {
                 preferences.remove(CURRENT_USER_ID)
-                preferences.remove(LAST_SYNC_TIME)
-                preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
+                if (
+                    previousWorkspace != null &&
+                    legacyBackupImportUndoItemsFromPreferences(preferences, previousWorkspace) != null
+                ) {
+                    preferences.remove(LAST_BACKUP_IMPORT_UNDO_ITEMS)
+                }
             }
         }
         if (resetSession) tokenRevision.value += 1
@@ -513,15 +542,50 @@ private fun legacyWorkspaceOwnerKey(ownerUserId: String) = stringPreferencesKey(
     "legacy_workspace_owner_${ownerUserId.trim().ifBlank { "legacy" }}",
 )
 
-private fun workspaceFromPreferences(
+internal fun workspaceFromPreferences(
+    preferences: androidx.datastore.preferences.core.Preferences,
+    connectionLocked: Boolean = !BuildConfig.DEBUG,
+    bundledApiBaseUrl: String = BuildConfig.TASKBRIDGE_BASE_URL,
+): WorkspaceIdentity? {
+    val storedWorkspace = storedWorkspaceFromPreferences(preferences) ?: return null
+    if (connectionLocked) {
+        val bundledApi = validateApiBaseUrl(bundledApiBaseUrl)
+        val bundledServer = inferServerBaseUrlFromApi(bundledApi)
+        val storedApi = preferences[stringPreferencesKey("api_base_url")]
+        if (storedApi != null && runCatching { validateApiBaseUrl(storedApi) }.getOrNull() != bundledApi) {
+            return null
+        }
+        val storedServer = preferences[stringPreferencesKey("server_base_url")]
+        if (storedServer != null && runCatching { normalizeServerBaseUrl(storedServer) }.getOrNull() != bundledServer) {
+            return null
+        }
+    }
+    return storedWorkspace
+}
+
+internal fun storedWorkspaceFromPreferences(
     preferences: androidx.datastore.preferences.core.Preferences,
 ): WorkspaceIdentity? {
     val userId = preferences[stringPreferencesKey("current_user_id")]?.takeIf { it.isNotBlank() } ?: return null
-    val serverBaseUrl = normalizeStoredServerBaseUrl(
-        preferences[stringPreferencesKey("server_base_url")]
-            ?: inferServerBaseUrlFromApi(preferences[stringPreferencesKey("api_base_url")]),
-    )
-    return runCatching { WorkspaceIdentity.create(serverBaseUrl, userId) }.getOrNull()
+    return runCatching {
+        // Existing data needs a persisted origin; a new build's defaults cannot prove ownership.
+        val storedServer = preferences[stringPreferencesKey("server_base_url")]
+        val serverBaseUrl = if (storedServer != null) {
+            requireServerBaseUrlForUserInput(storedServer)
+        } else {
+            val storedApi = preferences[stringPreferencesKey("api_base_url")] ?: return null
+            normalizeServerBaseUrl(validateApiBaseUrl(storedApi))
+        }
+        WorkspaceIdentity.create(serverBaseUrl, userId)
+    }.getOrNull()
+}
+
+internal fun legacyBackupImportUndoItemsFromPreferences(
+    preferences: androidx.datastore.preferences.core.Preferences,
+    workspace: WorkspaceIdentity,
+): String? {
+    if (!canClaimLegacyWorkspace(preferences[legacyWorkspaceOwnerKey(workspace.userId)], workspace)) return null
+    return preferences[stringPreferencesKey("last_backup_import_undo_items")]
 }
 
 fun effectiveDisplayTimeZone(timeZoneId: String?): String {

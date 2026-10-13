@@ -4,10 +4,26 @@ import com.taskbridge.app.domain.model.SyncStatus
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TaskUiPolicyTest {
+    @Test
+    fun repeatedTaskActionsUseSpecificAccessibleLabels() {
+        assertEquals("Actions: Write launch notes", taskActionAccessibilityLabel("Actions", "Write launch notes"))
+        assertEquals("Select task: Write launch notes", taskSelectionAccessibilityLabel("Write launch notes", "en-US"))
+        assertEquals(
+            "Complete task: Write launch notes",
+            taskCompletionAccessibilityLabel("Write launch notes", TaskStatus.Todo, "en-US"),
+        )
+        assertEquals(
+            "Undo completion: Write launch notes",
+            taskCompletionAccessibilityLabel("Write launch notes", TaskStatus.Completed, "en-US"),
+        )
+    }
+
     @Test
     fun deleteActionsRequireExplicitConfirmation() {
         assertEquals(true, shouldConfirmTaskAction(TaskUiAction.Delete))
@@ -195,10 +211,17 @@ class TaskUiPolicyTest {
         assertEquals(EmptyTaskListAction.AddTask, state.action)
     }
 
-    private fun taskWithSyncStatus(syncStatus: SyncStatus): Task {
+    @Test
+    fun offlinePurgeIsBlockedOnlyForTasksThatAlreadyExistOnTheServer() {
+        assertTrue(shouldBlockOfflinePurge(listOf(taskWithSyncStatus(SyncStatus.Synced, serverId = 10)), hasAccessToken = false))
+        assertFalse(shouldBlockOfflinePurge(listOf(taskWithSyncStatus(SyncStatus.PendingCreate)), hasAccessToken = false))
+        assertFalse(shouldBlockOfflinePurge(listOf(taskWithSyncStatus(SyncStatus.Synced, serverId = 10)), hasAccessToken = true))
+    }
+
+    private fun taskWithSyncStatus(syncStatus: SyncStatus, serverId: Int? = null): Task {
         return Task(
             localId = "local-${syncStatus.wireName}",
-            serverId = null,
+            serverId = serverId,
             title = "Test task",
             content = null,
             status = TaskStatus.Todo,

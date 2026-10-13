@@ -340,7 +340,7 @@ fun TaskDetailScreen(
                         ) {
                             Text(strings.snoozeOneHour)
                         }
-                        if (!current.repeatRule.isNullOrBlank()) {
+                        if (!current.repeatRule.isNullOrBlank() && current.serverId != null) {
                             OutlinedButton(
                                 onClick = {
                                     scope.launch {

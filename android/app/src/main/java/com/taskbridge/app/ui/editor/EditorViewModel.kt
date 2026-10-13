@@ -12,11 +12,9 @@ import com.google.gson.reflect.TypeToken
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.repository.TaskRepository
 import com.taskbridge.app.domain.usecase.QuickAddParser
-import com.taskbridge.app.notification.ReminderManager
 import com.taskbridge.app.sync.SyncManager
 import com.taskbridge.app.ui.task.getTaskPriorityLabel
 import com.taskbridge.app.utils.ShanghaiTime
-import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -83,6 +81,24 @@ private val editorGson = Gson()
 private val editorChecklistType = object : TypeToken<List<EditorChecklistItem>>() {}.type
 private const val EDITOR_DRAFT_ID_KEY = "editor_draft_id"
 private const val EDITOR_EDITING_LOCAL_ID_KEY = "editor_editing_local_id"
+const val TASK_TITLE_MAX_LENGTH = 255
+const val TASK_CONTENT_MAX_LENGTH = 10_000
+const val TASK_TAG_MAX_LENGTH = 64
+const val TASK_PROJECT_MAX_LENGTH = 128
+const val TASK_TEMPLATE_NAME_MAX_LENGTH = 128
+const val TASK_CHECKLIST_MAX_ITEMS = 100
+const val TASK_CHECKLIST_ITEM_MAX_LENGTH = 255
+
+enum class EditorInputError {
+    TitleRequired,
+    TitleTooLong,
+    ContentTooLong,
+    TagTooLong,
+    ProjectTooLong,
+    TemplateNameTooLong,
+    ChecklistItemTooLong,
+    TooManyChecklistItems,
+}
 
 class EditorViewModel(
     private val appContext: Context,
@@ -115,18 +131,25 @@ class EditorViewModel(
             restoredDraftLoaded = true
         }
     }
-    private val reminderManager = ReminderManager(appContext, tokenDataStore)
     val uiState: StateFlow<EditorUiState> = _uiState
     val displayTimeZone: StateFlow<String> = tokenDataStore.displayTimeZone
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ShanghaiTime.DEFAULT_ZONE_ID)
 
-    fun updateTitle(value: String) = updateDraft { it.copy(title = value, error = null) }
-    fun updateContent(value: String) = updateDraft { it.copy(content = value) }
+    fun updateTitle(value: String) = updateDraft {
+        it.copy(title = value, error = null)
+    }
+    fun updateContent(value: String) = updateDraft {
+        it.copy(content = value, error = null)
+    }
     fun updatePriority(value: String) = updateDraft {
         it.copy(priority = value.filter { char -> char.isDigit() })
     }
-    fun updateTag(value: String) = updateDraft { it.copy(tag = value) }
-    fun updateProject(value: String) = updateDraft { it.copy(project = value) }
+    fun updateTag(value: String) = updateDraft {
+        it.copy(tag = value, error = null)
+    }
+    fun updateProject(value: String) = updateDraft {
+        it.copy(project = value, error = null)
+    }
     fun updateDueTime(value: String) = updateDraft { it.copy(dueTime = value) }
     fun updateRemindTime(value: String) = updateDraft { it.copy(remindTime = value) }
     fun updateRepeatRule(value: String) = updateDraft { it.copy(repeatRule = value) }
@@ -144,9 +167,13 @@ class EditorViewModel(
             today = ShanghaiTime.todayDate(displayTimeZone.value),
         )
     }
-    fun updateChecklistText(value: String) = updateDraft { it.copy(checklistText = value) }
-    fun updateTemplateName(value: String) = updateDraft { it.copy(templateName = value) }
-    fun updateIsTemplate(value: Boolean) = updateDraft { it.copy(isTemplate = value) }
+    fun updateChecklistText(value: String) = updateDraft { it.copy(checklistText = value, error = null) }
+    fun updateTemplateName(value: String) = updateDraft {
+        it.copy(templateName = value, error = null)
+    }
+    fun updateIsTemplate(value: Boolean) = updateDraft {
+        editorDraftWithTemplateState(state = it, value = value)
+    }
 
     fun startNewTask(preset: EditorEntryPreset = EditorEntryPreset.Default) {
         viewModelScope.launch {
@@ -207,8 +234,9 @@ class EditorViewModel(
 
     fun save(onSaved: () -> Unit) {
         val state = _uiState.value
-        if (state.title.isBlank()) {
-            _uiState.update { it.copy(error = "Title is required.") }
+        val inputError = validateEditorTaskInput(state)
+        if (inputError != null) {
+            _uiState.update { it.copy(error = editorInputErrorMessage(inputError)) }
             return
         }
         if (!isValidPlannedDateInput(state.plannedDate)) {
@@ -270,10 +298,7 @@ class EditorViewModel(
                     )
                     editingLocalId
                 }
-                taskRepository.getTask(localId)?.let(reminderManager::schedule)
-                TodayTaskWidgetUpdateWorker.enqueue(appContext)
-                syncManager.enqueueNetworkSync()
-                syncManager.syncNow()
+                syncManager.requestSync(followUpIfRunning = true)
                 savedSnapshot = snapshotFromState(_uiState.value)
                 clearPersistedDraft()
             }
@@ -332,6 +357,44 @@ class EditorViewModel(
     }
 }
 
+fun validateEditorTaskInput(state: EditorUiState): EditorInputError? {
+    if (state.title.isBlank()) return EditorInputError.TitleRequired
+    if (exceedsCodePointLimit(state.title, TASK_TITLE_MAX_LENGTH)) return EditorInputError.TitleTooLong
+    if (exceedsCodePointLimit(state.content, TASK_CONTENT_MAX_LENGTH)) return EditorInputError.ContentTooLong
+    if (exceedsCodePointLimit(state.tag, TASK_TAG_MAX_LENGTH)) return EditorInputError.TagTooLong
+    if (exceedsCodePointLimit(state.project, TASK_PROJECT_MAX_LENGTH)) return EditorInputError.ProjectTooLong
+    if (state.isTemplate && exceedsCodePointLimit(state.templateName, TASK_TEMPLATE_NAME_MAX_LENGTH)) {
+        return EditorInputError.TemplateNameTooLong
+    }
+    val checklistItems = state.checklistText
+        .lineSequence()
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .toList()
+    if (checklistItems.size > TASK_CHECKLIST_MAX_ITEMS) return EditorInputError.TooManyChecklistItems
+    if (checklistItems.any { exceedsCodePointLimit(it, TASK_CHECKLIST_ITEM_MAX_LENGTH) }) {
+        return EditorInputError.ChecklistItemTooLong
+    }
+    return null
+}
+
+private fun exceedsCodePointLimit(value: String, limit: Int): Boolean {
+    return value.codePointCount(0, value.length) > limit
+}
+
+private fun editorInputErrorMessage(error: EditorInputError): String {
+    return when (error) {
+        EditorInputError.TitleRequired -> "Title is required."
+        EditorInputError.TitleTooLong -> "Title is too long."
+        EditorInputError.ContentTooLong -> "Content is too long."
+        EditorInputError.TagTooLong -> "Tag is too long."
+        EditorInputError.ProjectTooLong -> "Project is too long."
+        EditorInputError.TemplateNameTooLong -> "Template name is too long."
+        EditorInputError.ChecklistItemTooLong -> "A checklist item is too long."
+        EditorInputError.TooManyChecklistItems -> "Checklist has too many items."
+    }
+}
+
 private fun decodeEditorState(value: String): EditorUiState? {
     return runCatching { editorGson.fromJson(value, EditorUiState::class.java) }.getOrNull()
 }
@@ -386,6 +449,16 @@ fun editorDraftWithListType(
         state.plannedDate
     }
     return state.copy(listType = nextListType, plannedDate = nextPlannedDate)
+}
+
+fun editorDraftWithTemplateState(
+    state: EditorUiState,
+    value: Boolean,
+): EditorUiState {
+    return state.copy(
+        isTemplate = value,
+        templateName = if (value) state.templateName else "",
+    )
 }
 
 fun buildQuickAddPreviewChips(

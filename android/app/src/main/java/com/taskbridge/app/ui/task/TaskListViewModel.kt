@@ -7,18 +7,16 @@ import androidx.lifecycle.viewModelScope
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.repository.TaskRepository
 import com.taskbridge.app.domain.model.Task
-import com.taskbridge.app.notification.ReminderManager
+import com.taskbridge.app.domain.model.TaskFilter
 import com.taskbridge.app.ui.components.SyncStatusMessage
 import com.taskbridge.app.sync.SyncManager
 import com.taskbridge.app.sync.SyncRunState
 import com.taskbridge.app.utils.ShanghaiTime
-import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -32,18 +30,7 @@ data class TaskListUiState(
     val filter: TaskListFilter = TaskListFilter.All,
 )
 
-enum class TaskListFilter(val label: String) {
-    All("全部"),
-    Inbox("收件箱"),
-    Overdue("逾期"),
-    Week("本周"),
-    HighPriority("高优先级"),
-    Completed("已完成"),
-    PendingSync("未同步"),
-    Conflict("冲突"),
-    Templates("模板"),
-    Trash("回收站"),
-}
+typealias TaskListFilter = TaskFilter
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TaskListViewModel(
@@ -52,7 +39,6 @@ class TaskListViewModel(
     private val syncManager: SyncManager,
     private val tokenDataStore: TokenDataStore,
 ) : ViewModel() {
-    private val reminderManager = ReminderManager(appContext, tokenDataStore)
     val displayTimeZone: StateFlow<String> = tokenDataStore.displayTimeZone
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ShanghaiTime.DEFAULT_ZONE_ID)
 
@@ -64,21 +50,9 @@ class TaskListViewModel(
         }
     }
 
-    val tasks: StateFlow<List<Task>> = timelineNow
-        .flatMapLatest { now -> taskRepository.observeTasks(now) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val trashTasks: StateFlow<List<Task>> = taskRepository.observeTrashTasks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val todayTasks: StateFlow<List<Task>> = combine(tokenDataStore.displayTimeZone, timelineNow) { timeZoneId, now ->
-        timeZoneId to now
-    }
-        .flatMapLatest { (timeZoneId, now) ->
-            val todayPrefix = ShanghaiTime.todayDate(timeZoneId).toString()
-            taskRepository.observeTodayTasks(todayPrefix, timeZoneId, now)
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val pager = TaskListPager(viewModelScope, tokenDataStore.displayTimeZone, timelineNow, taskRepository::observeTaskPage)
+    val page = pager.page
+    private var todayOnly = false
 
     private val _uiState = MutableStateFlow(TaskListUiState())
     val uiState: StateFlow<TaskListUiState> = _uiState
@@ -98,18 +72,12 @@ class TaskListViewModel(
                 }
             }
         }
-        syncManager.enqueueNetworkSync()
-        syncManager.syncNow()
-        viewModelScope.launch {
-            todayTasks.collect { TodayTaskWidgetUpdateWorker.enqueue(appContext) }
-        }
+        syncManager.requestSync()
     }
 
     fun complete(localId: String) {
         viewModelScope.launch {
             taskRepository.completeTask(localId)
-            taskRepository.getTask(localId)?.let(reminderManager::cancel)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.CompletionQueued)
         }
     }
@@ -117,7 +85,6 @@ class TaskListViewModel(
     fun undoComplete(localId: String) {
         viewModelScope.launch {
             taskRepository.undoCompleteTask(localId)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.RestoreQueued)
         }
     }
@@ -125,18 +92,19 @@ class TaskListViewModel(
     fun restoreDeleted(localId: String) {
         viewModelScope.launch {
             taskRepository.restoreDeletedTask(localId)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.RestoreQueued)
         }
     }
 
     fun purgeDeleted(localId: String) {
         viewModelScope.launch {
+            val taskBeforePurge = taskRepository.getTask(localId) ?: return@launch
+            if (shouldBlockOfflinePurge(listOf(taskBeforePurge), !tokenDataStore.accessToken.first().isNullOrBlank())) {
+                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.PurgeRequiresConnection) }
+                return@launch
+            }
             runCatching {
-                val taskBeforePurge = taskRepository.getTask(localId)
-                taskBeforePurge?.let(reminderManager::cancel)
                 taskRepository.purgeDeletedTask(localId)
-                TodayTaskWidgetUpdateWorker.enqueue(appContext)
             }.onSuccess {
                 _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.Purged) }
             }.onFailure {
@@ -148,8 +116,6 @@ class TaskListViewModel(
     fun delete(localId: String) {
         viewModelScope.launch {
             taskRepository.softDeleteTask(localId)
-            taskRepository.getTask(localId)?.let(reminderManager::cancel)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.DeleteQueued)
         }
     }
@@ -157,7 +123,6 @@ class TaskListViewModel(
     fun batchComplete(localIds: List<String>) {
         viewModelScope.launch {
             taskRepository.batchComplete(localIds)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.BatchCompleted(localIds.size))
         }
     }
@@ -165,7 +130,6 @@ class TaskListViewModel(
     fun batchDelete(localIds: List<String>) {
         viewModelScope.launch {
             taskRepository.batchDelete(localIds)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.BatchDeleted(localIds.size))
         }
     }
@@ -173,19 +137,19 @@ class TaskListViewModel(
     fun batchRestoreDeleted(localIds: List<String>) {
         viewModelScope.launch {
             taskRepository.batchRestoreDeleted(localIds)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.BatchRestored(localIds.size))
         }
     }
 
     fun batchPurgeDeleted(localIds: List<String>) {
         viewModelScope.launch {
+            val tasks = localIds.distinct().mapNotNull { taskRepository.getTask(it) }
+            if (shouldBlockOfflinePurge(tasks, !tokenDataStore.accessToken.first().isNullOrBlank())) {
+                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.PurgeRequiresConnection) }
+                return@launch
+            }
             runCatching {
-                localIds.distinct().forEach { localId ->
-                    taskRepository.getTask(localId)?.let(reminderManager::cancel)
-                }
                 taskRepository.batchPurgeDeleted(localIds)
-                TodayTaskWidgetUpdateWorker.enqueue(appContext)
             }.onSuccess {
                 _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.BatchPurged(localIds.distinct().size)) }
             }.onFailure {
@@ -197,7 +161,6 @@ class TaskListViewModel(
     fun resolveConflictUseServer(localId: String) {
         viewModelScope.launch {
             taskRepository.resolveConflictUseServer(localId)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.UsingCloudVersion)
         }
     }
@@ -205,7 +168,6 @@ class TaskListViewModel(
     fun forceOverwriteServer(localId: String) {
         viewModelScope.launch {
             taskRepository.forceOverwriteServer(localId)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.OverwriteCloudQueued)
         }
     }
@@ -224,8 +186,6 @@ class TaskListViewModel(
                 remindTime = null,
                 plannedDate = tomorrow.toString(),
             )
-            taskRepository.getTask(localId)?.let(reminderManager::schedule)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.PostponedToTomorrow)
         }
     }
@@ -233,8 +193,6 @@ class TaskListViewModel(
     fun snoozeOneHour(localId: String) {
         viewModelScope.launch {
             taskRepository.snoozeTask(localId, Instant.now().plusSeconds(3_600).toString())
-            taskRepository.getTask(localId)?.let(reminderManager::schedule)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.Snoozed)
         }
     }
@@ -242,8 +200,6 @@ class TaskListViewModel(
     fun planToday(localId: String) {
         viewModelScope.launch {
             taskRepository.planTaskForToday(localId, ShanghaiTime.todayString(displayTimeZone.value))
-            taskRepository.getTask(localId)?.let(reminderManager::schedule)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.PlannedForToday)
         }
     }
@@ -251,7 +207,6 @@ class TaskListViewModel(
     fun moveInbox(localId: String) {
         viewModelScope.launch {
             taskRepository.moveTaskToInbox(localId)
-            TodayTaskWidgetUpdateWorker.enqueue(appContext)
             requestSync(SyncStatusMessage.MovedToInbox)
         }
     }
@@ -262,17 +217,36 @@ class TaskListViewModel(
 
     fun updateSearchQuery(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
+        updatePageSelection()
     }
 
     fun setFilter(filter: TaskListFilter) {
         _uiState.update { it.copy(filter = filter) }
+        updatePageSelection()
+    }
+
+    fun setTodayOnly(value: Boolean) {
+        todayOnly = value
+        updatePageSelection()
+    }
+
+    fun nextPage() = pager.next()
+
+    fun previousPage() = pager.previous()
+
+    private fun updatePageSelection() {
+        val state = _uiState.value
+        pager.select(todayOnly, state.filter, state.searchQuery)
     }
 
     private fun requestSync(message: SyncStatusMessage) {
         _uiState.update { it.copy(syncMessage = message) }
-        syncManager.enqueueNetworkSync()
-        syncManager.syncNow()
+        syncManager.requestSync(followUpIfRunning = message != SyncStatusMessage.Syncing)
     }
+}
+
+fun shouldBlockOfflinePurge(tasks: List<Task>, hasAccessToken: Boolean): Boolean {
+    return !hasAccessToken && tasks.any { it.serverId != null }
 }
 
 class TaskListViewModelFactory(

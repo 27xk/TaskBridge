@@ -1,17 +1,26 @@
 package com.taskbridge.app.ui.task
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -34,6 +43,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,12 +59,13 @@ import com.taskbridge.app.domain.model.SyncStatus
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
 import com.taskbridge.app.domain.model.isOverdueAt
-import com.taskbridge.app.domain.model.sortedByTaskTimeline
 import com.taskbridge.app.ui.components.AppDropdownField
 import com.taskbridge.app.ui.components.AppHeader
 import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
 import com.taskbridge.app.ui.components.AppUiOption
+import com.taskbridge.app.ui.components.glass.GlassStyle
+import com.taskbridge.app.ui.components.glass.LiquidGlassSurface
 import com.taskbridge.app.ui.components.SyncStatusMessage
 import com.taskbridge.app.ui.components.SyncStatusBar
 import com.taskbridge.app.ui.i18n.LocalAppLanguage
@@ -105,27 +120,20 @@ fun TaskListScreen(
     val appLanguage = LocalAppLanguage.current
     val isEnglish = appLanguage.code == "en-US"
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val allTasks by viewModel.tasks.collectAsStateWithLifecycle()
-    val todayTasks by viewModel.todayTasks.collectAsStateWithLifecycle()
-    val trashTasks by viewModel.trashTasks.collectAsStateWithLifecycle()
+    val page by viewModel.page.collectAsStateWithLifecycle()
     LaunchedEffect(todayOnly, initialFilter) {
+        viewModel.setTodayOnly(todayOnly)
         if (!todayOnly && initialFilter != TaskListFilter.All && uiState.filter != initialFilter) {
             viewModel.setFilter(initialFilter)
         }
     }
     val isTrashFilter = !todayOnly && uiState.filter == TaskListFilter.Trash
-    val sourceTasks = when {
-        todayOnly -> todayTasks
-        isTrashFilter -> trashTasks
-        else -> allTasks
-    }
     val displayTimeZone by viewModel.displayTimeZone.collectAsStateWithLifecycle()
     val now = rememberTimelineNow()
-    val tasks = remember(sourceTasks, todayOnly, uiState.searchQuery, uiState.filter, displayTimeZone, now) {
-        sourceTasks
-            .filterByMode(todayOnly, uiState.filter, displayTimeZone, now)
-            .filterByQuery(uiState.searchQuery)
-            .sortedByTaskTimeline(now, displayTimeZone)
+    val tasks = page.tasks
+    val listState = rememberLazyListState()
+    LaunchedEffect(page.offset, todayOnly, uiState.searchQuery, uiState.filter) {
+        listState.scrollToItem(0)
     }
     val openTasks = remember(tasks) { tasks.filter { it.status != TaskStatus.Completed } }
     val overdueTasks = remember(openTasks, now, displayTimeZone) { openTasks.filter { it.isOverdueAt(now, displayTimeZone) } }
@@ -135,15 +143,39 @@ fun TaskListScreen(
     var listToolsOpen by rememberSaveable { mutableStateOf(false) }
     var headerActionsExpanded by remember { mutableStateOf(false) }
     var pendingDeleteTask by remember { mutableStateOf<Task?>(null) }
+    var pendingDeleteSelectedTasks by remember { mutableStateOf<List<Task>>(emptyList()) }
     var pendingPurgeTask by remember { mutableStateOf<Task?>(null) }
     var pendingPurgeSelectedTasks by remember { mutableStateOf<List<Task>>(emptyList()) }
     var pendingConflictAction by remember { mutableStateOf<PendingConflictAction?>(null) }
+    var openTaskSelectionMode by remember { mutableStateOf(false) }
+    var selectedOpenTaskIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedTrashTaskIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val visibleOpenTaskIds = remember(isTrashFilter, openTasks) {
+        if (isTrashFilter) emptyList() else openTasks.map { it.localId }
+    }
     val visibleTrashTaskIds = remember(isTrashFilter, tasks) {
         if (isTrashFilter) tasks.map { it.localId }.toSet() else emptySet()
     }
+    fun clearOpenTaskSelection() {
+        openTaskSelectionMode = false
+        selectedOpenTaskIds = emptySet()
+    }
+    LaunchedEffect(page.offset) {
+        clearOpenTaskSelection()
+        selectedTrashTaskIds = emptySet()
+    }
+    LaunchedEffect(isTrashFilter, visibleOpenTaskIds) {
+        if (isTrashFilter) {
+            clearOpenTaskSelection()
+        } else {
+            selectedOpenTaskIds = retainVisibleOpenTaskSelection(selectedOpenTaskIds, visibleOpenTaskIds)
+        }
+    }
     LaunchedEffect(visibleTrashTaskIds) {
         selectedTrashTaskIds = selectedTrashTaskIds.intersect(visibleTrashTaskIds)
+    }
+    val selectedOpenTasks = remember(openTasks, selectedOpenTaskIds) {
+        openTasks.filter { selectedOpenTaskIds.contains(it.localId) }
     }
     val selectedTrashTasks = remember(tasks, selectedTrashTaskIds) {
         tasks.filter { selectedTrashTaskIds.contains(it.localId) }
@@ -166,8 +198,8 @@ fun TaskListScreen(
         filter = uiState.filter,
         strings = strings,
     )
-    val syncHealth = remember(allTasks, trashTasks, appLanguage.code) {
-        taskListSyncHealthText(allTasks + trashTasks, appLanguage.code)
+    val syncHealth = remember(page.syncCounts, appLanguage.code) {
+        taskListSyncHealthText(page.syncCounts.errors, page.syncCounts.pending, appLanguage.code)
     }
 
     pendingDeleteTask?.let { task ->
@@ -179,6 +211,20 @@ fun TaskListScreen(
             onConfirm = {
                 viewModel.delete(task.localId)
                 pendingDeleteTask = null
+            },
+        )
+    }
+
+    pendingDeleteSelectedTasks.takeIf { it.isNotEmpty() }?.let { selected ->
+        DeleteSelectedTasksConfirmationDialog(
+            count = selected.size,
+            strings = strings,
+            languageCode = appLanguage.code,
+            onDismiss = { pendingDeleteSelectedTasks = emptyList() },
+            onConfirm = {
+                viewModel.batchDelete(selected.map { it.localId })
+                clearOpenTaskSelection()
+                pendingDeleteSelectedTasks = emptyList()
             },
         )
     }
@@ -226,7 +272,9 @@ fun TaskListScreen(
     }
 
     AppPage(modifier = Modifier.fillMaxSize()) {
-        if (!localWorkspaceMode && uiState.syncMessage != SyncStatusMessage.LocalCacheReady) {
+        val showLocalModeActionMessage = uiState.syncMessage == SyncStatusMessage.PurgeRequiresConnection ||
+            uiState.syncMessage == SyncStatusMessage.PurgeFailed
+        if (uiState.syncMessage != SyncStatusMessage.LocalCacheReady && (!localWorkspaceMode || showLocalModeActionMessage)) {
             SyncStatusBar(uiState.syncMessage)
         }
         Column(
@@ -237,7 +285,7 @@ fun TaskListScreen(
         ) {
             AppHeader(
                 title = if (todayOnly) strings.todayTasks else strings.allTasks,
-                subtitle = "${tasks.size} ${strings.taskCountSuffix}",
+                subtitle = "${page.total} ${strings.taskCountSuffix}",
                 trailing = {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -338,7 +386,52 @@ fun TaskListScreen(
                 onClearFilter = { viewModel.setFilter(TaskListFilter.All) },
             )
 
+            if (!isTrashFilter && openTaskSelectionMode) {
+                OpenTaskSelectionActionBar(
+                    selectedCount = selectedOpenTaskIds.size,
+                    canSelectAllVisible = visibleOpenTaskIds.isNotEmpty() &&
+                        selectedOpenTaskIds.size < visibleOpenTaskIds.distinct().size,
+                    languageCode = appLanguage.code,
+                    onSelectAllVisible = {
+                        selectedOpenTaskIds = selectAllVisibleOpenTasks(visibleOpenTaskIds)
+                    },
+                    onCompleteSelected = {
+                        val selectedIds = selectedOpenTaskIds.toList()
+                        if (selectedIds.isNotEmpty()) {
+                            viewModel.batchComplete(selectedIds)
+                            clearOpenTaskSelection()
+                        }
+                    },
+                    onDeleteSelected = {
+                        if (selectedOpenTasks.isNotEmpty()) {
+                            pendingDeleteSelectedTasks = selectedOpenTasks
+                        }
+                    },
+                    onCancelSelection = { clearOpenTaskSelection() },
+                )
+            }
+
+            if (page.total > page.pageSize) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = viewModel::previousPage, enabled = page.hasPrevious) {
+                        Text(if (isEnglish) "Previous" else "上一页")
+                    }
+                    Text(
+                        "${page.offset + 1}–${page.offset + tasks.size} / ${page.total}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = viewModel::nextPage, enabled = page.hasNext) {
+                        Text(if (isEnglish) "Next" else "下一页")
+                    }
+                }
+            }
+
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -423,6 +516,20 @@ fun TaskListScreen(
                             onDelete = { pendingDeleteTask = task },
                             onOpen = { onTaskClick(task.localId) },
                             onEdit = { onEditClick(task.localId) },
+                            selectionMode = openTaskSelectionMode,
+                            selectionEnabled = true,
+                            selected = selectedOpenTaskIds.contains(task.localId),
+                            onSelectionChange = { checked ->
+                                selectedOpenTaskIds = if (checked) {
+                                    selectedOpenTaskIds + task.localId
+                                } else {
+                                    selectedOpenTaskIds - task.localId
+                                }
+                            },
+                            onEnterSelection = {
+                                openTaskSelectionMode = true
+                                selectedOpenTaskIds = selectedOpenTaskIds + task.localId
+                            },
                             now = now,
                             languageCode = appLanguage.code,
                             isTrash = false,
@@ -447,6 +554,20 @@ fun TaskListScreen(
                             onDelete = { pendingDeleteTask = task },
                             onOpen = { onTaskClick(task.localId) },
                             onEdit = { onEditClick(task.localId) },
+                            selectionMode = openTaskSelectionMode,
+                            selectionEnabled = true,
+                            selected = selectedOpenTaskIds.contains(task.localId),
+                            onSelectionChange = { checked ->
+                                selectedOpenTaskIds = if (checked) {
+                                    selectedOpenTaskIds + task.localId
+                                } else {
+                                    selectedOpenTaskIds - task.localId
+                                }
+                            },
+                            onEnterSelection = {
+                                openTaskSelectionMode = true
+                                selectedOpenTaskIds = selectedOpenTaskIds + task.localId
+                            },
                             now = now,
                             languageCode = appLanguage.code,
                             isTrash = false,
@@ -640,32 +761,74 @@ private fun TaskListPrimaryNavigation(
     onAllClick: () -> Unit,
     onSettingsClick: () -> Unit,
 ) {
-    FlowRow(
+    LiquidGlassSurface(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        cornerRadius = 28.dp,
+        style = GlassStyle.Elevated,
     ) {
-        if (todaySelected) {
-            Button(onClick = onTodayClick) {
-                Text(strings.today, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        } else {
-            OutlinedButton(onClick = onTodayClick) {
-                Text(strings.today, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(6.dp)
+                .selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TaskListNavigationTab(
+                label = strings.today,
+                selected = todaySelected,
+                onClick = onTodayClick,
+            )
+            TaskListNavigationTab(
+                label = strings.all,
+                selected = !todaySelected,
+                onClick = onAllClick,
+            )
+            TextButton(
+                onClick = onSettingsClick,
+                modifier = Modifier.heightIn(min = 48.dp),
+                shape = RoundedCornerShape(24.dp),
+            ) {
+                Text(strings.settings, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        if (todaySelected) {
-            OutlinedButton(onClick = onAllClick) {
-                Text(strings.all, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        } else {
-            Button(onClick = onAllClick) {
-                Text(strings.all, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        OutlinedButton(onClick = onSettingsClick) {
-            Text(strings.settings, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+    }
+}
+
+@Composable
+private fun TaskListNavigationTab(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val containerColor by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        label = "navigationContainer",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        label = "navigationContent",
+    )
+    Box(
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(containerColor)
+            .selectable(
+                selected = selected,
+                role = Role.Tab,
+                onClick = onClick,
+            )
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = contentColor,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -692,6 +855,55 @@ private fun TaskListHeaderActions(
                 onSyncNow()
             },
         )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun OpenTaskSelectionActionBar(
+    selectedCount: Int,
+    canSelectAllVisible: Boolean,
+    languageCode: String,
+    onSelectAllVisible: () -> Unit,
+    onCompleteSelected: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    onCancelSelection: () -> Unit,
+) {
+    val strings = LocalTaskBridgeStrings.current
+    val isEnglish = languageCode == "en-US"
+    AppPanel(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
+        Text(
+            text = strings.selectedCount.format(selectedCount),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            TextButton(
+                onClick = onSelectAllVisible,
+                enabled = canSelectAllVisible,
+            ) {
+                Text(if (isEnglish) "Select this page" else "全选本页")
+            }
+            TextButton(
+                onClick = onCompleteSelected,
+                enabled = selectedCount > 0,
+            ) {
+                Text(if (isEnglish) "Complete selected" else "完成所选")
+            }
+            TextButton(
+                onClick = onDeleteSelected,
+                enabled = selectedCount > 0,
+            ) {
+                Text(if (isEnglish) "Delete selected" else "删除所选")
+            }
+            TextButton(onClick = onCancelSelection) {
+                Text(if (isEnglish) "Cancel selection" else "取消选择")
+            }
+        }
     }
 }
 
@@ -781,6 +993,27 @@ private fun DeleteTaskConfirmationDialog(
 }
 
 @Composable
+private fun DeleteSelectedTasksConfirmationDialog(
+    count: Int,
+    strings: TaskBridgeStrings,
+    languageCode: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (languageCode == "en-US") "Delete selected tasks?" else "删除所选任务？") },
+        text = { Text(getDeleteSelectedConfirmationMessage(count, languageCode)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text(strings.delete) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(strings.cancel) }
+        },
+    )
+}
+
+@Composable
 private fun PurgeTaskConfirmationDialog(
     task: Task,
     strings: TaskBridgeStrings,
@@ -849,7 +1082,7 @@ private fun ConflictActionConfirmationDialog(
 }
 
 @Composable
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 private fun TaskRow(
     task: Task,
     strings: TaskBridgeStrings,
@@ -866,30 +1099,50 @@ private fun TaskRow(
     onPurge: () -> Unit = {},
     onOpen: () -> Unit,
     onEdit: () -> Unit,
+    selectionMode: Boolean = false,
+    selectionEnabled: Boolean = false,
     selected: Boolean = false,
     onSelectionChange: (Boolean) -> Unit = {},
+    onEnterSelection: () -> Unit = {},
     now: Instant,
     languageCode: String,
     isTrash: Boolean = false,
 ) {
+    val selectingThisRow = selectionMode && selectionEnabled
     val isOverdue = task.isOverdueAt(now, displayTimeZone)
-    val borderColor = if (isOverdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant
+    val borderColor = when {
+        selectingThisRow && selected -> MaterialTheme.colorScheme.primary
+        isOverdue -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.outlineVariant
+    }
     val showCompletionControl = !isTrash
     val showLeadingControl = showCompletionControl || isTrash
     var moreMenuExpanded by remember { mutableStateOf(false) }
     val actionsLabel = if (languageCode == "en-US") "Actions" else "操作"
+    val selectionLabel = if (languageCode == "en-US") "Select" else "选择"
     val adjustPlanSectionLabel = if (languageCode == "en-US") "Adjust plan" else "调整计划"
     val resolveConflictSectionLabel = if (languageCode == "en-US") "Resolve conflict" else "解决冲突"
     val dangerSectionLabel = if (languageCode == "en-US") "Danger zone" else "危险操作"
-    Surface(
+    LiquidGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onOpen),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
+            .clip(RoundedCornerShape(20.dp))
+            .then(
+                if (selectionEnabled) {
+                    Modifier.combinedClickable(
+                        onClick = {
+                            if (selectionMode) onSelectionChange(!selected) else onOpen()
+                        },
+                        onLongClickLabel = selectionLabel,
+                        onLongClick = onEnterSelection,
+                    )
+                } else {
+                    Modifier.clickable(onClick = onOpen)
+                },
+            ),
+        cornerRadius = 20.dp,
+        style = GlassStyle.Quiet,
+        borderColor = borderColor,
     ) {
         Column(
             modifier = Modifier
@@ -901,10 +1154,17 @@ private fun TaskRow(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (isTrash) {
+                if (isTrash || selectingThisRow) {
                     Checkbox(
                         checked = selected,
                         onCheckedChange = onSelectionChange,
+                        modifier = Modifier.semantics {
+                            contentDescription = if (selected) {
+                                taskSelectionAccessibilityLabel(task.title, languageCode, selected = true)
+                            } else {
+                                taskSelectionAccessibilityLabel(task.title, languageCode)
+                            }
+                        },
                     )
                 } else if (showCompletionControl) {
                     Checkbox(
@@ -916,6 +1176,9 @@ private fun TaskRow(
                                 onUndoComplete()
                             }
                         },
+                        modifier = Modifier.semantics {
+                            contentDescription = taskCompletionAccessibilityLabel(task.title, task.status, languageCode)
+                        },
                     )
                 }
                 Column(
@@ -925,7 +1188,7 @@ private fun TaskRow(
                 ) {
                     Text(
                         text = task.title,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                         textDecoration = if (task.status == TaskStatus.Completed) {
@@ -944,90 +1207,107 @@ private fun TaskRow(
             if (task.syncStatus == SyncStatus.Conflict) {
                 ConflictSnapshotSummary(task = task, languageCode = languageCode)
             }
-            FlowRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = if (showLeadingControl) 42.dp else 0.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                if (isTrash) {
-                    TextButton(onClick = onRestoreDeleted) { Text(strings.restore) }
-                    TextButton(onClick = onPurge) { Text(strings.purge) }
-                } else {
-                    TextButton(onClick = { moreMenuExpanded = true }) { Text(actionsLabel) }
-                }
-                DropdownMenu(
-                    expanded = moreMenuExpanded,
-                    onDismissRequest = { moreMenuExpanded = false },
+            if (!selectingThisRow) {
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = if (showLeadingControl) 42.dp else 0.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    DropdownMenuItem(
-                        text = { Text(strings.edit) },
-                        onClick = {
-                            moreMenuExpanded = false
-                            onEdit()
-                        },
-                    )
-                    if (task.status == TaskStatus.Completed) {
-                        DropdownMenuItem(
-                            text = { Text(strings.restore) },
-                            onClick = {
-                                moreMenuExpanded = false
-                                onUndoComplete()
-                            },
-                        )
+                    if (isTrash) {
+                        TextButton(onClick = onRestoreDeleted) { Text(strings.restore) }
+                        TextButton(onClick = onPurge) { Text(strings.purge) }
                     } else {
-                        DropdownMenuSectionLabel(adjustPlanSectionLabel)
-                        DropdownMenuItem(
-                            text = { Text(strings.today) },
-                            onClick = {
-                                moreMenuExpanded = false
-                                onPlanToday()
+                        TextButton(
+                            onClick = { moreMenuExpanded = true },
+                            modifier = Modifier.semantics {
+                                contentDescription = taskActionAccessibilityLabel(actionsLabel, task.title)
                             },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(strings.tomorrow) },
-                            onClick = {
-                                moreMenuExpanded = false
-                                onPostpone()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(strings.snoozeOneHour) },
-                            onClick = {
-                                moreMenuExpanded = false
-                                onSnooze()
-                            },
-                        )
+                        ) { Text(actionsLabel) }
                     }
-                    if (task.syncStatus == SyncStatus.Conflict) {
+                    DropdownMenu(
+                        expanded = moreMenuExpanded,
+                        onDismissRequest = { moreMenuExpanded = false },
+                    ) {
+                        if (selectionEnabled) {
+                            DropdownMenuItem(
+                                text = { Text(selectionLabel) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onEnterSelection()
+                                },
+                            )
+                            HorizontalDivider()
+                        }
+                        DropdownMenuItem(
+                            text = { Text(strings.edit) },
+                            onClick = {
+                                moreMenuExpanded = false
+                                onEdit()
+                            },
+                        )
+                        if (task.status == TaskStatus.Completed) {
+                            DropdownMenuItem(
+                                text = { Text(strings.restore) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onUndoComplete()
+                                },
+                            )
+                        } else {
+                            DropdownMenuSectionLabel(adjustPlanSectionLabel)
+                            DropdownMenuItem(
+                                text = { Text(strings.today) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onPlanToday()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(strings.tomorrow) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onPostpone()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(strings.snoozeOneHour) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onSnooze()
+                                },
+                            )
+                        }
+                        if (task.syncStatus == SyncStatus.Conflict) {
+                            HorizontalDivider()
+                            DropdownMenuSectionLabel(resolveConflictSectionLabel)
+                            DropdownMenuItem(
+                                text = { Text(strings.keepServerVersion) },
+                                enabled = !task.conflictServerJson.isNullOrBlank(),
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onUseServer()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(strings.keepDeviceVersion) },
+                                onClick = {
+                                    moreMenuExpanded = false
+                                    onOverwriteServer()
+                                },
+                            )
+                        }
                         HorizontalDivider()
-                        DropdownMenuSectionLabel(resolveConflictSectionLabel)
+                        DropdownMenuSectionLabel(dangerSectionLabel)
                         DropdownMenuItem(
-                            text = { Text(strings.keepServerVersion) },
-                            enabled = !task.conflictServerJson.isNullOrBlank(),
+                            text = { Text(strings.delete) },
                             onClick = {
                                 moreMenuExpanded = false
-                                onUseServer()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(strings.keepDeviceVersion) },
-                            onClick = {
-                                moreMenuExpanded = false
-                                onOverwriteServer()
+                                onDelete()
                             },
                         )
                     }
-                    HorizontalDivider()
-                    DropdownMenuSectionLabel(dangerSectionLabel)
-                    DropdownMenuItem(
-                        text = { Text(strings.delete) },
-                        onClick = {
-                            moreMenuExpanded = false
-                            onDelete()
-                        },
-                    )
                 }
             }
         }
@@ -1070,6 +1350,36 @@ private fun TaskMetaChips(
                 )
             }
         }
+    }
+}
+
+fun taskActionAccessibilityLabel(actionLabel: String, taskTitle: String): String {
+    return "$actionLabel: $taskTitle"
+}
+
+fun taskSelectionAccessibilityLabel(
+    taskTitle: String,
+    languageCode: String,
+    selected: Boolean = false,
+): String {
+    return when {
+        selected && languageCode == "en-US" -> "Unselect task: $taskTitle"
+        selected -> "取消选择任务：$taskTitle"
+        languageCode == "en-US" -> "Select task: $taskTitle"
+        else -> "选择任务：$taskTitle"
+    }
+}
+
+fun taskCompletionAccessibilityLabel(
+    taskTitle: String,
+    status: TaskStatus,
+    languageCode: String,
+): String {
+    return when {
+        status == TaskStatus.Completed && languageCode == "en-US" -> "Undo completion: $taskTitle"
+        status == TaskStatus.Completed -> "撤销完成：$taskTitle"
+        languageCode == "en-US" -> "Complete task: $taskTitle"
+        else -> "完成任务：$taskTitle"
     }
 }
 
@@ -1249,41 +1559,6 @@ private fun combinedTaskListFilterOptions(strings: TaskBridgeStrings): List<AppU
     return (primaryTaskListFilters + moreTaskListFilters)
         .distinct()
         .map { AppUiOption(it, it.localizedLabel(strings)) }
-}
-
-private fun List<Task>.filterByMode(
-    todayOnly: Boolean,
-    filter: TaskListFilter,
-    displayTimeZone: String,
-    now: Instant,
-): List<Task> {
-    if (todayOnly) return this
-    val today = ShanghaiTime.todayDate(displayTimeZone)
-    return when (filter) {
-        TaskListFilter.All -> this
-        TaskListFilter.Inbox -> filter { it.listType == "inbox" && it.status != TaskStatus.Completed }
-        TaskListFilter.Overdue -> filter { it.isOverdueAt(now, displayTimeZone) }
-        TaskListFilter.Week -> filter {
-            val date = it.plannedDate?.let { value -> runCatching { LocalDate.parse(value) }.getOrNull() }
-                ?: it.dueLocalDate(displayTimeZone)
-            date != null && !date.isBefore(today) && !date.isAfter(today.plusDays(7))
-        }
-        TaskListFilter.HighPriority -> filter { it.status != TaskStatus.Completed && it.priority >= 3 }
-        TaskListFilter.Completed -> filter { it.status == TaskStatus.Completed }
-        TaskListFilter.PendingSync -> filter { it.syncStatus != SyncStatus.Synced }
-        TaskListFilter.Conflict -> filter { it.syncStatus == SyncStatus.Conflict }
-        TaskListFilter.Templates -> filter { it.isTemplate }
-        TaskListFilter.Trash -> this
-    }
-}
-
-private fun List<Task>.filterByQuery(query: String): List<Task> {
-    val keyword = query.trim()
-    if (keyword.isBlank()) return this
-    return filter { task ->
-        listOfNotNull(task.title, task.content, task.tag, task.project)
-            .any { it.contains(keyword, ignoreCase = true) }
-    }
 }
 
 private fun taskMetaChips(

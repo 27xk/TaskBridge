@@ -1,6 +1,5 @@
 package com.taskbridge.app.widget
 
-import android.content.Context
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.local.AppDatabase
 import com.taskbridge.app.data.local.TodayWidgetTaskProjection
@@ -34,18 +33,11 @@ data class TodayTaskWidgetItem(
 )
 
 class TodayTaskWidgetRepository(
-    context: Context,
+    private val database: AppDatabase,
+    private val tokenDataStore: TokenDataStore,
+    private val workspaceMigration: WorkspaceMigrationCoordinator,
 ) {
-    private val appContext = context.applicationContext
-    private val database = AppDatabase.getInstance(appContext)
     private val taskDao = database.taskDao()
-    private val tokenDataStore = TokenDataStore(appContext)
-    private val workspaceMigration = WorkspaceMigrationCoordinator(
-        database,
-        taskDao,
-        database.syncQueueDao(),
-        tokenDataStore,
-    )
 
     suspend fun loadState(): TodayTaskWidgetState {
         tokenDataStore.initializeLegacyWorkspaceOwnership()
@@ -120,7 +112,8 @@ class TodayTaskWidgetRepository(
             displayTimeZone: String = ShanghaiTime.DEFAULT_ZONE_ID,
             now: Instant = Instant.now(),
         ): Boolean {
-            if (isTaskOverdue(task.status, task.dueTime, now, displayTimeZone)) return true
+            if (task.listType == "today") return true
+            if (isTaskOverdue(task.status, task.dueTime, now, displayTimeZone, task.snoozedUntil)) return true
             if (task.dueTime.isToday(today, displayTimeZone)) return true
             if (task.remindTime.isToday(today, displayTimeZone)) return true
             if (task.plannedDate == today) return true
@@ -139,6 +132,7 @@ fun List<TodayWidgetTaskProjection>.sortedForWidget(
             dueTime = task.dueTime,
             plannedDate = task.plannedDate,
             completedAt = task.completedAt,
+            snoozedUntil = task.snoozedUntil,
             priority = task.priority,
             sortOrder = task.sortOrder,
             updatedAt = task.updatedAt,

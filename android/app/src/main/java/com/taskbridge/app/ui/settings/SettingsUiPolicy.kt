@@ -1,5 +1,13 @@
 package com.taskbridge.app.ui.settings
 
+fun settingsCategoryLabels(isEnglish: Boolean): List<String> {
+    return if (isEnglish) {
+        listOf("Preferences", "Connection", "Account", "Data and backups", "Sync issues")
+    } else {
+        listOf("偏好", "连接", "账号", "数据与备份", "同步问题")
+    }
+}
+
 fun syncQueueDiagnosticText(
     action: String,
     taskTitle: String?,

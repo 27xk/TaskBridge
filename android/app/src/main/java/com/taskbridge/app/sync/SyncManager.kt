@@ -4,127 +4,109 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.work.Constraints
-import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.taskbridge.app.CoalescingWorkScheduler
 import com.taskbridge.app.data.datastore.TokenDataStore
 import com.taskbridge.app.data.repository.SyncRepository
-import com.taskbridge.app.notification.ReminderManager
-import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.Closeable
+import java.util.UUID
+import java.util.concurrent.TimeoutException
 
 class SyncManager(
     private val context: Context,
     private val syncRepository: SyncRepository,
     private val tokenDataStore: TokenDataStore,
-    private val reminderManager: ReminderManager,
-) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope: CoroutineScope,
+    private val workScheduler: CoalescingWorkScheduler,
+) : Closeable {
     private val deviceIdProvider = DeviceIdProvider(context)
     private val webSocketClient = WebSocketClient(
         scope = scope,
         webSocketUrlProvider = { tokenDataStore.webSocketUrl.first() },
         ticketProvider = { deviceId -> syncRepository.createWebSocketTicket(deviceId).getOrNull() },
     )
-    private val syncMutex = Mutex()
-    private var syncDebounceJob: Job? = null
+    private val coordinator = SyncCoordinator(scope, ::performSync)
+    private var socketConnectionJob: Job? = null
+    @Volatile private var foreground = false
     private val _syncState = MutableStateFlow<SyncRunState>(SyncRunState.Idle)
     val syncState: StateFlow<SyncRunState> = _syncState
-
-    init {
-        scope.launch {
-            combine(tokenDataStore.currentWorkspace, tokenDataStore.accessToken) { workspace, accessToken ->
-                workspace?.id to accessToken.isNullOrBlank()
-            }
-                .distinctUntilChanged()
-                .drop(1)
-                .collect {
-                    syncDebounceJob?.cancel()
-                    webSocketClient.disconnect()
-                    _syncState.value = SyncRunState.Idle
-                }
+    private val sessionObserver = scope.launch {
+        combine(tokenDataStore.currentWorkspace, tokenDataStore.accessToken) { workspace, accessToken ->
+            workspace?.id to accessToken.isNullOrBlank()
+        }.distinctUntilChanged().drop(1).collect {
+            coordinator.cancel()
+            socketConnectionJob?.cancel()
+            webSocketClient.disconnect()
+            _syncState.value = SyncRunState.Idle
+            if (foreground) connectForegroundWebSocket()
         }
     }
 
-    fun enqueueNetworkSync() {
-        scope.launch {
-            val authContext = tokenDataStore.requestAuthContext()
-            val workspace = authContext.workspace ?: return@launch
-            if (authContext.accessToken.isNullOrBlank()) {
-                _syncState.value = SyncRunState.Offline
-                return@launch
-            }
-            val request = OneTimeWorkRequestBuilder<SyncWorker>()
-                .setInputData(workDataOf(SyncWorker.INPUT_WORKSPACE_ID to workspace.id))
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build(),
-                )
-                .build()
-
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                "taskbridge-sync-${workspace.preferenceSuffix}",
-                ExistingWorkPolicy.KEEP,
-                request,
-            )
-        }
+    /** One durable path for startup, edits, manual refresh and WebSocket notifications. */
+    fun requestSync(followUpIfRunning: Boolean = false) {
+        scope.launch { enqueueSync(followUpIfRunning) }
     }
 
-    fun syncNow() {
-        syncDebounceJob?.cancel()
-        syncDebounceJob = scope.launch {
-            delay(500)
-            performSync()
+    private suspend fun enqueueSync(followUpIfRunning: Boolean): UUID? {
+        val authContext = tokenDataStore.requestAuthContext()
+        val workspace = authContext.workspace ?: return null
+        if (authContext.accessToken.isNullOrBlank()) {
+            _syncState.value = SyncRunState.Offline
+            return null
         }
+        val request = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setInputData(workDataOf(SyncWorker.INPUT_WORKSPACE_ID to workspace.id))
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        if (!isNetworkAvailable()) _syncState.value = SyncRunState.Offline
+        // A running job gets one waiting successor, so edits after its push snapshot are retained.
+        return workScheduler.enqueue("taskbridge-sync-${workspace.preferenceSuffix}", request, followUpIfRunning)
     }
 
     suspend fun syncNowAndWait(): SyncRunState {
-        syncDebounceJob?.cancel()
-        return withContext(Dispatchers.IO) { performSync() }
+        val id = enqueueSync(followUpIfRunning = true) ?: return _syncState.value
+        if (!isNetworkAvailable()) return SyncRunState.Offline
+        val result = withTimeoutOrNull(45_000) {
+            WorkManager.getInstance(context).getWorkInfoByIdFlow(id).filterNotNull().first { info ->
+                info.state.isFinished || (info.state == WorkInfo.State.ENQUEUED && info.runAttemptCount > 0)
+            }
+        }
+        return if (result == null) {
+            if (isNetworkAvailable()) SyncRunState.Failure(TimeoutException("sync is still queued")) else SyncRunState.Offline
+        } else _syncState.value
     }
 
-    private suspend fun performSync(): SyncRunState = syncMutex.withLock {
-        val authContext = tokenDataStore.requestAuthContext()
-        if (authContext.workspace == null) {
-            _syncState.value = SyncRunState.Idle
-            return@withLock SyncRunState.Idle
-        }
-        if (authContext.accessToken.isNullOrBlank()) {
-            _syncState.value = SyncRunState.Offline
-            return@withLock SyncRunState.Offline
-        }
-        val networkAvailable = isNetworkAvailable()
-        if (!networkAvailable) {
-            _syncState.value = SyncRunState.Offline
-            return@withLock SyncRunState.Offline
-        }
+    suspend fun runWorkerSync(expectedWorkspaceId: String): SyncRunState = coordinator.run(expectedWorkspaceId)
 
+    private suspend fun performSync(expectedWorkspaceId: String): SyncRunState {
+        val authContext = tokenDataStore.requestAuthContext()
+        if (authContext.workspace?.id != expectedWorkspaceId) return SyncRunState.Idle
+        if (authContext.accessToken.isNullOrBlank() || !isNetworkAvailable()) {
+            _syncState.value = SyncRunState.Offline
+            return SyncRunState.Offline
+        }
         _syncState.value = SyncRunState.Syncing
         val result = syncRepository.syncNow(deviceIdProvider.getDeviceId())
-        val terminal = terminalSyncState(networkAvailable = true, failure = result.exceptionOrNull())
-        if (result.isSuccess) {
-            runCatching { reminderManager.rebuildAll() }
-            TodayTaskWidgetUpdateWorker.enqueue(context)
-        }
-        _syncState.value = terminal
-        terminal
+        result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+        val terminal = terminalSyncState(networkAvailable = isNetworkAvailable(), failure = result.exceptionOrNull())
+        if (tokenDataStore.currentWorkspace.first()?.id == expectedWorkspaceId) _syncState.value = terminal
+        return terminal
     }
 
     private fun isNetworkAvailable(): Boolean {
@@ -135,20 +117,30 @@ class SyncManager(
     }
 
     fun connectForegroundWebSocket() {
-        scope.launch {
+        foreground = true
+        if (socketConnectionJob?.isActive == true) return
+        socketConnectionJob = scope.launch {
             val authContext = tokenDataStore.requestAuthContext()
             if (authContext.workspace == null || authContext.accessToken.isNullOrBlank()) {
                 _syncState.value = if (authContext.workspace == null) SyncRunState.Idle else SyncRunState.Offline
                 webSocketClient.disconnect()
                 return@launch
             }
-            webSocketClient.connect(deviceIdProvider.getDeviceId()) {
-                performSync()
-            }
+            if (foreground) webSocketClient.connect(deviceIdProvider.getDeviceId()) { requestSync(followUpIfRunning = true) }
         }
     }
 
     fun disconnectForegroundWebSocket() {
+        foreground = false
+        socketConnectionJob?.cancel()
+        socketConnectionJob = null
         webSocketClient.disconnect()
+    }
+
+    override fun close() {
+        disconnectForegroundWebSocket()
+        sessionObserver.cancel()
+        coordinator.cancel()
+        webSocketClient.close()
     }
 }
