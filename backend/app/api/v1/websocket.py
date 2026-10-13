@@ -1,6 +1,7 @@
 import json
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_session_from_payload, get_db
@@ -22,19 +23,37 @@ async def sync_socket(
     db: Session = Depends(get_db),
 ):
     try:
-        user_id = _authenticate_sync_socket(websocket, device_id, ticket, db)
-        ensure_device_registered_by_user_id(db, user_id, device_id)
+        user_id = await run_in_threadpool(
+            _authenticate_connection, websocket, device_id, ticket, db,
+        )
     except (AppException, KeyError, ValueError):
         await websocket.close(code=4401)
         return
 
-    await websocket_manager.connect(user_id, device_id, websocket)
     try:
+        await websocket_manager.connect(user_id, device_id, websocket)
         while True:
             message = await websocket.receive_text()
             await _handle_client_message(websocket, user_id, device_id, message)
     except WebSocketDisconnect:
+        pass
+    finally:
         websocket_manager.disconnect(user_id, device_id, websocket)
+
+
+def _authenticate_connection(
+    websocket: WebSocket,
+    device_id: str,
+    ticket: str | None,
+    db: Session,
+) -> int:
+    try:
+        user_id = _authenticate_sync_socket(websocket, device_id, ticket, db)
+        ensure_device_registered_by_user_id(db, user_id, device_id)
+        return user_id
+    finally:
+        # WebSocket dependencies otherwise retain their Session until disconnection.
+        db.close()
 
 
 async def _handle_client_message(
