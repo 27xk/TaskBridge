@@ -25,12 +25,12 @@
         <div class="local-trial-choice-grid">
           <article class="local-trial-choice">
             <h3>我只是使用别人部署好的 TaskBridge</h3>
-            <p>请先向管理员或部署者索取服务器地址和账号，然后回到登录页填写地址。普通使用不需要执行下面的部署命令。</p>
-            <a class="secondary-button" href="./index.html">返回登录页填写地址</a>
+            <p>请先向管理员或部署者索取 Web 访问地址或已配置客户端及账号。普通使用不需要执行下面的部署命令。</p>
+            <a class="secondary-button" href="./index.html">返回登录页</a>
           </article>
           <article class="local-trial-choice">
             <h3>我是部署者，准备自托管</h3>
-            <p>继续阅读下面步骤，完成服务启动、健康检查和首个账号创建，再把服务器地址发给需要登录的用户。</p>
+            <p>继续阅读下面步骤，完成服务启动、健康检查和首个账号创建，再提供 Web 入口或对应服务的客户端安装包。</p>
           </article>
         </div>
       </section>
@@ -63,7 +63,7 @@ WEB_CORS_ORIGINS=https://taskbridge.example.com</code></pre>
         <li>
           <span>检查健康状态</span>
           <pre class="command-snippet"><code>curl http://127.0.0.1:8080/ready</code></pre>
-          <p><code>/ready</code> 返回可用后，可打开 <code>http://127.0.0.1:8080</code> 验证 Web。通过 Nginx 或 Caddy 对外提供服务时，请把统一域名代理到该 Web 入口，并在客户端填写该域名。</p>
+          <p><code>/ready</code> 返回可用后，可打开 <code>http://127.0.0.1:8080</code> 验证 Web。通过 Nginx 或 Caddy 对外提供服务时，请把统一域名代理到该 Web 入口，并在构建桌面 / Android 发布包时写入对应 API 和同步地址。</p>
         </li>
         <li>
           <span>创建首个账号</span>
@@ -82,12 +82,12 @@ WEB_CORS_ORIGINS=https://taskbridge.example.com</code></pre>
           <div class="local-trial-choice-grid">
             <article class="local-trial-choice">
               <h4>If you use someone else's TaskBridge service</h4>
-              <p>Ask the administrator or deployer for the server address and account first. You do not need to run the deployment commands below.</p>
-              <a class="secondary-button" href="./index.html">Back to sign-in with that address</a>
+              <p>Ask the administrator for the Web address or a configured client and an account. You do not need the deployment commands below.</p>
+              <a class="secondary-button" href="./index.html">Back to sign-in</a>
             </article>
             <article class="local-trial-choice">
               <h4>If you are deploying TaskBridge</h4>
-              <p>Continue with the steps below, start the service, check readiness, and create the first account before sharing the server address.</p>
+              <p>Continue below to start the service, check readiness, and create the first account before sharing the Web entry or configured client packages.</p>
             </article>
           </div>
         </div>

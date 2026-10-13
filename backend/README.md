@@ -60,6 +60,9 @@ Docker Compose 中只有 API 端口对宿主机开放。MySQL 和 Redis 默认�
 | `APP_VERSION` | 应用版本 |
 | `ENVIRONMENT` | 运行环境 |
 | `DATABASE_URL` | MySQL 连接字符串 |
+| `DATABASE_POOL_SIZE` | 每个后端进程的连接池容量，默认 `3` |
+| `DATABASE_MAX_OVERFLOW` | 每个后端进程可临时增加的连接数，默认 `2` |
+| `DATABASE_POOL_RECYCLE_SECONDS` | 数据库连接回收间隔，默认 `1800` 秒 |
 | `REDIS_URL` | Redis 连接字符串 |
 | `JWT_SECRET` | JWT 签名密钥，生产环境必须替换 |
 | `JWT_ALGORITHM` | JWT 算法，默认 `HS256` |
@@ -70,9 +73,12 @@ Docker Compose 中只有 API 端口对宿主机开放。MySQL 和 Redis 默认�
 | `METRICS_ENABLED` | 是否启用 `/metrics` |
 | `METRICS_TOKEN` | 生产 / 预发环境启用指标时必须配置 |
 | `TRUSTED_PROXY_IPS` | 允许提供 `X-Forwarded-For` / `X-Real-IP` 的反向代理 IP 或 CIDR |
+| `FORWARDED_ALLOW_IPS` | Uvicorn 允许提供 `X-Forwarded-Proto` 的代理 IP；HTTPS 反代必须设置为受控代理地址 |
 | `WEB_CORS_ORIGINS` | Web/PWA 客户端允许访问 API 的 Origin，多个值用英文逗号分隔 |
 
 `MYSQL_ROOT_PASSWORD`、`MYSQL_DATABASE`、`MYSQL_USER` 和 `MYSQL_PASSWORD` 只用于 Docker Compose 内置 MySQL 初始化。
+
+WebSocket 在握手阶段完成身份和设备检查后即归还数据库连接，空闲长连接不持续占用连接池。连接池应按同时执行的短事务调整；多进程部署的总上限为 `(DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW) × 进程数`。
 
 生产环境建议：
 
@@ -117,6 +123,7 @@ http://127.0.0.1:8000/redoc
 POST /api/v1/auth/register
 POST /api/v1/auth/login
 POST /api/v1/auth/refresh
+DELETE /api/v1/auth/session
 GET  /api/v1/auth/me
 PUT  /api/v1/auth/password
 GET  /api/v1/auth/sessions
@@ -144,6 +151,8 @@ POST /api/v1/sync/push
 `POST /api/v1/sync/push` 支持安全重试：同一 `device_id + local_id + action + version` 且 payload 相同的变更会返回首次应用结果，不会重复写入。复用同一幂等键但更换 payload 会被拒绝；如果该变更已经落后于服务端版本，则按普通 `conflict` 返回服务端任务快照。
 
 Web 等直接调用 `POST /api/v1/tasks` 的客户端可传稳定的 `client_request_id`。同一用户使用相同键和相同创建数据重试时返回原任务，不会重复创建或重复写同步日志；复用同一键提交不同数据时返回 409。`GET /api/v1/tasks` 和 `/tasks/meta` 接受 IANA `timezone` 参数，客户端应传当前显示时区，未知时区返回 400。
+
+Web/PWA 登录、注册和刷新时，后端会同时更新限定认证路径的 HttpOnly Refresh Cookie；刷新请求可以从请求体或 Cookie 读取 Refresh Token。`DELETE /api/v1/auth/session` 会撤销当前会话并清除 Cookie。
 
 已登录用户通过 `PUT /api/v1/auth/password` 修改密码，成功后会撤销其他活跃会话。无法登录时，自托管管理员可运行 `python -m tools.reset_password --username-or-email <账号>` 重置密码并撤销该账号全部会话。
 

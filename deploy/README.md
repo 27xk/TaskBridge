@@ -2,7 +2,7 @@
 
 `deploy/` 提供面向普通用户和自托管用户的 Docker Compose 部署方式。默认使用 GitHub Container Registry 上的正式镜像，也可以切换到 Docker Hub 镜像。
 
-这份文档只适合“还没有服务器地址，需要在本机试用或长期自托管”的用户。已经拿到 TaskBridge 服务器地址和账号的用户，不需要执行这里的 Docker 命令，直接回到客户端填写服务器地址并登录。
+这份文档适合本机试用或长期自托管。普通用户拿到 Web 入口或对应服务的发布包与账号后，直接打开客户端登录，不需要执行 Docker 命令或填写服务地址。
 
 ## 快速启动
 
@@ -26,7 +26,7 @@
 2. 下载并解压 Release 部署包，或准备完整项目源码。
 3. 使用上面的启动入口；需要手动控制时再复制 `.env.local.example` 为 `.env` 并执行下面的 Compose 命令。
 4. 打开 `http://127.0.0.1:8080/ready` 确认服务可用，再访问 `http://127.0.0.1:8080` 打开 Web/PWA。
-5. Web 登录页和本机 Windows 桌面端都填写 `http://127.0.0.1:8080`；Android 模拟器填写 `http://10.0.2.2:8080`。真机或另一台电脑填写 `http://<运行服务电脑的局域网 IP>:8080`。
+5. Web 直接使用当前入口；手机或另一台电脑可打开 `http://<运行服务电脑的局域网 IP>:8080`。Windows / Android 开发构建可配置对应测试地址，发布包需在构建时注入地址。
 
 环境要求：
 
@@ -52,7 +52,7 @@ Copy-Item .env.local.example .env
 docker compose -f docker-compose.release.yml up -d
 ```
 
-本机试用示例使用 `ENVIRONMENT=development`，并设置 `WEB_CORS_ORIGINS=*`，方便手机、局域网电脑和 Web/PWA 同时访问开发后端。如果要部署到公网或共享服务器，请改用下面“配置”章节的生产示例，替换密码、密钥和域名，并把 `WEB_CORS_ORIGINS` 改为明确的 Web 客户端来源，例如 `WEB_CORS_ORIGINS=http://taskbridge.example.com` 或 `WEB_CORS_ORIGINS=https://taskbridge.example.com`。
+本机试用示例使用 `ENVIRONMENT=development`，并设置 `WEB_CORS_ORIGINS=*`，方便开发工具访问后端。内置 Web/PWA 使用同源入口，可通过 HttpOnly Cookie 自动恢复登录。若要部署到公网或共享服务器，请改用下面“配置”章节的生产示例，替换密码、密钥和域名，并把 `WEB_CORS_ORIGINS` 改为明确的 Web 客户端来源，例如 `WEB_CORS_ORIGINS=http://taskbridge.example.com` 或 `WEB_CORS_ORIGINS=https://taskbridge.example.com`。
 
 启动后访问：
 
@@ -67,8 +67,8 @@ http://127.0.0.1:8080/ready
 ### 验证客户端能登录
 
 1. Web/PWA 访问 `http://127.0.0.1:8080`；桌面端或 Android 端从安装包打开。
-2. 在登录页填写统一服务器根地址：本机 Web 和 Windows 使用 `http://127.0.0.1:8080`；Android 模拟器使用 `http://10.0.2.2:8080`；手机或另一台电脑使用 `http://<服务器局域网 IP>:8080`。
-3. 直接登录或注册。登录会自动检查连接；“检查连接”只用于排查服务器地址。
+2. Web 使用当前站点；Windows / Android 应安装已写入该服务地址的发布包。
+3. 直接登录或注册；连接检查用于确认服务状态。
 4. 新建一条待办，刷新或切换到另一端确认能看到同一条任务。
 
 ## 镜像来源
@@ -96,7 +96,7 @@ GitHub Release 的 `TaskBridge-<version>-deployment.zip` 会把 `.env.example`�
 | `mysql` | 内部网络 | MySQL 数据库，默认不对宿主机开放 |
 | `redis` | 内部网络 | Redis，默认不对宿主机开放 |
 
-Release Compose 使用固定内部网段 `172.30.27.0/24`，其中 Web 反向代理固定为 `172.30.27.10`。默认 `TRUSTED_PROXY_IPS=172.30.27.10` 只信任这一个代理出口，避免其他容器伪造客户端转发地址。
+Release Compose 使用固定内部网段 `172.30.27.0/24`，其中 Web 反向代理固定为 `172.30.27.10`。默认 `TRUSTED_PROXY_IPS=172.30.27.10` 只信任这一个代理出口，避免其他容器伪造客户端转发地址；`FORWARDED_ALLOW_IPS=172.30.27.10` 让 Uvicorn 只从同一代理读取 `X-Forwarded-Proto`，从而在 HTTPS 反代下正确设置 Cookie 的 `Secure` 属性。
 
 ## 配置
 
@@ -145,7 +145,7 @@ printf '%s\n' 'replace-with-a-strong-password' | docker compose -f docker-compos
 
 ### 忘记密码
 
-已登录用户可在客户端的账号安全入口修改密码。无法登录时，自托管管理员可以在后端容器内重置密码；命令执行后会同时撤销该账号全部登录会话：
+Web、Windows 和 Android 登录页都会提示无法登录的用户联系服务器管理员。已登录用户可在客户端的账号安全入口修改密码；无法登录时，自托管管理员可以在后端容器内重置密码，命令执行后会同时撤销该账号全部登录会话：
 
 ```bash
 docker compose -f docker-compose.release.yml exec api \
@@ -170,7 +170,7 @@ DATABASE_URL=mysql+pymysql://taskbridge:change-this-password@mysql:3306/taskbrid
 
 ## 客户端连接地址
 
-Release Compose 下，Web/PWA、Windows 和 Android 都填写同一个入口：
+Release Compose 提供统一入口，Web/PWA 直接从此地址打开；Windows 和 Android 的发布配置指向同一服务：
 
 ```text
 http://<服务器 IP 或域名>:8080
@@ -178,11 +178,9 @@ http://<服务器 IP 或域名>:8080
 
 该入口已经代理 `/api/` 和 `/ws/`。普通用户不需要知道后端端口，也不需要分别配置 HTTP 和 WebSocket 地址。
 
-桌面端可以在设置页修改服务器地址，登录页也会保留首次连接入口。Android 端可以在登录 / 注册页直接填写服务器地址，也可以在设置页修改。客户端会自动派生请求地址和同步连接地址，保存后新的请求和同步连接会使用用户填写的服务器根地址。
+发布版桌面和 Android 客户端固定使用构建时注入的 API / WebSocket 地址。服务入口变更后应重新构建并发布客户端；Debug 构建保留手动端点调试。
 
-构建时注入的地址会作为首次启动默认值，用户保存自己的服务器地址后会覆盖该默认值。
-
-高级端点通常不需要手动填写。只有开发直连后端，或反向代理把请求路径和同步路径分流到不同位置时，才需要展开并分别填写：
+开发直连后端，或反向代理把请求路径和同步路径分流到不同位置时，在构建配置中分别指定：
 
 ```text
 http://<服务器 IP 或域名>:8000/api/v1/
@@ -193,14 +191,14 @@ ws://<服务器 IP 或域名>:8000/ws/sync
 
 客户端支持 HTTP / WS，也支持 HTTPS / WSS。公网部署建议在后端容器前放 Nginx 或 Caddy，并使用 HTTPS / WSS；本机试用、内网或明确接受明文传输的部署可以继续使用 HTTP / WS。
 
-客户端填写服务器根地址，例如：
+供 Web 访问及客户端构建使用的服务器入口例如：
 
 ```text
 http://<服务器 IP 或域名>:8080
 https://<域名>
 ```
 
-客户端会自动派生请求地址和同步连接地址。只有需要手动配置高级端点时，才分别填写：
+发布构建的 API / WebSocket 参数应分别使用：
 
 ```text
 http://<服务器 IP 或域名>:8000/api/v1/
@@ -214,7 +212,7 @@ wss://<域名>/ws/sync
 - [Nginx 示例](./nginx.taskbridge.conf.example)
 - [Caddy 示例](./Caddyfile.taskbridge.example)
 
-示例反向代理把外部域名转发到 Compose Web 入口 `127.0.0.1:8080`，再由内层 Nginx 分发静态资源、API 和 WebSocket。替换域名和证书路径后，客户端填写该统一域名。使用明文 HTTP / WS 时，不需要证书文件，但仍应确认网络边界和访问控制。
+示例反向代理把外部域名转发到 Compose Web 入口 `127.0.0.1:8080`，再由内层 Nginx 分发静态资源、API 和 WebSocket。替换域名和证书路径后，让用户从该域名打开 Web，并将相应 API / WebSocket 地址写入发布包。使用明文 HTTP / WS 时，不需要证书文件，但仍应确认网络边界和访问控制。
 
 浏览器通常只允许 HTTPS、`localhost` 或 `127.0.0.1` 注册 Service Worker。通过 `http://192.168.x.x:8080` 访问时普通 Web、HTTP 和 WS 可以工作，但“安装为应用”和离线页面缓存可能被浏览器禁用；这是浏览器安全限制，不能由 TaskBridge 绕过。
 
@@ -241,9 +239,11 @@ Authorization: Bearer <METRICS_TOKEN>
 
 ### 可信代理
 
-如果后端部署在 Nginx / Caddy 等反向代理之后，只有把代理出口 IP 或 CIDR 写入 `TRUSTED_PROXY_IPS` 后，后端才会信任 `X-Forwarded-For` / `X-Real-IP` 并用于限流。Release Compose 的内层 Web 代理固定使用 `172.30.27.10`，所以示例环境变量只信任该地址；内层 Nginx 会用实际连接地址重写转发头，不接受客户端自行提供的 `X-Forwarded-For`。不要把它设置成开放网段，除非你明确知道入口链路只有可信代理。
+如果后端部署在 Nginx / Caddy 等反向代理之后，只有把代理出口 IP 或 CIDR 写入 `TRUSTED_PROXY_IPS` 后，后端才会信任 `X-Forwarded-For` / `X-Real-IP` 并用于限流；还要把 Uvicorn 可直接连接到的代理 IP 写入 `FORWARDED_ALLOW_IPS`，才能正确识别 HTTPS 并签发带 `Secure` 的 Cookie。Release Compose 的内层 Web 代理固定使用 `172.30.27.10`，所以示例环境变量只信任该地址；内层 Nginx 会用实际连接地址重写客户端地址头，不接受客户端自行提供的 `X-Forwarded-For`。不要把这些变量设置成开放网段，除非你明确知道入口链路只有可信代理。
 
-如果宿主机已有网络与 `172.30.27.0/24` 冲突，需要同时修改 `docker-compose.release.yml` 中的子网、各服务静态地址和 `.env` 中的 `TRUSTED_PROXY_IPS`，然后重新创建容器。不要只改其中一处。
+内层 Nginx 会保留外层代理提供的 `X-Forwarded-Proto`，用于把 HTTPS 状态传到后端。生产环境应保持 `.env.example` 中的 `TASKBRIDGE_WEB_BIND=127.0.0.1:8080`，只允许受控的外层代理访问该入口；外层代理必须像示例配置一样覆盖 `X-Forwarded-Proto`，不能透传客户端提交的同名请求头。只有本机试用或受控内网需要直接访问明文入口时，才把绑定改为 `8080`。
+
+如果宿主机已有网络与 `172.30.27.0/24` 冲突，需要同时修改 `docker-compose.release.yml` 中的子网、各服务静态地址、`.env` 中的 `TRUSTED_PROXY_IPS` 和 `FORWARDED_ALLOW_IPS`，然后重新创建容器。不要只改其中一处。
 
 ## 更新
 
@@ -324,7 +324,7 @@ sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
 ### 手机无法连接后端
 
-检查客户端填写的地址是否是服务器 IP 或域名，而不是 `127.0.0.1`。对手机来说，`127.0.0.1` 指的是手机自己。
+检查手机打开的 Web 地址或 Android 发布包的内置地址是否指向服务器，而不是 `127.0.0.1`。对手机来说，`127.0.0.1` 指的是手机自己。
 
 ### 需要暴露 MySQL 或 Redis 调试
 

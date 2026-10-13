@@ -22,18 +22,18 @@
 
       <section class="local-trial-intro" data-lang="zh-CN">
         <h2>第一步：先确认你是不是普通使用者</h2>
-        <p>如果只是使用别人部署好的 TaskBridge，请先找管理员或部署者要服务器地址、账号和 Web/PWA 入口，不需要在自己电脑上运行下面的命令。</p>
+        <p>如果只是使用别人部署好的 TaskBridge，请先找管理员或部署者要 Web 入口或已配置的客户端及账号，不需要在自己电脑上运行下面的命令。</p>
         <p>只有你想先在本机试用，或者你就是负责部署的人，才继续准备后端服务。</p>
       </section>
 
       <section class="local-trial-intro" data-lang="zh-CN">
-        <h2>登录页应该填写哪个地址</h2>
-        <p>Release Compose 提供统一的 8080 入口；手机或另一台电脑访问时，只需把回环地址换成运行服务电脑的局域网 IP。</p>
+        <h2>打开哪个入口</h2>
+        <p>Release Compose 提供统一的 8080 入口；手机或另一台电脑访问时，用运行服务电脑的局域网 IP 打开 Web。</p>
         <ul class="local-trial-addresses">
-          <li><strong>Web/PWA：</strong>打开 <code>http://127.0.0.1:8080</code>，登录页也填写 <code>http://127.0.0.1:8080</code>。</li>
-          <li><strong>Windows 桌面端：</strong>如果服务运行在同一台电脑，填写 <code>http://127.0.0.1:8080</code>。</li>
-          <li><strong>Android 真机：</strong>填写运行服务电脑的局域网 IP，例如 <code>http://192.168.1.23:8080</code>。</li>
-          <li><strong>Android 模拟器：</strong>如果服务运行在宿主电脑，填写 <code>http://10.0.2.2:8080</code>。</li>
+          <li><strong>Web/PWA：</strong>打开 <code>http://127.0.0.1:8080</code>。</li>
+          <li><strong>Windows / Android 发布包：</strong>安装为此服务构建的客户端，地址已内置。</li>
+          <li><strong>Android 真机上的 Web：</strong>打开运行服务电脑的局域网地址，例如 <code>http://192.168.1.23:8080</code>。</li>
+          <li><strong>Android 模拟器上的 Web：</strong>打开 <code>http://10.0.2.2:8080</code>。</li>
         </ul>
       </section>
 
@@ -62,7 +62,7 @@
           <li>
             <span>确认服务可用</span>
             <pre class="command-snippet"><code>curl http://127.0.0.1:8080/ready</code></pre>
-            <p><code>/ready</code> 返回可用后，打开 <code>http://127.0.0.1:8080</code> 使用 Web；已安装客户端也填写同一个统一入口。</p>
+            <p><code>/ready</code> 返回可用后，打开 <code>http://127.0.0.1:8080</code> 使用 Web；发布版客户端的服务地址由构建者写入。</p>
           </li>
         </ol>
       </section>
@@ -72,14 +72,14 @@
         <p>This page is for people who want to run the complete TaskBridge service on their own computer. Compose serves the Web client and the backend together.</p>
 
         <h3>Step 1: check whether you are a regular user</h3>
-        <p>If you are using someone else's TaskBridge service, ask the administrator or deployer for the server address, account, and Web/PWA entry first. You do not need to run the commands below.</p>
+        <p>If you use someone else's service, ask the administrator for the Web address or a configured client and an account. You do not need the commands below.</p>
 
-        <h3>Which address to enter</h3>
+        <h3>Which entry to open</h3>
         <ul class="local-trial-addresses">
-          <li><strong>Web/PWA:</strong> open <code>http://127.0.0.1:8080</code> and use the same address on its sign-in page.</li>
-          <li><strong>Windows desktop:</strong> use <code>http://127.0.0.1:8080</code> when the service runs on the same computer.</li>
-          <li><strong>Android phone:</strong> use the LAN IP of the computer running the service, for example <code>http://192.168.1.23:8080</code>.</li>
-          <li><strong>Android emulator:</strong> use <code>http://10.0.2.2:8080</code> when the service runs on the host computer.</li>
+          <li><strong>Web/PWA:</strong> open <code>http://127.0.0.1:8080</code>.</li>
+          <li><strong>Windows / Android release clients:</strong> install a package built for this service.</li>
+          <li><strong>Web on an Android phone:</strong> open the computer's LAN address, for example <code>http://192.168.1.23:8080</code>.</li>
+          <li><strong>Web in an Android emulator:</strong> open <code>http://10.0.2.2:8080</code>.</li>
         </ul>
 
         <h3>Start the backend yourself</h3>
