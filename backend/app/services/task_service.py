@@ -1029,10 +1029,13 @@ def postpone_task(
     task = _get_owned_task(db, current_user, task_id)
     if payload.due_time is not None:
         task.due_time = normalize_to_utc_naive(payload.due_time)
+        if payload.remind_time is None and task.remind_time is not None:
+            task.remind_time = task.due_time
     if payload.remind_time is not None:
         task.remind_time = normalize_to_utc_naive(payload.remind_time)
     if payload.planned_date is not None:
         task.planned_date = payload.planned_date
+    task.list_type = "inbox"
     task.snoozed_until = None
     task.version += 1
     task.updated_at = utc_now()
@@ -1209,7 +1212,7 @@ def instantiate_template(
         if payload.planned_date is not None
         else template.planned_date,
         parent_task_id=parent_task_id,
-        checklist=deepcopy(template.checklist or []),
+        checklist=_reset_checklist(template.checklist or []),
         is_template=False,
         template_name=None,
         sort_order=template.sort_order,
@@ -1231,9 +1234,15 @@ def instantiate_template(
 
 def create_next_occurrence(db: Session, current_user: User, task_id: int) -> Task:
     task = _get_owned_task(db, current_user, task_id)
-    next_task = _build_repeat_occurrence(task, current_user.id)
-    if next_task is None:
+    if _repeat_delta(task.repeat_rule) is None:
         raise AppException(status_code=400, message="unsupported repeat_rule")
+    existing = _find_existing_repeat_occurrence(db, current_user.id, task)
+    if existing is not None:
+        db.commit()
+        db.refresh(existing)
+        return existing
+    next_task = _build_repeat_occurrence(task, current_user.id)
+    assert next_task is not None
     db.add(next_task)
     db.flush()
     append_sync_log(
@@ -1252,14 +1261,7 @@ def create_next_occurrence(db: Session, current_user: User, task_id: int) -> Tas
 def _create_repeat_occurrence_if_needed(db: Session, current_user: User, task: Task) -> Task | None:
     if not task.repeat_rule:
         return None
-    existing_id = db.scalar(
-        select(Task.id).where(
-            Task.user_id == current_user.id,
-            Task.parent_task_id == task.id,
-            Task.is_deleted.is_(False),
-        ),
-    )
-    if existing_id is not None:
+    if _find_existing_repeat_occurrence(db, current_user.id, task) is not None:
         return None
 
     next_task = _build_repeat_occurrence(task, current_user.id)
@@ -1276,6 +1278,31 @@ def _create_repeat_occurrence_if_needed(db: Session, current_user: User, task: T
         payload={**_snapshot(next_task), "source_task_id": task.id},
     )
     return next_task
+
+
+def _find_existing_repeat_occurrence(db: Session, user_id: int, task: Task) -> Task | None:
+    db.flush()
+    # Serialize all generators on the parent, including SQLite where FOR UPDATE
+    # is ignored. Keep the timestamp unchanged: acquiring a lock is not an edit.
+    db.execute(
+        update(Task)
+        .where(Task.id == task.id, Task.user_id == user_id)
+        .values(updated_at=Task.updated_at)
+        .execution_options(synchronize_session=False),
+    )
+    # A locking read also sees children committed after a MySQL repeatable-read
+    # transaction started (for example during sync's initial context preload).
+    return db.scalar(
+        select(Task)
+        .where(
+            Task.user_id == user_id,
+            Task.parent_task_id == task.id,
+            Task.is_deleted.is_(False),
+        )
+        .order_by(Task.id.asc())
+        .limit(1)
+        .with_for_update(),
+    )
 
 
 def _build_repeat_occurrence(task: Task, user_id: int) -> Task | None:

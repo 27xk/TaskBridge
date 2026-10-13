@@ -497,6 +497,11 @@ def _create_repeat_from_sync(db: Session, user_id: int, task: Task, context: Syn
         return None
     if task.id in context.repeat_child_parent_ids:
         return None
+    from app.services.task_service import _find_existing_repeat_occurrence
+
+    if _find_existing_repeat_occurrence(db, user_id, task) is not None:
+        context.repeat_child_parent_ids.add(task.id)
+        return None
     next_task = shift_repeat_task(task)
     if next_task is None:
         return None
@@ -577,6 +582,11 @@ def _create_from_change(
     db.flush()
     context.tasks_by_id[task.id] = task
     _append_success_log(db, current_user.id, device_id, change, task, context)
+    # A completed task may arrive as its first offline create (for example from
+    # the desktop floating window). Generate the repeat child at the server,
+    # where the parent already has a stable id, and let the next pull deliver it.
+    if task.status.strip().lower() in {"completed", "done"}:
+        _create_repeat_from_sync(db, current_user.id, task, context)
     task_read = TaskRead.model_validate(task)
     return (
         SyncChangeResult(

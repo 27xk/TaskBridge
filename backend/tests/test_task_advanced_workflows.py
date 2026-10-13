@@ -54,7 +54,7 @@ def test_templates_can_be_instantiated_without_mutating_template(client: TestCli
             "priority": 3,
             "is_template": True,
             "template_name": "Weekly review template",
-            "checklist": [{"id": "notes", "title": "Collect notes", "done": False}],
+            "checklist": [{"id": "notes", "title": "Collect notes", "done": True}],
         },
     )
     template = template_response.json()["data"]
@@ -77,6 +77,7 @@ def test_templates_can_be_instantiated_without_mutating_template(client: TestCli
     assert created["template_name"] is None
     assert created["planned_date"] == "2026-05-18"
     assert created["checklist"][0]["id"] == "notes"
+    assert created["checklist"][0]["done"] is False
 
     templates_response = client.get("/api/v1/tasks", headers=headers, params={"templates_only": True})
     assert [item["id"] for item in templates_response.json()["data"]] == [template["id"]]
@@ -104,6 +105,13 @@ def test_repeat_next_occurrence_and_trash_purge(client: TestClient) -> None:
     assert next_task["planned_date"] == "2026-05-19"
     assert next_task["repeat_rule"] == "daily"
 
+    duplicate_next_response = client.post(
+        f"/api/v1/tasks/{task['id']}/next-occurrence",
+        headers=headers,
+    )
+    assert duplicate_next_response.status_code == 201
+    assert duplicate_next_response.json()["data"]["id"] == next_task["id"]
+
     delete_response = client.delete(f"/api/v1/tasks/{task['id']}", headers=headers)
     assert delete_response.status_code == 200
 
@@ -117,6 +125,48 @@ def test_repeat_next_occurrence_and_trash_purge(client: TestClient) -> None:
 
     trash_after_purge = client.get("/api/v1/tasks/trash", headers=headers)
     assert trash_after_purge.json()["data"] == []
+
+
+def test_postpone_moves_today_list_tasks_back_to_inbox(client: TestClient) -> None:
+    headers = auth_headers(client, "postpone-list-user", "postpone-list@example.com")
+    created = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={
+            "title": "Today task to postpone",
+            "list_type": "today",
+            "planned_date": "2026-05-18",
+        },
+    ).json()["data"]
+
+    response = client.post(
+        f"/api/v1/tasks/{created['id']}/postpone",
+        headers=headers,
+        json={"planned_date": "2026-05-19", "due_time": "2026-05-19T09:00:00Z"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["list_type"] == "inbox"
+
+
+def test_monthly_repeat_uses_calendar_month_boundaries(client: TestClient) -> None:
+    headers = auth_headers(client, "monthly-repeat-user", "monthly-repeat@example.com")
+    task = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={
+            "title": "Month end close",
+            "repeat_rule": "monthly",
+            "planned_date": "2026-01-31",
+            "due_time": "2026-01-31T09:00:00Z",
+        },
+    ).json()["data"]
+
+    response = client.post(f"/api/v1/tasks/{task['id']}/next-occurrence", headers=headers)
+
+    assert response.status_code == 201
+    assert response.json()["data"]["planned_date"] == "2026-02-28"
+    assert response.json()["data"]["due_time"].startswith("2026-02-28T09:00:00")
 
 
 def test_task_list_supports_small_page_windows(client: TestClient) -> None:

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -731,3 +731,41 @@ def test_sync_pull_paginates_changed_and_deleted_tasks(client, db_session: Sessi
     assert second_page["next_cursor_id"] is None
     assert second_page["changed_tasks"] == []
     assert [task["title"] for task in second_page["deleted_tasks"]] == ["Paged task 2"]
+
+
+def test_sync_create_completed_repeat_generates_one_server_child(client, db_session: Session) -> None:
+    headers = auth_headers(client, "sync-repeat-create-user", "sync-repeat-create@example.com")
+    register_test_device(client, headers, "desktop-repeat-create", "windows")
+    payload = {
+        "device_id": "desktop-repeat-create",
+        "changes": [
+            {
+                "local_id": "offline-completed-repeat",
+                "server_id": None,
+                "action": "create",
+                "title": "Offline recurring task",
+                "status": "completed",
+                "completed_at": "2026-05-18T09:00:00Z",
+                "repeat_rule": "daily",
+                "due_time": "2026-05-18T09:00:00Z",
+                "planned_date": "2026-05-18",
+                "version": 0,
+                "local_updated_at": "2026-05-18T09:00:00Z",
+            },
+        ],
+    }
+
+    first = client.post("/api/v1/sync/push", headers=headers, json=payload)
+    assert first.status_code == 200
+    parent_id = first.json()["data"]["results"][0]["server_id"]
+
+    tasks = list(db_session.scalars(select(Task).order_by(Task.id)))
+    assert len(tasks) == 2
+    child = next(task for task in tasks if task.parent_task_id == parent_id)
+    assert child.status == "todo"
+    assert child.planned_date.isoformat() == "2026-05-19"
+
+    retry = client.post("/api/v1/sync/push", headers=headers, json=payload)
+    assert retry.status_code == 200
+    assert retry.json()["data"]["results"][0]["status"] == "applied"
+    assert db_session.scalar(select(func.count(Task.id))) == 2
