@@ -10,10 +10,30 @@ export interface ParsedQuickTask {
 export const DEFAULT_TIME_ZONE = "Asia/Shanghai";
 export const TASKBRIDGE_TIME_ZONE = DEFAULT_TIME_ZONE;
 
+const FORMATTER_CACHE_LIMIT = 32;
+const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+const normalizedTimeZones = new Map<string, string>();
+
+export function getDateTimeFormatter(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = JSON.stringify([locale, Object.entries(options).sort(([a], [b]) => a.localeCompare(b))]);
+  const cached = dateTimeFormatters.get(key);
+  if (cached) {
+    dateTimeFormatters.delete(key);
+    dateTimeFormatters.set(key, cached);
+    return cached;
+  }
+  const formatter = new Intl.DateTimeFormat(locale, options);
+  if (dateTimeFormatters.size >= FORMATTER_CACHE_LIMIT) dateTimeFormatters.delete(dateTimeFormatters.keys().next().value!);
+  dateTimeFormatters.set(key, formatter);
+  return formatter;
+}
+
 const priorityPattern = /\bP([0-5])\b/i;
 const tagPattern = /#([\p{L}\p{N}_-]{1,32})/u;
 const projectPattern = /(^|\s)@([\p{L}\p{N}_-]{1,64})(?=\s|$)/u;
-const timePattern = /(?:(上午|下午|晚上|中午|am|pm)\s*)?(\d{1,2})(?::(\d{2}))?\s*(?:点)?/iu;
+// Only marked clock expressions are removed; ordinary quantities stay in the title.
+const timePattern = /(?<![\p{L}\p{N}_])(?=(?:上午|下午|晚上|中午|am|pm)\s*\d|\d{1,2}(?::\d{2}(?!\d)|\s*点))(?:(上午|下午|晚上|中午|am|pm)\s*)?(\d{1,2})(?::(\d{2}))?\s*点?(?![\d:])/iu;
+const dateTimePattern = /(?:今天|明天|后天|今晚|today|tomorrow)\s+(?:(上午|下午|晚上|中午|am|pm)\s*)?(\d{1,2})(?::(\d{2}))?\s*(?:点|:)?(?=\s|$)/iu;
 
 export function parseQuickTask(input: string, now = new Date(), timeZone = DEFAULT_TIME_ZONE): ParsedQuickTask {
   const zone = normalizeTimeZone(timeZone);
@@ -33,13 +53,18 @@ export function parseQuickTask(input: string, now = new Date(), timeZone = DEFAU
   working = working.replace(projectPattern, "$1").trim();
 
   const date = parseDateWord(working, now, zone);
-  working = working.replace(/后天|明天|今天|今晚/g, "").trim();
-
-  const timeMatch = working.match(timePattern);
-  const time = timeMatch ? parseTime(timeMatch) : null;
-  if (timeMatch?.[0]) {
-    working = working.replace(timeMatch[0], "").trim();
+  const dateTimeMatch = working.match(dateTimePattern);
+  let timeMatch = dateTimeMatch;
+  if (dateTimeMatch) {
+    working = working.replace(dateTimeMatch[0], "").trim();
+  } else {
+    working = working.replace(/后天|明天|今天|今晚|today|tomorrow/g, "").trim();
+    timeMatch = working.match(timePattern);
+    if (timeMatch?.[0]) {
+      working = working.replace(timeMatch[0], "").trim();
+    }
   }
+  const time = timeMatch ? parseTime(timeMatch) : null;
 
   const plannedDate = date ? formatLocalDateParts(date) : null;
   const resolvedDue = date || time ? resolveDueDateTime(date, time, timeMatch, now, zone) : null;
@@ -91,16 +116,25 @@ export function getSystemTimeZone(): string {
 
 export function normalizeTimeZone(value?: string | null): string {
   const candidate = value?.trim() || DEFAULT_TIME_ZONE;
+  const cached = normalizedTimeZones.get(candidate);
+  if (cached) return cached;
+  let normalized = candidate;
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone: candidate }).format(new Date());
-    return candidate;
+    getDateTimeFormatter("en-US", { timeZone: candidate });
   } catch {
-    return DEFAULT_TIME_ZONE;
+    normalized = DEFAULT_TIME_ZONE;
   }
+  if (normalizedTimeZones.size >= FORMATTER_CACHE_LIMIT) normalizedTimeZones.delete(normalizedTimeZones.keys().next().value!);
+  normalizedTimeZones.set(candidate, normalized);
+  return normalized;
 }
 
 export function todayLocalDate(now = new Date(), timeZone = DEFAULT_TIME_ZONE): string {
   return formatLocalDateParts(getZonedDateParts(now, timeZone));
+}
+
+export function localDateAfterDays(now: Date, days: number, timeZone = DEFAULT_TIME_ZONE): string {
+  return formatLocalDateParts(addDays(getZonedDateParts(now, normalizeTimeZone(timeZone)), days));
 }
 
 export function shanghaiDayBounds(day = todayLocalDate(), timeZone = DEFAULT_TIME_ZONE): { startTime: string; endTime: string } {
@@ -139,33 +173,33 @@ export function shanghaiDateTimeInputToIso(value?: string | null, timeZone = DEF
 export function formatShanghaiDateTime(value: string | null, locale = "zh-CN", timeZone = DEFAULT_TIME_ZONE): string {
   const date = parseTaskBridgeDate(value);
   if (!date) return "";
-  return date.toLocaleString(locale, {
+  return getDateTimeFormatter(locale, {
     timeZone: normalizeTimeZone(timeZone),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  });
+  }).format(date);
 }
 
 export function formatShanghaiTime(value: string | null, locale = "zh-CN", timeZone = DEFAULT_TIME_ZONE): string {
   const date = parseTaskBridgeDate(value);
   if (!date) return "";
-  return date.toLocaleTimeString(locale, {
+  return getDateTimeFormatter(locale, {
     timeZone: normalizeTimeZone(timeZone),
     hour: "2-digit",
     minute: "2-digit",
-  });
+  }).format(date);
 }
 
 export function formatShanghaiDate(value: Date, locale = "zh-CN", timeZone = DEFAULT_TIME_ZONE): string {
-  return value.toLocaleDateString(locale, {
+  return getDateTimeFormatter(locale, {
     timeZone: normalizeTimeZone(timeZone),
     month: "long",
     day: "numeric",
     weekday: "long",
-  });
+  }).format(value);
 }
 
 export function parseTaskBridgeDate(value?: string | null): Date | null {
@@ -190,8 +224,8 @@ type DateTimeParts = DateParts & {
 function parseDateWord(value: string, now: Date, timeZone: string): DateParts | null {
   const date = getZonedDateParts(now, timeZone);
   if (value.includes("后天")) return addDays(date, 2);
-  if (value.includes("明天")) return addDays(date, 1);
-  if (value.includes("今天") || value.includes("今晚")) return date;
+  if (value.includes("明天") || /\btomorrow\b/i.test(value)) return addDays(date, 1);
+  if (value.includes("今天") || value.includes("今晚") || /\btoday\b/i.test(value)) return date;
   return null;
 }
 
@@ -251,7 +285,7 @@ function getTimeZoneOffsetMs(timeZone: string, date: Date): number {
 }
 
 function dateTimePartsMap(date: Date, timeZone: string): Record<string, string> {
-  const parts = new Intl.DateTimeFormat("en-US", {
+  const parts = getDateTimeFormatter("en-US", {
     timeZone,
     year: "numeric",
     month: "2-digit",

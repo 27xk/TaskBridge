@@ -27,19 +27,19 @@ try {
   const now = new Date("2026-05-20T06:50:00.000Z");
   const failures = [];
 
-  const laterToday = parseQuickTask("report 8", now, "Asia/Shanghai");
+  const laterToday = parseQuickTask("report 8点", now, "Asia/Shanghai");
   if (laterToday.dueTime !== "2026-05-20T12:00:00.000Z") {
-    failures.push(`bare 8 after noon should become today 20:00, got ${laterToday.dueTime}`);
+    failures.push(`8点 after noon should become today 20:00, got ${laterToday.dueTime}`);
   }
 
-  const tomorrow = parseQuickTask("report 8", new Date("2026-05-20T13:00:00.000Z"), "Asia/Shanghai");
+  const tomorrow = parseQuickTask("report 8点", new Date("2026-05-20T13:00:00.000Z"), "Asia/Shanghai");
   if (tomorrow.dueTime !== "2026-05-21T00:00:00.000Z") {
-    failures.push(`bare 8 after evening should become tomorrow 08:00, got ${tomorrow.dueTime}`);
+    failures.push(`8点 after evening should become tomorrow 08:00, got ${tomorrow.dueTime}`);
   }
 
-  const futureToday = parseQuickTask("report 16", now, "Asia/Shanghai");
+  const futureToday = parseQuickTask("report 16点", now, "Asia/Shanghai");
   if (futureToday.dueTime !== "2026-05-20T08:00:00.000Z") {
-    failures.push(`bare 16 should stay today 16:00, got ${futureToday.dueTime}`);
+    failures.push(`16点 should stay today 16:00, got ${futureToday.dueTime}`);
   }
 
   if (failures.length > 0) {

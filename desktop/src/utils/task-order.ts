@@ -1,4 +1,4 @@
-import { parseTaskBridgeDate } from "../../shared/quick-add-parser";
+import { getDateTimeFormatter, parseTaskBridgeDate } from "../../shared/quick-add-parser";
 
 type TaskRecencyFields = Pick<
   TaskRecord,
@@ -31,11 +31,12 @@ export function sortTasksByTimeline<T extends TaskTimelineFields>(
 ): T[] {
   const nowTime = parseNowTime(options.now);
   const displayTimeZone = options.displayTimeZone ?? "Asia/Shanghai";
+  const context = { nowKey: localDateTimeKey(new Date(nowTime), displayTimeZone), plannedDates: new Map<string, number | null>() };
   return tasks
     .map((task, index) => ({
       task,
       index,
-      key: taskTimelineSortKey(task, nowTime, displayTimeZone),
+      key: taskTimelineSortKey(task, nowTime, displayTimeZone, context),
     }))
     .sort((left, right) => compareTimelineKey(left.key, right.key) || left.index - right.index)
     .map((item) => item.task);
@@ -68,14 +69,22 @@ function completedRecencyTime(task: TaskRecencyFields): number {
   );
 }
 
-export function taskTimelineSortKey(task: TaskTimelineFields, nowTime: number, displayTimeZone: string): number[] {
+export function taskTimelineSortKey(
+  task: TaskTimelineFields,
+  nowTime: number,
+  displayTimeZone: string,
+  context?: { nowKey: string; plannedDates: Map<string, number | null> },
+): number[] {
   const isCompleted = isCompletedStatus(task.status);
   const dueTime = parseTaskTime(task.dueTime);
-  const plannedTime = parsePlannedDateStart(task.plannedDate, displayTimeZone);
+  const plannedTime = task.plannedDate && context?.plannedDates.has(task.plannedDate)
+    ? context.plannedDates.get(task.plannedDate)!
+    : parsePlannedDateStart(task.plannedDate, displayTimeZone);
+  if (task.plannedDate) context?.plannedDates.set(task.plannedDate, plannedTime);
   const updatedTime = parseTaskTime(task.updatedAt);
   const completedTime = parseTaskTime(task.completedAt);
   const completedRecency = completedTime ?? updatedTime ?? dueTime ?? plannedTime;
-  const overdue = dueTime !== null && localDateTimeKey(new Date(dueTime), displayTimeZone) < localDateTimeKey(new Date(nowTime), displayTimeZone);
+  const overdue = dueTime !== null && localDateTimeKey(new Date(dueTime), displayTimeZone) < (context?.nowKey ?? localDateTimeKey(new Date(nowTime), displayTimeZone));
   const scheduleRank = isCompleted ? 4 : overdue ? 0 : dueTime !== null ? 1 : plannedTime !== null ? 2 : 3;
   const scheduleTime = isCompleted
     ? completedRecency !== null ? -completedRecency : Number.MAX_SAFE_INTEGER
@@ -125,7 +134,7 @@ function parsePlannedDateStart(value: string | null | undefined, displayTimeZone
 
 function localDateTimeKey(date: Date, timeZone: string): string {
   try {
-    const parts = new Intl.DateTimeFormat("en-US", {
+    const parts = getDateTimeFormatter("en-US", {
       timeZone,
       year: "numeric",
       month: "2-digit",
@@ -144,7 +153,7 @@ function localDateTimeKey(date: Date, timeZone: string): string {
 
 function timeZoneOffsetMs(date: Date, timeZone: string): number {
   try {
-    const parts = new Intl.DateTimeFormat("en-US", {
+    const parts = getDateTimeFormatter("en-US", {
       timeZone,
       year: "numeric",
       month: "2-digit",
