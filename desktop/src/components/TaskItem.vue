@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { MoreHorizontal } from "lucide-vue-next";
+import { computed } from "vue";
+import TaskActionMenu from "./TaskActionMenu.vue";
 
 import { useSettingsStore } from "../stores/settings";
 import { useTaskStore } from "../stores/task";
@@ -13,25 +14,18 @@ const props = defineProps<{
   trash?: boolean;
   selectable?: boolean;
   selected?: boolean;
+  busy?: boolean;
 }>();
 
 const emit = defineEmits<{
-  edit: [task: TaskRecord];
-  complete: [task: TaskRecord];
-  restore: [task: TaskRecord];
-  delete: [task: TaskRecord];
-  purge: [task: TaskRecord];
-  postpone: [task: TaskRecord];
-  snooze: [task: TaskRecord];
-  planToday: [task: TaskRecord];
-  nextOccurrence: [task: TaskRecord];
-  instantiateTemplate: [task: TaskRecord];
-  useServer: [task: TaskRecord];
-  overwriteServer: [task: TaskRecord];
-  "selection-change": [task: TaskRecord, selected: boolean];
+  (event: "edit" | "complete" | "restore" | "delete" | "purge" | "postpone" | "snooze" | "planToday" | "nextOccurrence" | "instantiateTemplate" | "useServer" | "overwriteServer", task: TaskRecord): void;
+  (event: "selection-change", task: TaskRecord, selected: boolean): void;
 }>();
 const settingsStore = useSettingsStore();
 const taskStore = useTaskStore();
+const progress = computed(() => checklistProgress(props.task));
+const conflictFields = computed(() => conflictSnapshotDetail(props.task));
+const overdue = computed(() => isOverdue(props.task));
 
 function taskMenuLabel(action: string, title: string): string {
   return `${action}: ${title}`;
@@ -167,7 +161,7 @@ function isOverdue(task: TaskRecord): boolean {
 </script>
 
 <template>
-  <article class="task-row" :class="{ completed: isCompletedStatus(task.status), compact, overdue: isOverdue(task), deleted: trash, selectable }">
+  <article class="task-row" :aria-busy="busy || undefined" :class="{ completed: isCompletedStatus(task.status), compact, overdue, deleted: trash, selectable }">
     <label v-if="selectable" class="task-selection-checkbox" @click.stop>
       <input
         type="checkbox"
@@ -181,25 +175,36 @@ function isOverdue(task: TaskRecord): boolean {
       v-if="!trash && !selectable"
       class="check-button"
       type="button"
-      :title="isCompletedStatus(task.status) ? settingsStore.t('task.restore') : settingsStore.t('task.complete')"
-      :aria-label="isCompletedStatus(task.status) ? settingsStore.t('task.restore') : settingsStore.t('task.complete')"
+      :disabled="busy"
+      :title="taskMenuLabel(isCompletedStatus(task.status) ? settingsStore.t('task.restore') : settingsStore.t('task.complete'), task.title)"
+      :aria-label="taskMenuLabel(isCompletedStatus(task.status) ? settingsStore.t('task.restore') : settingsStore.t('task.complete'), task.title)"
       @click="toggleCompletion(task)"
     >
     </button>
 
     <div class="task-body" @dblclick="$emit('edit', task)">
       <div class="task-title-line">
-        <h3 class="task-title">{{ task.title }}</h3>
+        <h3 class="task-title">
+          <button
+            class="task-edit-trigger"
+            type="button"
+            :aria-label="taskMenuLabel(settingsStore.t('task.editAction'), task.title)"
+            @click="$emit('edit', task)"
+            @dblclick.stop
+          >
+            {{ task.title }}
+          </button>
+        </h3>
         <span v-if="task.syncStatus !== 'synced'" class="sync-pill">{{ syncStatusText(task.syncStatus) }}</span>
       </div>
-      <p v-if="task.content">{{ task.content }}</p>
+      <p v-if="task.content" class="task-content-preview">{{ task.content }}</p>
       <div class="task-meta">
-        <span v-if="isOverdue(task)" class="overdue-pill">{{ settingsStore.t("task.filterOverdue") }}</span>
+        <span v-if="overdue" class="overdue-pill">{{ settingsStore.t("task.filterOverdue") }}</span>
         <span v-if="task.dueTime">{{ settingsStore.t("task.due") }} {{ formatShanghaiDateTime(task.dueTime, settingsStore.language, settingsStore.displayTimeZone) }}</span>
         <span v-if="task.plannedDate">{{ settingsStore.t("task.plan") }} {{ task.plannedDate }}</span>
         <span v-if="task.tag">#{{ task.tag }}</span>
         <span v-if="task.project">{{ task.project }}</span>
-        <span v-if="checklistProgress(task)">{{ settingsStore.t("task.checklist") }} {{ checklistProgress(task) }}</span>
+        <span v-if="progress">{{ settingsStore.t("task.checklist") }} {{ progress }}</span>
         <span v-if="task.repeatRule">{{ settingsStore.t("task.repeat") }} {{ getTaskRepeatRuleLabel(task.repeatRule, settingsStore.language) }}</span>
         <span v-if="task.isTemplate">{{ settingsStore.t("task.template") }}</span>
         <span v-if="task.priority > 0">{{ settingsStore.t("task.priority") }} {{ getTaskPriorityLabel(task.priority, settingsStore.language) }}</span>
@@ -210,8 +215,8 @@ function isOverdue(task: TaskRecord): boolean {
           <section class="conflict-snapshot-card">
             <strong>{{ settingsStore.t("sync.localSnapshot") }}</strong>
             <span class="conflict-snapshot-title">{{ conflictSnapshotTitle(task.conflictLocalJson) || task.title }}</span>
-            <ul v-if="conflictSnapshotDetail(task).length">
-              <li v-for="field in conflictSnapshotDetail(task)" :key="`local-${field.label}`">
+            <ul v-if="conflictFields.length">
+              <li v-for="field in conflictFields" :key="`local-${field.label}`">
                 <span>{{ field.label }}</span>
                 <b>{{ field.local || "-" }}</b>
               </li>
@@ -222,24 +227,24 @@ function isOverdue(task: TaskRecord): boolean {
             <span class="conflict-snapshot-title">
               {{ conflictSnapshotTitle(task.conflictServerJson) || settingsStore.t("sync.cloudSnapshotMissing") }}
             </span>
-            <ul v-if="conflictSnapshotDetail(task).length">
-              <li v-for="field in conflictSnapshotDetail(task)" :key="`cloud-${field.label}`">
+            <ul v-if="conflictFields.length">
+              <li v-for="field in conflictFields" :key="`cloud-${field.label}`">
                 <span>{{ field.label }}</span>
                 <b>{{ field.cloud || "-" }}</b>
               </li>
             </ul>
           </section>
         </div>
-        <span v-if="!conflictSnapshotDetail(task).length">{{ settingsStore.t("sync.conflictNoFieldDiff") }}</span>
+        <span v-if="!conflictFields.length">{{ settingsStore.t("sync.conflictNoFieldDiff") }}</span>
         <div class="conflict-actions-inline">
           <button
             type="button"
-            :disabled="!conflictSnapshotTitle(task.conflictServerJson)"
+            :disabled="busy || !conflictSnapshotTitle(task.conflictServerJson)"
             @click="$emit('useServer', task)"
           >
             {{ settingsStore.t("sync.useServer") }}
           </button>
-          <button type="button" @click="$emit('overwriteServer', task)">
+          <button type="button" :disabled="busy" @click="$emit('overwriteServer', task)">
             {{ settingsStore.t("sync.overwriteServer") }}
           </button>
         </div>
@@ -253,35 +258,36 @@ function isOverdue(task: TaskRecord): boolean {
       <button v-if="trash" type="button" @click="$emit('purge', task)">
         {{ settingsStore.t("task.purge") }}
       </button>
-      <button v-else-if="isCompletedStatus(task.status)" type="button" @click="$emit('restore', task)">
-        {{ settingsStore.t("task.restore") }}
-      </button>
-      <details v-if="!trash" class="task-menu">
-        <summary
-          class="task-menu-trigger"
-          :title="taskMenuLabel(settingsStore.t('task.moreActions'), task.title)"
-          :aria-label="taskMenuLabel(settingsStore.t('task.moreActions'), task.title)"
-        >
-          <MoreHorizontal aria-hidden="true" :size="18" />
-        </summary>
-        <div class="task-menu-panel">
-          <button type="button" @click="$emit('edit', task)">{{ settingsStore.t("task.editAction") }}</button>
-          <button v-if="!isCompletedStatus(task.status)" type="button" @click="$emit('planToday', task)">{{ settingsStore.t("task.today") }}</button>
-          <button v-if="!isCompletedStatus(task.status)" type="button" @click="$emit('postpone', task)">{{ settingsStore.t("task.tomorrow") }}</button>
-          <button v-if="!isCompletedStatus(task.status)" type="button" @click="$emit('snooze', task)">{{ settingsStore.t("task.snooze") }}</button>
-          <button v-if="task.repeatRule" type="button" @click="$emit('nextOccurrence', task)">{{ settingsStore.t("task.next") }}</button>
-          <button v-if="task.isTemplate" type="button" @click="$emit('instantiateTemplate', task)">{{ settingsStore.t("task.use") }}</button>
-          <button type="button" @click="$emit('delete', task)">{{ settingsStore.t("task.delete") }}</button>
-        </div>
-      </details>
+      <TaskActionMenu v-if="!trash" :task="task" :disabled="busy" @action="(action, target) => emit(action, target)" />
     </div>
   </article>
 </template>
 
 <style scoped>
+.task-content-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  white-space: pre-line;
+}
+
 .task-title {
   overflow: visible;
   text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.task-edit-trigger {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
 }

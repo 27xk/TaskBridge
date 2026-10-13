@@ -56,9 +56,12 @@ type SettingsNavItem = {
 const settings = reactive<TaskBridgeSettings>({
   baseUrl: "",
   wsUrl: "",
+  connectionLocked: true,
   currentUserId: null,
   language: "zh-CN",
   desktopTheme: "warm",
+  desktopDensity: "comfortable",
+  desktopGlassEnabled: true,
   displayTimeZone: "Asia/Shanghai",
   deviceId: "",
   lastSyncTime: "",
@@ -254,20 +257,6 @@ function showAutoSaveFeedback(): void {
   }, 1800);
 }
 
-async function save(): Promise<void> {
-  await settingsStore.setLanguage(settings.language);
-  settings.language = settingsStore.language;
-  await settingsStore.setDesktopTheme(settings.desktopTheme);
-  settings.desktopTheme = settingsStore.desktopTheme;
-  await settingsStore.setDisplayTimeZone(settings.displayTimeZone);
-  settings.displayTimeZone = settingsStore.displayTimeZone;
-  Object.assign(settings, await bridge().app.setSetting("floatingOpacity", settings.floatingOpacity));
-  Object.assign(settings, await bridge().app.setSetting("floatingVisibleOnStart", settings.floatingVisibleOnStart));
-  Object.assign(settings, await bridge().app.setAutoStart(settings.autoStart));
-  serverUrlDraft.value = inferServerUrlFromApi(settings.baseUrl);
-  showAutoSaveFeedback();
-}
-
 function applyServerUrl(): boolean {
   try {
     const endpoints = deriveConnectionEndpoints(serverUrlDraft.value);
@@ -330,22 +319,11 @@ async function persistConnectionSettings(baseUrl = settings.baseUrl, wsUrl = set
   );
 }
 
-async function saveConnection(): Promise<void> {
-  if (!applyServerUrl()) return;
-  await persistConnectionSettings();
-  connectionNote.value = settingsStore.t("settings.connectionSaved");
-  connectionNoteTone.value = "success";
-}
-
 async function resetGeneratedConnectionEndpoints(): Promise<void> {
   if (!applyServerUrl()) return;
   await persistConnectionSettings();
   connectionNote.value = settingsStore.t("settings.connectionSaved");
   connectionNoteTone.value = "success";
-}
-
-async function testConnection(): Promise<void> {
-  await checkAndSaveConnection();
 }
 
 async function saveAdvancedConnection(): Promise<void> {
@@ -379,6 +357,12 @@ async function checkAndSaveConnection(): Promise<void> {
   connectionNote.value = "";
   connectionNoteTone.value = null;
   try {
+    if (settings.connectionLocked) {
+      await bridge().api.request({ method: "GET", url: "/sync/status" });
+      connectionNote.value = settingsStore.t("settings.connectionReady");
+      connectionNoteTone.value = "success";
+      return;
+    }
     const endpoints = advancedEndpointsEdited.value
       ? { baseUrl: settings.baseUrl, wsUrl: settings.wsUrl }
       : deriveConnectionEndpoints(serverUrlDraft.value);
@@ -392,11 +376,9 @@ async function checkAndSaveConnection(): Promise<void> {
       settings.wsUrl,
     );
   } catch (error) {
-    connectionNote.value = formatConnectionFailureMessage(
-      error,
-      settingsStore.t("settings.connectionFailed"),
-      settingsStore.language,
-    );
+    connectionNote.value = settings.connectionLocked
+      ? settingsStore.t("auth.networkError")
+      : formatConnectionFailureMessage(error, settingsStore.t("settings.connectionFailed"), settingsStore.language);
     connectionNoteTone.value = "error";
   } finally {
     connectionTesting.value = false;
@@ -763,6 +745,7 @@ async function retryExhaustedQueue(): Promise<void> {
           v-model:server-url-draft="serverUrlDraft"
           v-model:base-url="settings.baseUrl"
           v-model:ws-url="settings.wsUrl"
+          :connection-locked="settings.connectionLocked"
           :connection-testing="connectionTesting"
           :connection-note="connectionNote"
           :connection-note-tone="connectionNoteTone"

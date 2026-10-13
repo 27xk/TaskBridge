@@ -1,11 +1,20 @@
 import { pullSync, pushSync, type SyncPushResult } from "../api/sync";
 import { createWebSocketTicket } from "../api/auth";
 import { registerDevice } from "../api/device";
+import type { ServerTaskDto } from "../api/task";
 import { bridge, nowIso } from "../db/sqlite";
-import { enqueueChange, incrementQueueAttempt, listSyncQueue, removeQueueItem } from "../db/sync-queue.dao";
-import { getTask, getTasksByServerIds, saveTask, saveTasks } from "../db/task.dao";
+import { enqueueChange, incrementQueueAttempt, listSyncQueue } from "../db/sync-queue.dao";
+import { commitTaskChange, readTaskMutationState, getTasksByServerIds } from "../db/task.dao";
+import { useAuthStore } from "../stores/auth";
 import { mergePulledTask, serverTaskToLocal, toPushChange } from "./task-mapper";
 import { WebSocketClient, type SyncSocketMessage } from "./WebSocketClient";
+import {
+  TASK_MUTABLE_FIELDS,
+  TASK_COMMIT_RETRIES,
+  notifyTaskMutationAcknowledged,
+  taskFieldEquals,
+  taskMatchesQueuedMutation,
+} from "../../shared/task-mutation-policy";
 
 type SyncStatus = "idle" | "syncing" | "offline" | "error" | "synced";
 
@@ -21,6 +30,7 @@ export class SyncManager {
   private socket: WebSocketClient | null = null;
   private generation = 0;
   private started = false;
+  private tasksChanged = false;
 
   constructor(
     private readonly onStatus: (status: SyncStatus, message: string) => void,
@@ -43,6 +53,7 @@ export class SyncManager {
     this.running = false;
     this.rerunRequested = false;
     this.rerunForceRequested = false;
+    this.tasksChanged = false;
     window.removeEventListener("online", this.handleOnline);
     window.removeEventListener("offline", this.handleOffline);
     if (this.syncTimer !== null) {
@@ -85,7 +96,7 @@ export class SyncManager {
         if (!this.isRunActive(generation)) return;
         await this.setStatus("synced", "已同步");
         if (!this.isRunActive(generation)) return;
-        await this.onTasksChanged();
+        await this.refreshChangedTasks();
       } while (
         this.isRunActive(generation) &&
         this.rerunRequested &&
@@ -96,10 +107,16 @@ export class SyncManager {
       if (!this.isRunActive(generation)) return;
       console.error("[TaskBridge] sync failed", error);
       await this.setStatus("error", "同步异常");
-      await this.onTasksChanged();
+      await this.refreshChangedTasks();
     } finally {
       if (this.generation === generation) this.running = false;
     }
+  }
+
+  private async refreshChangedTasks(): Promise<void> {
+    if (!this.tasksChanged) return;
+    await this.onTasksChanged();
+    this.tasksChanged = false;
   }
 
   async enqueueTaskChange(task: TaskRecord, action: SyncQueueRecord["action"]): Promise<void> {
@@ -153,14 +170,12 @@ export class SyncManager {
         if (result.status === "applied") {
           await this.markQueueItemApplied(queueItem, result, generation);
           if (!this.isRunActive(generation)) return;
-          await removeQueueItem(queueItem.id);
           continue;
         }
 
         if (result.status === "conflict") {
           await this.markQueueItemConflict(queueItem, result, generation);
           if (!this.isRunActive(generation)) return;
-          await removeQueueItem(queueItem.id);
           continue;
         }
 
@@ -182,67 +197,118 @@ export class SyncManager {
   }
 
   private async markQueueItemApplied(queueItem: SyncQueueRecord, result: SyncPushResult, generation: number): Promise<void> {
-    if (!this.isRunActive(generation)) return;
-    if (result.task) {
-      await saveTask(serverTaskToLocal(result.task, queueItem.localId, "synced"));
+    const workspaceKey = useAuthStore().workspaceKey;
+    if (!this.isRunActive(generation) || !workspaceKey) return;
+    for (let attempt = 0; attempt < TASK_COMMIT_RETRIES; attempt++) {
+      const state = await readTaskMutationState(queueItem.localId, workspaceKey);
+      const task = state.task;
+      if (!this.isRunActive(generation) || !task) return;
+      const remote = result.task
+        ? serverTaskToLocal(result.task, queueItem.localId, "synced")
+        : {
+          ...task,
+          serverId: result.server_id ?? task.serverId,
+          version: result.version ?? task.version,
+          isDeleted: queueItem.action === "delete" ? true : queueItem.action === "restore" ? false : task.isDeleted,
+          status: queueItem.action === "complete" ? "completed" : task.status,
+          syncStatus: "synced" as const,
+          lastSyncAt: nowIso(),
+        };
+      if (remote.version < task.version || (task.serverId && remote.serverId !== task.serverId)) return;
+      const superseded = state.queueId !== queueItem.id || !taskMatchesQueuedMutation(task, queueItem);
+      let needsFollowup = superseded;
+      let next: TaskRecord = remote;
+      if (superseded || ["complete", "delete", "restore"].includes(queueItem.action)) {
+        next = {
+          ...task,
+          serverId: remote.serverId,
+          version: remote.version,
+          lastSyncAt: remote.lastSyncAt,
+          syncStatus: "synced",
+          conflictServerJson: null,
+          conflictLocalJson: null,
+        };
+        if (!superseded) {
+          next.isDeleted = remote.isDeleted;
+          next.updatedAt = remote.updatedAt;
+          if (queueItem.action === "complete") {
+            next.status = remote.status;
+            next.completedAt = remote.completedAt;
+          }
+          needsFollowup = !next.isDeleted && TASK_MUTABLE_FIELDS.some((field) => !taskFieldEquals(field, next[field], remote[field]));
+        }
+      }
+      if (needsFollowup) {
+        next.syncStatus = next.isDeleted ? "pending_delete" : "pending_update";
+        next.updatedAt = task.updatedAt;
+      }
+      const completed = (status: string) => ["completed", "done"].includes(status.trim().toLowerCase());
+      const action = next.isDeleted ? "delete" : remote.isDeleted ? "restore"
+        : completed(next.status) && !completed(remote.status) ? "complete" : "update";
+      const committed = await commitTaskChange({
+        expectedWorkspaceKey: workspaceKey,
+        expected: task,
+        expectedQueueId: state.queueId,
+        task: next,
+        queueAction: needsFollowup ? action : undefined,
+        removeQueueId: queueItem.id,
+      });
+      if (!this.isRunActive(generation)) return;
+      if (!committed.applied) continue;
+      this.tasksChanged = true;
+      if (!superseded && committed.task) notifyTaskMutationAcknowledged(queueItem, committed.task);
+      if (needsFollowup) this.rerunRequested = true;
       return;
     }
-
-    const task = await getTask(queueItem.localId);
-    if (!this.isRunActive(generation) || !task) return;
-    await saveTask({
-      ...task,
-      serverId: result.server_id ?? task.serverId,
-      version: result.version ?? task.version,
-      syncStatus: "synced",
-      lastSyncAt: nowIso(),
-      conflictServerJson: null,
-      conflictLocalJson: null,
-    });
+    throw new Error("Task changed repeatedly while applying its synchronization acknowledgement");
   }
 
   private async markQueueItemConflict(queueItem: SyncQueueRecord, result: SyncPushResult, generation: number): Promise<void> {
-    if (!this.isRunActive(generation)) return;
-    const task = await getTask(queueItem.localId);
-    if (!this.isRunActive(generation)) return;
-    if (!task) {
-      if (result.server_task) {
-        await saveTask({
-          ...serverTaskToLocal(result.server_task, queueItem.localId, "conflict"),
-          conflictServerJson: JSON.stringify(result.server_task),
-          conflictLocalJson: null,
-        });
-        return;
-      }
-      await this.markQueueItemFailed(queueItem, generation);
-      return;
+    const workspaceKey = useAuthStore().workspaceKey;
+    if (!this.isRunActive(generation) || !workspaceKey) return;
+    for (let attempt = 0; attempt < TASK_COMMIT_RETRIES; attempt++) {
+      const state = await readTaskMutationState(queueItem.localId, workspaceKey);
+      const task = state.task;
+      if (!this.isRunActive(generation) || !task) return;
+      const next: TaskRecord = {
+        ...task,
+        serverId: task.serverId ?? result.server_id ?? result.server_task?.id ?? null,
+        version: Math.max(task.version, result.version ?? result.server_task?.version ?? task.version),
+        syncStatus: "conflict",
+        lastSyncAt: nowIso(),
+        conflictServerJson: result.server_task ? JSON.stringify(result.server_task) : null,
+        conflictLocalJson: JSON.stringify(task),
+      };
+      const committed = await commitTaskChange({
+        expectedWorkspaceKey: workspaceKey, expected: task, expectedQueueId: state.queueId,
+        task: next, removeQueueId: queueItem.id,
+      });
+      if (!this.isRunActive(generation)) return;
+      if (committed.applied) { this.tasksChanged = true; return; }
     }
-
-    await saveTask({
-      ...task,
-      serverId: result.server_id ?? task.serverId ?? result.server_task?.id ?? null,
-      version: result.version ?? result.server_task?.version ?? task.version,
-      syncStatus: "conflict",
-      lastSyncAt: nowIso(),
-      conflictServerJson: result.server_task ? JSON.stringify(result.server_task) : null,
-      conflictLocalJson: JSON.stringify(task),
-    });
+    throw new Error("Task changed repeatedly while recording its synchronization conflict");
   }
 
   private async markQueueItemFailed(queueItem: SyncQueueRecord, generation: number): Promise<void> {
-    if (!this.isRunActive(generation)) return;
-    const task = await getTask(queueItem.localId);
-    if (!this.isRunActive(generation) || !task) return;
-    await saveTask({
-      ...task,
-      syncStatus: "sync_failed",
-      lastSyncAt: nowIso(),
-      conflictServerJson: null,
-      conflictLocalJson: null,
-    });
+    const workspaceKey = useAuthStore().workspaceKey;
+    if (!this.isRunActive(generation) || !workspaceKey) return;
+    for (let attempt = 0; attempt < TASK_COMMIT_RETRIES; attempt++) {
+      const state = await readTaskMutationState(queueItem.localId, workspaceKey);
+      const task = state.task;
+      if (!this.isRunActive(generation) || !task || state.queueId !== queueItem.id || !taskMatchesQueuedMutation(task, queueItem)) return;
+      const committed = await commitTaskChange({
+        expectedWorkspaceKey: workspaceKey, expected: task, expectedQueueId: state.queueId,
+        task: { ...task, syncStatus: "sync_failed", lastSyncAt: nowIso(), conflictServerJson: null, conflictLocalJson: null },
+      });
+      if (!this.isRunActive(generation)) return;
+      if (committed.applied) { this.tasksChanged = true; return; }
+    }
+    throw new Error("Task changed repeatedly while recording its synchronization failure");
   }
 
   private async pullRemoteChanges(generation: number): Promise<void> {
+    const workspaceKey = useAuthStore().workspaceKey;
+    if (!workspaceKey || !this.isRunActive(generation)) return;
     const settings = await bridge().app.getSettings();
     if (!this.isRunActive(generation)) return;
     let cursorUpdatedAt: string | null = null;
@@ -263,15 +329,10 @@ export class SyncManager {
           .filter((task): task is TaskRecord & { serverId: number } => task.serverId !== null)
           .map((task) => [task.serverId, task]),
       );
-      const changed = response.changed_tasks.map((task) => {
-        return mergePulledTask(task, localByServerId.get(task.id));
-      });
-      const deleted = response.deleted_tasks.map((task) => {
-        return mergePulledTask(task, localByServerId.get(task.id));
-      });
-
-      await saveTasks([...changed, ...deleted]);
-      if (!this.isRunActive(generation)) return;
+      for (const remote of pulledTasks) {
+        await this.commitPulledTask(remote, localByServerId.get(remote.id)?.localId, workspaceKey, generation);
+        if (!this.isRunActive(generation)) return;
+      }
 
       if (!response.has_more) {
         await bridge().app.setSetting("lastSyncTime", response.server_time);
@@ -284,6 +345,26 @@ export class SyncManager {
       cursorUpdatedAt = response.next_cursor_updated_at;
       cursorId = response.next_cursor_id;
     }
+  }
+
+  private async commitPulledTask(remote: ServerTaskDto, knownLocalId: string | undefined, workspaceKey: string, generation: number): Promise<void> {
+    for (let attempt = 0; attempt < TASK_COMMIT_RETRIES; attempt++) {
+      if (!this.isRunActive(generation)) return;
+      const state = await readTaskMutationState(knownLocalId ?? `server-${remote.id}`, workspaceKey);
+      if (!this.isRunActive(generation)) return;
+      if (knownLocalId && !state.task) return;
+      if (state.task && (state.task.serverId !== remote.id || state.task.version >= remote.version)) return;
+      const next = mergePulledTask(remote, state.task ?? undefined);
+      const committed = await commitTaskChange({
+        expectedWorkspaceKey: workspaceKey,
+        expected: state.task,
+        expectedQueueId: state.queueId,
+        task: next,
+      });
+      if (!this.isRunActive(generation)) return;
+      if (committed.applied) { this.tasksChanged = true; return; }
+    }
+    throw new Error("Task changed repeatedly while applying a synchronization pull");
   }
 
   private async connectWebSocket(generation = this.generation): Promise<void> {

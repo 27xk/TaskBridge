@@ -180,8 +180,8 @@ export function restoreTask(taskId: number, expectedVersion?: number): Promise<S
   return unwrap(request.post(`/tasks/${taskId}/restore`, undefined, { params: expectedVersionParams(expectedVersion) }));
 }
 
-export function createNextOccurrence(taskId: number): Promise<ServerTaskDto> {
-  return unwrap(request.post(`/tasks/${taskId}/next-occurrence`));
+export function createNextOccurrence(taskId: number, expectedWorkspaceKey?: string): Promise<ServerTaskDto> {
+  return unwrap(request.post(`/tasks/${taskId}/next-occurrence`, undefined, { expectedWorkspaceKey }));
 }
 
 export function instantiateTemplate(

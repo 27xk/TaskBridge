@@ -34,6 +34,7 @@ const serverUrlDraft = ref("");
 const settings = reactive({
   baseUrl: "",
   wsUrl: "",
+  connectionLocked: true,
 });
 const connectionNote = ref("");
 const connectionNoteTone = ref<"success" | "error" | null>(null);
@@ -48,9 +49,11 @@ const guideReferenceKind = ref<"localTrial" | "selfHost">("localTrial");
 const localTrialGuideUrl =
   "https://github.com/27xk/TaskBridge/blob/main/docs/user-quick-start.md#%E6%B2%A1%E6%9C%89%E6%9C%8D%E5%8A%A1%E5%99%A8%E5%9C%B0%E5%9D%80";
 const selfHostGuideUrl = "https://github.com/27xk/TaskBridge/blob/main/deploy/README.md";
-const serverLocalhostHint = computed(() => (isLoopbackServerUrl(serverUrlDraft.value) ? settingsStore.t("settings.localhostHint") : ""));
+const serverLocalhostHint = computed(() =>
+  !settings.connectionLocked && isLoopbackServerUrl(serverUrlDraft.value) ? settingsStore.t("settings.localhostHint") : "",
+);
 const showAdvancedConnectionEntry = computed(
-  () => advancedConnectionManuallyRequested.value || advancedConnectionOpen.value || advancedEndpointsEdited.value || connectionNoteTone.value === "error",
+  () => !settings.connectionLocked && (advancedConnectionManuallyRequested.value || advancedConnectionOpen.value || advancedEndpointsEdited.value || connectionNoteTone.value === "error"),
 );
 const registrationBlocked = computed(() => auth.registrationStatusKnown && !auth.registrationEnabled);
 const passwordInputType = computed(() => (passwordVisible.value ? "text" : "password"));
@@ -92,17 +95,32 @@ onMounted(async () => {
 async function submit(): Promise<void> {
   if (submitting.value) return;
   submitting.value = true;
+  connectionNote.value = "";
+  connectionNoteTone.value = null;
+  auth.error = null;
+  let connectionSaved = settings.connectionLocked;
   try {
-    const connectionReady = await testConnection();
-    if (!connectionReady) return;
+    if (!settings.connectionLocked) {
+      await saveConnection();
+      connectionSaved = true;
+    }
     if (mode.value === "login") {
       await auth.login(email.value || username.value, password.value);
     } else {
       await auth.register(username.value, email.value, password.value);
     }
     emit("authenticated");
-  } catch {
-    // The auth store exposes the user-facing error in the form.
+  } catch (error) {
+    if (!connectionSaved) {
+      connectionNote.value = formatConnectionFailureMessage(
+        error,
+        settingsStore.t("settings.connectionFailed"),
+        settingsStore.language,
+      );
+      connectionNoteTone.value = "error";
+      advancedConnectionOpen.value = true;
+    }
+    // Authentication errors are exposed separately by the auth store.
   } finally {
     submitting.value = false;
   }
@@ -297,8 +315,28 @@ async function ensureRegistrationModeAvailable(): Promise<boolean> {
   if (registrationBlocked.value) {
     return false;
   }
-  await testConnection();
-  return auth.registrationStatusKnown && auth.registrationEnabled;
+  try {
+    if (!settings.connectionLocked) await saveConnection();
+    await auth.loadRegistrationStatus();
+  } catch (error) {
+    if (settings.connectionLocked) {
+      auth.error = "network_error";
+      return false;
+    }
+    connectionNote.value = formatConnectionFailureMessage(
+      error,
+      settingsStore.t("settings.connectionFailed"),
+      settingsStore.language,
+    );
+    connectionNoteTone.value = "error";
+    advancedConnectionOpen.value = true;
+    return false;
+  }
+  const available = auth.registrationStatusKnown && auth.registrationEnabled;
+  if (!available && settings.connectionLocked) {
+    auth.error = auth.registrationStatusKnown ? "registration disabled" : "registration unknown";
+  }
+  return available;
 }
 
 async function selectAuthMode(nextMode: "login" | "register"): Promise<void> {
@@ -322,7 +360,7 @@ function authErrorText(error: string): string {
   if (error === "注册失败") return settingsStore.t("auth.registerFailed");
   if (error === "network_error") return settingsStore.t("auth.networkError");
   if (error === "server_error") return settingsStore.t("auth.serverError");
-  if (error === "registration unknown") return settingsStore.t("auth.registrationUnknown");
+  if (error === "registration unknown") return settingsStore.t("auth.registrationCheckFailed");
   if (error === "registration disabled") return settingsStore.t("auth.registrationClosed");
   return error;
 }
@@ -360,20 +398,22 @@ function authErrorText(error: string): string {
             {{ settingsStore.t("auth.continueOffline") }}
           </button>
         </section>
-        <label>
-          <span>{{ settingsStore.t("settings.serverUrl") }}</span>
+        <div v-if="!settings.connectionLocked" class="auth-labeled-field">
+          <label for="loginServerUrl">{{ settingsStore.t("settings.serverUrl") }}</label>
           <input
+            id="loginServerUrl"
             v-model.trim="serverUrlDraft"
             type="text"
             inputmode="url"
             autocomplete="off"
             spellcheck="false"
+            :aria-describedby="serverLocalhostHint ? 'loginServerUrlHint loginServerLocalhostHint' : 'loginServerUrlHint'"
             @change="applyServerUrl"
           />
-          <small>{{ settingsStore.t("settings.serverUrlHint") }}</small>
-          <small v-if="serverLocalhostHint" class="form-message form-message-info">{{ serverLocalhostHint }}</small>
-        </label>
-        <p class="form-message form-message-info">{{ registrationConnectionHint }}</p>
+          <small id="loginServerUrlHint">{{ settingsStore.t("settings.serverUrlHint") }}</small>
+          <small id="loginServerLocalhostHint" v-if="serverLocalhostHint" class="form-message form-message-info">{{ serverLocalhostHint }}</small>
+        </div>
+        <p v-if="!settings.connectionLocked" class="form-message form-message-info">{{ registrationConnectionHint }}</p>
 
         <div class="segment-control" role="group" :aria-label="settingsStore.t('auth.mode')">
           <button
@@ -401,12 +441,18 @@ function authErrorText(error: string): string {
         </label>
         <label>
           <span>{{ mode === "login" ? settingsStore.t("auth.usernameOrEmail") : settingsStore.t("auth.email") }}</span>
-          <input v-model="email" :type="mode === 'register' ? 'email' : 'text'" required autocomplete="email" />
+          <input
+            v-model="email"
+            :type="mode === 'register' ? 'email' : 'text'"
+            :autocomplete="mode === 'register' ? 'email' : 'username'"
+            required
+          />
         </label>
-        <label>
-          <span>{{ settingsStore.t("auth.password") }}</span>
+        <div class="auth-labeled-field">
+          <label for="loginPassword">{{ settingsStore.t("auth.password") }}</label>
           <div class="password-field">
             <input
+              id="loginPassword"
               v-model="password"
               :type="passwordInputType"
               required
@@ -423,35 +469,35 @@ function authErrorText(error: string): string {
               {{ passwordToggleLabel }}
             </button>
           </div>
-        </label>
+          <small v-if="mode === 'login'">{{ settingsStore.t("auth.forgotPasswordHelp") }}</small>
+        </div>
 
         <p v-if="auth.error" class="form-error" role="alert" aria-live="assertive">{{ authErrorText(auth.error) }}</p>
         <button class="primary-button" type="submit" :disabled="submitting || auth.loading">
           {{ submitting || auth.loading ? settingsStore.t("auth.processing") : mode === "login" ? settingsStore.t("auth.login") : settingsStore.t("auth.createAccount") }}
         </button>
-        <div class="connection-secondary-actions">
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="submitting || connectionTesting"
-            @click="checkAndSaveConnection"
-          >
-            {{ connectionTesting ? settingsStore.t("settings.connectionTesting") : settingsStore.t("settings.checkAndSaveConnection") }}
-          </button>
-          <small>{{ settingsStore.t("settings.loginAutoChecksConnection") }}</small>
-          <p
-            v-if="connectionNote"
-            :class="['form-message', connectionNoteTone === 'success' ? 'form-message-success' : 'form-message-error']"
-            :role="connectionNoteTone === 'error' ? 'alert' : 'status'"
-            :aria-live="connectionNoteTone === 'error' ? 'assertive' : 'polite'"
-          >
-            {{ connectionNote }}
-          </p>
+        <div v-if="!settings.connectionLocked" class="connection-secondary-actions">
           <button v-if="!showAdvancedConnectionEntry" class="text-button" type="button" @click="showAdvancedConnection">
             {{ settingsStore.t("settings.showAdvancedConnection") }}
           </button>
           <details v-if="showAdvancedConnectionEntry" :open="advancedConnectionOpen" class="first-use-details" @toggle="setAdvancedConnectionOpen">
             <summary>{{ settingsStore.t("settings.advancedEndpoints") }}</summary>
+            <button
+              class="secondary-button"
+              type="button"
+              :disabled="submitting || connectionTesting"
+              @click="checkAndSaveConnection"
+            >
+              {{ connectionTesting ? settingsStore.t("settings.connectionTesting") : settingsStore.t("settings.checkAndSaveConnection") }}
+            </button>
+            <p
+              v-if="connectionNote"
+              :class="['form-message', connectionNoteTone === 'success' ? 'form-message-success' : 'form-message-error']"
+              :role="connectionNoteTone === 'error' ? 'alert' : 'status'"
+              :aria-live="connectionNoteTone === 'error' ? 'assertive' : 'polite'"
+            >
+              {{ connectionNote }}
+            </p>
             <label>
               <span>{{ settingsStore.t("settings.baseUrl") }}</span>
               <input
@@ -483,7 +529,7 @@ function authErrorText(error: string): string {
         </div>
       </form>
 
-      <details class="first-use-guide first-use-guide-collapsed">
+      <details v-if="!settings.connectionLocked" class="first-use-guide first-use-guide-collapsed">
         <summary>{{ settingsStore.t("auth.noServerHelpSummary") }}</summary>
         <div class="first-use-guide-body" :aria-label="settingsStore.t('auth.firstUseTitle')">
           <strong>{{ settingsStore.t("auth.firstUseTitle") }}</strong>

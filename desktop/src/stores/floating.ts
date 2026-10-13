@@ -1,7 +1,9 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, shallowRef } from "vue";
 
 import { bridge } from "../db/sqlite";
+import { normalizeSyncStatus, formatSyncStatus } from "../../shared/sync-status";
+import { tryCreateWorkspaceKey } from "../../shared/workspace";
 import { formatShanghaiDateTime } from "../../shared/quick-add-parser";
 import {
   completeFloatingTask,
@@ -15,22 +17,29 @@ import { useSettingsStore } from "./settings";
 type FloatingSyncState = "idle" | "syncing" | "offline" | "error" | "synced";
 
 export const useFloatingStore = defineStore("floating", () => {
-  const tasks = ref<TaskRecord[]>([]);
+  const tasks = shallowRef<TaskRecord[]>([]);
+  const visible = ref(true);
   const syncMessage = ref("已同步");
   const syncState = ref<FloatingSyncState>("idle");
   const opacity = ref(0.96);
   const loading = ref(false);
   const authenticated = ref(false);
+  const workspaceKey = ref<string | null>(null);
   const feedback = ref("");
   const hiddenTaskCount = ref(0);
   const width = ref(320);
   const height = ref(460);
   let refreshTimer: number | null = null;
   let feedbackTimer: number | null = null;
+  let refreshGeneration = 0;
+  let visibilityGeneration = 0;
 
   const openTasks = computed(() => tasks.value.filter((task) => !isCompletedStatus(task.status)));
 
   async function init(): Promise<void> {
+    const generation = visibilityGeneration;
+    const initialVisibility = await bridge().floating.isVisible();
+    if (generation === visibilityGeneration) visible.value = initialVisibility;
     const settings = await bridge().app.getSettings();
     opacity.value = settings.floatingOpacity;
     width.value = settings.floatingWidth;
@@ -39,12 +48,18 @@ export const useFloatingStore = defineStore("floating", () => {
   }
 
   async function refresh(): Promise<void> {
-    authenticated.value = await bridge().auth.hasTokens();
+    if (!visible.value) return;
+    const generation = ++refreshGeneration;
+    const [settings, hasTokens] = await Promise.all([bridge().app.getSettings(), bridge().auth.hasTokens()]);
+    if (!visible.value || generation !== refreshGeneration) return;
+    workspaceKey.value = tryCreateWorkspaceKey(settings.baseUrl, settings.currentUserId);
+    authenticated.value = hasTokens;
+    opacity.value = settings.floatingOpacity;
 
     if (!authenticated.value) {
       tasks.value = [];
       hiddenTaskCount.value = 0;
-      syncMessage.value = "请登录 TaskBridge";
+      syncMessage.value = useSettingsStore().t("floating.loginRequired");
       syncState.value = "offline";
       return;
     }
@@ -52,32 +67,46 @@ export const useFloatingStore = defineStore("floating", () => {
     loading.value = true;
     try {
       const summary = await getFloatingTodayTaskSummary(8);
+      if (!visible.value || generation !== refreshGeneration) return;
       tasks.value = summary.tasks;
       hiddenTaskCount.value = Math.max(0, summary.totalOpen - openTasks.value.length);
-      const status = await bridge().sync.getStatus();
-      syncMessage.value = translateSyncStatus(status);
-      syncState.value = mapSyncState(status);
+      await refreshStatus();
     } finally {
-      loading.value = false;
+      if (generation === refreshGeneration) loading.value = false;
     }
   }
 
+  async function refreshStatus(): Promise<void> {
+    if (!visible.value || !authenticated.value) return;
+    const generation = visibilityGeneration;
+    const status = await bridge().sync.getStatus();
+    if (!visible.value || generation !== visibilityGeneration || !authenticated.value) return;
+    syncMessage.value = translateSyncStatus(status);
+    syncState.value = mapSyncState(status);
+  }
+
   function scheduleRefresh(delay = 120): void {
+    if (!visible.value) return;
     if (refreshTimer !== null) {
       window.clearTimeout(refreshTimer);
     }
     refreshTimer = window.setTimeout(() => {
       refreshTimer = null;
-      void refresh();
+      void refresh().catch(() => { syncState.value = "error"; });
     }, delay);
   }
 
-  async function quickAdd(title: string): Promise<void> {
-    if (!authenticated.value) return;
-    const task = await quickAddTodayTask(title);
-    if (!task) return;
+  async function quickAdd(title: string, submissionId?: string): Promise<boolean> {
+    if (!authenticated.value) return false;
+    const key = workspaceKey.value;
+    if (!key) return false;
+    const task = await quickAddTodayTask(title, submissionId, key);
+    if (!task) return false;
+    if (key !== workspaceKey.value) return true;
     showFeedback(formatQuickAddFeedback(task));
-    await refresh();
+    // Persistence already succeeded; a list refresh failure must not invite a duplicate save.
+    await refresh().catch(() => scheduleRefresh());
+    return true;
   }
 
   async function complete(task: TaskRecord): Promise<void> {
@@ -114,16 +143,22 @@ export const useFloatingStore = defineStore("floating", () => {
       scheduleRefresh();
     });
     const unsubscribeStatus = bridge().window.onSyncStatusChanged(() => {
-      scheduleRefresh();
+      void refreshStatus().catch(() => { syncState.value = "error"; });
     });
-    const unsubscribeQuickAdd = bridge().window.onQuickAdd(() => {
-      const input = document.querySelector<HTMLInputElement>("[data-floating-quick-add]");
-      input?.focus();
+    const unsubscribeVisibility = bridge().floating.onVisibilityChanged((nextVisible) => {
+      visibilityGeneration++;
+      refreshGeneration++;
+      visible.value = nextVisible;
+      loading.value = false;
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = null;
+      if (nextVisible) scheduleRefresh(0);
     });
     const unsubscribeOpacity = bridge().floating.onOpacityChanged((value) => {
       opacity.value = value;
     });
     const unsubscribeSessionExpired = bridge().auth.onSessionExpired(() => {
+      refreshGeneration++;
       authenticated.value = false;
       tasks.value = [];
       hiddenTaskCount.value = 0;
@@ -133,9 +168,12 @@ export const useFloatingStore = defineStore("floating", () => {
     return () => {
       unsubscribeTasks();
       unsubscribeStatus();
-      unsubscribeQuickAdd();
+      unsubscribeVisibility();
       unsubscribeOpacity();
       unsubscribeSessionExpired();
+      refreshGeneration++;
+      visibilityGeneration++;
+      visible.value = false;
       if (refreshTimer !== null) {
         window.clearTimeout(refreshTimer);
         refreshTimer = null;
@@ -172,6 +210,7 @@ export const useFloatingStore = defineStore("floating", () => {
 
   return {
     tasks,
+    visible,
     openTasks,
     syncMessage,
     syncState,
@@ -180,6 +219,7 @@ export const useFloatingStore = defineStore("floating", () => {
     height,
     loading,
     authenticated,
+    workspaceKey,
     feedback,
     hiddenTaskCount,
     init,
@@ -197,31 +237,13 @@ export const useFloatingStore = defineStore("floating", () => {
 });
 
 function translateSyncStatus(status: string): string {
-  const normalized = status.toLowerCase();
-  if (status.includes("同步中")) return "同步中";
-  if (status.includes("离线")) return "离线";
-  if (status.includes("异常")) return "同步异常";
-  if (status.includes("连接")) return status;
-  if (status.includes("已同步")) return "已同步";
-  if (normalized.includes("syncing")) return "同步中";
-  if (normalized.includes("offline")) return "离线";
-  if (normalized.includes("error")) return "同步异常";
-  if (normalized.includes("connected")) return "实时连接";
-  if (normalized.includes("disconnected")) return "等待连接";
-  if (normalized.includes("synced")) return "已同步";
-  if (normalized.includes("idle")) return "已同步";
-  return status || "已同步";
+  return formatSyncStatus(status, useSettingsStore().language);
 }
 
 function mapSyncState(status: string): FloatingSyncState {
-  const normalized = status.toLowerCase();
-  if (status.includes("同步中")) return "syncing";
-  if (status.includes("离线") || status.includes("等待连接")) return "offline";
-  if (status.includes("异常")) return "error";
-  if (status.includes("已同步") || status.includes("实时连接")) return "synced";
-  if (normalized.includes("syncing")) return "syncing";
-  if (normalized.includes("offline") || normalized.includes("disconnected")) return "offline";
-  if (normalized.includes("error")) return "error";
-  if (normalized.includes("synced") || normalized.includes("connected")) return "synced";
+  const normalized = normalizeSyncStatus(status);
+  if (normalized === "syncing" || normalized === "error") return normalized;
+  if (["offline", "disconnected", "signed-out"].includes(normalized)) return "offline";
+  if (normalized === "connected" || normalized === "synced") return "synced";
   return "idle";
 }

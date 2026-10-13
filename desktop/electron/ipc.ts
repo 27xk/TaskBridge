@@ -1,4 +1,4 @@
-import { dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
+import { app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 import type { OpenDialogOptions, SaveDialogOptions } from "electron";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
@@ -7,15 +7,20 @@ import { setAutoStart } from "./auto-start";
 import {
   clearLocalDeviceData,
   completeLocalTaskWithQueue,
+  commitTaskChange,
+  readTaskMutationState,
   createLocalTask,
   enqueueChange,
   enqueueTaskChange,
   getTask,
+  getTaskSyncCounts,
   getSyncQueueCounts,
   getTodayFloatingTaskSummary,
   incrementAttempt,
   listQueue,
   listTasks,
+  listTaskSnapshotPage,
+  listTaskChanges,
   listTasksByServerIds,
   listTodayFloatingTasks,
   listTodayTasks,
@@ -35,16 +40,20 @@ import {
   getFloatingWindowPosition,
   getFloatingWindowSize,
   hideFloatingWindow,
+  isFloatingWindowVisible,
   notifyFloatingTasksChanged,
   notifyFloatingSyncStatusChanged,
   saveFloatingWindowPosition,
   setFloatingWindowSize,
+  setFloatingDraftDurable,
   setFloatingWindowOpacity,
   showFloatingWindow,
   toggleFloatingWindow,
 } from "./floating-window";
 import { performApiRequest, type ApiRequestPayload } from "./http";
 import { showTaskNotification } from "./notification";
+import { openQuickCapture, markQuickCaptureReady } from "./quick-capture";
+import { showWindow } from "./window-layout";
 import {
   clearLastBackupImportUndoItems,
   broadcastSessionExpired,
@@ -52,6 +61,7 @@ import {
   getLastBackupImportUndoItems,
   getLastBackupImportUndoSummary,
   getSettings,
+  getActiveWorkspaceKey,
   hasTokens,
   setLastBackupImportUndoItems,
   setSetting,
@@ -151,6 +161,7 @@ export function registerIpcHandlers(): void {
   handle("auth:clear-tokens", () => {
     clearTokens();
     setTraySyncStatus("signed-out");
+    notifyFloatingTasksChanged();
   });
   handle("api:request", (_, payload: unknown) => performApiRequest(validateApiRequestPayload(payload)));
 
@@ -161,14 +172,50 @@ export function registerIpcHandlers(): void {
       optionalBoundedInteger(offset, "offset", 0, Number.MAX_SAFE_INTEGER),
     );
   });
-  handle("db:tasks:today", (_, limit?: unknown) => listTodayTasks(optionalBoundedInteger(limit, "limit", 1, 5_000)));
+  handle("db:tasks:today", (_, limit?: unknown, offset?: unknown) => listTodayTasks(
+    optionalBoundedInteger(limit, "limit", 1, 1_000),
+    optionalBoundedInteger(offset, "offset", 0, Number.MAX_SAFE_INTEGER),
+  ));
+  handle("db:tasks:snapshot", (_, afterLocalId?: unknown, limit?: unknown) => listTaskSnapshotPage(
+    afterLocalId === null || afterLocalId === undefined ? null : validateLocalId(afterLocalId),
+    optionalBoundedInteger(limit, "limit", 1, 1_000),
+  ));
+  handle("db:tasks:changes", (_, value: unknown, limit?: unknown) => {
+    const cursor = requireRecord(value, "Invalid task change cursor");
+    return listTaskChanges({
+      epoch: requireString(cursor.epoch, "epoch", 128),
+      revision: optionalBoundedInteger(cursor.revision, "revision", 0, Number.MAX_SAFE_INTEGER) ?? 0,
+    }, optionalBoundedInteger(limit, "limit", 1, 1_000));
+  });
+  handle("db:tasks:sync-counts", () => getTaskSyncCounts());
   handle("db:tasks:floating-today", (_, limit?: unknown) => {
     return listTodayFloatingTasks(optionalBoundedInteger(limit, "limit", 1, 100));
   });
   handle("db:tasks:get", (_, localId: unknown) => getTask(validateLocalId(localId)));
   handle("db:tasks:get-by-server-ids", (_, serverIds: unknown) => listTasksByServerIds(validateServerIds(serverIds)));
-  handle("db:tasks:upsert", (_, task: unknown) => {
-    const saved = upsertTask(validateTaskRecord(task));
+  handle("app:get-rendering-capabilities", () => {
+    const gpuCompositing = app.getGPUFeatureStatus().gpu_compositing;
+    return { hardwareAcceleration: app.isHardwareAccelerationEnabled() && gpuCompositing === "enabled", gpuCompositing };
+  });
+  handle("db:tasks:read-mutation", (_, localId: unknown, workspaceKey: unknown) => {
+    return readTaskMutationState(validateLocalId(localId), requireString(workspaceKey, "expectedWorkspaceKey", 1024));
+  });
+  handle("db:tasks:commit", (_, value: unknown) => {
+    const record = requireRecord(value, "Invalid task mutation payload");
+    const result = commitTaskChange({
+      expectedWorkspaceKey: requireString(record.expectedWorkspaceKey, "expectedWorkspaceKey", 1024),
+      expected: record.expected === null ? null : validateTaskRecord(record.expected),
+      expectedQueueId: record.expectedQueueId === null ? null : validateRecordId(record.expectedQueueId),
+      task: validateTaskRecord(record.task),
+      queueAction: record.queueAction === undefined || record.queueAction === null ? record.queueAction : requireSyncAction(record.queueAction),
+      removeQueueId: record.removeQueueId === undefined ? undefined : validateRecordId(record.removeQueueId),
+    });
+    if (result.applied) notifyFloatingTasksChanged();
+    return result;
+  });
+  handle("db:tasks:upsert", (_, task: unknown, preserveLocalChanges?: unknown, expectedWorkspaceKey?: unknown) => {
+    const workspaceKey = expectedWorkspaceKey === undefined ? undefined : requireString(expectedWorkspaceKey, "expectedWorkspaceKey", 1024);
+    const saved = upsertTask(validateTaskRecord(task), preserveLocalChanges === true, workspaceKey);
     notifyFloatingTasksChanged();
     return saved;
   });
@@ -204,18 +251,20 @@ export function registerIpcHandlers(): void {
   handle("db:queue:remove-by-local", (_, localId: unknown) => removeQueueByLocalId(validateLocalId(localId)));
   handle("db:queue:increment-attempt", (_, id: unknown) => incrementAttempt(validateRecordId(id)));
 
-  handle("window:quick-add", () => {
-    windows.mainWindow?.show();
-    windows.mainWindow?.webContents.send("taskbridge:quick-add");
-    windows.floatingWindow?.webContents.send("taskbridge:quick-add");
-  });
+  handle("window:quick-add", () => openQuickCapture());
+  handle("window:quick-add-ready", (event) => markQuickCaptureReady(event.sender));
   handle("window:open-main", () => {
-    windows.mainWindow?.show();
-    windows.mainWindow?.focus();
+    if (windows.mainWindow) showWindow(windows.mainWindow);
   });
 
   handle("floating:show", () => showFloatingWindow());
   handle("floating:hide", () => hideFloatingWindow());
+  handle("floating:is-visible", () => isFloatingWindowVisible());
+  handle("floating:set-draft-durable", (event, durable: unknown) => {
+    if (typeof durable !== "boolean") throw new Error("Invalid draft durability state");
+    if (event.sender !== windows.floatingWindow?.webContents) throw new Error("Only the active floating renderer may report its draft state");
+    setFloatingDraftDurable(durable);
+  });
   handle("floating:toggle", () => toggleFloatingWindow());
   handle("floating:set-opacity", (_, opacity: unknown) => {
     return setFloatingWindowOpacity(validateNumber(opacity, "opacity", 0.45, 1));
@@ -234,7 +283,12 @@ export function registerIpcHandlers(): void {
 
   handle("task:list-today", (_, limit?: unknown) => listTodayFloatingTasks(optionalBoundedInteger(limit, "limit", 1, 100)));
   handle("task:today-summary", (_, limit?: unknown) => getTodayFloatingTaskSummary(optionalBoundedInteger(limit, "limit", 1, 100)));
-  handle("task:quick-add", (_, title: unknown) => quickAddTask(validateNotificationText(title, "title", 255)));
+  handle("task:quick-add", (_, title: unknown, submissionId?: unknown, workspaceKey?: unknown) => {
+    if (workspaceKey !== undefined && requireString(workspaceKey, "expectedWorkspaceKey", 1024) !== getActiveWorkspaceKey()) {
+      throw new Error("Workspace changed before saving quick capture");
+    }
+    return quickAddTask(validateNotificationText(title, "title", 255), submissionId === undefined ? undefined : validateLocalId(submissionId));
+  });
   handle("task:complete", (_, localId: unknown) => completeTaskFromFloating(validateLocalId(localId)));
   handle("task:open-detail", (_, localId: unknown) => openTaskDetail(validateLocalId(localId)));
   handle("task:export-json", () => exportTasksJson());
@@ -297,6 +351,12 @@ function setAppSetting(key: string, value: unknown): AppSettings {
     if (key === "language") refreshTrayMenu();
     return settings;
   }
+  if (key === "desktopDensity" && (value === "comfortable" || value === "compact")) {
+    return setSetting(key, value);
+  }
+  if (key === "desktopGlassEnabled" && typeof value === "boolean") {
+    return setSetting(key, value);
+  }
   if (key === "autoStart" && typeof value === "boolean") {
     return setSetting(key, value);
   }
@@ -311,6 +371,9 @@ function setAppSetting(key: string, value: unknown): AppSettings {
 }
 
 function setConnectionSettings(baseUrl: unknown, wsUrl: unknown): AppSettings {
+  if (getSettings().connectionLocked) {
+    throw new Error("connection_locked");
+  }
   if (typeof baseUrl !== "string" || !isAllowedBaseUrl(baseUrl)) {
     throw new Error("Invalid API base URL");
   }
@@ -381,6 +444,9 @@ function validateApiRequestPayload(value: unknown): ApiRequestPayload {
     url,
     data: payload.data,
     params: payload.params as Record<string, unknown> | undefined,
+    expectedWorkspaceKey: payload.expectedWorkspaceKey === undefined
+      ? undefined
+      : requireString(payload.expectedWorkspaceKey, "expectedWorkspaceKey", 1024),
   };
 }
 
@@ -581,8 +647,8 @@ function requireSyncAction(value: unknown): SyncQueueRecord["action"] {
   throw new Error("Invalid action");
 }
 
-function quickAddTask(title: string): TaskRecord | null {
-  const task = createLocalTask(title);
+function quickAddTask(title: string, submissionId?: string): TaskRecord | null {
+  const task = createLocalTask(title, submissionId);
   if (!task) return null;
   notifyFloatingTasksChanged();
   windows.mainWindow?.webContents.send("taskbridge:tasks-changed");

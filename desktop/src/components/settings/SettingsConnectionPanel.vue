@@ -2,6 +2,7 @@
 import { useSettingsStore } from "../../stores/settings";
 
 defineProps<{
+  connectionLocked: boolean;
   serverUrlDraft: string;
   baseUrl: string;
   wsUrl: string;
@@ -44,7 +45,10 @@ function onWsUrlInput(event: Event): void {
 <template>
   <section class="settings-section settings-connection">
     <h2>{{ settingsStore.t("settings.connection") }}</h2>
-    <div class="settings-grid">
+    <div v-if="connectionLocked" class="settings-grid">
+      <p class="form-message form-message-info">{{ settingsStore.t("settings.managedConnection") }}</p>
+    </div>
+    <div v-else class="settings-grid">
       <label>
         <span>{{ settingsStore.t("settings.serverUrl") }}</span>
         <input
@@ -64,11 +68,11 @@ function onWsUrlInput(event: Event): void {
         {{ connectionTesting ? settingsStore.t("settings.connectionTesting") : settingsStore.t("settings.checkAndSaveConnection") }}
       </button>
     </div>
-    <button v-if="!showAdvancedConnectionEntry" class="text-button" type="button" @click="$emit('showAdvancedConnection')">
+    <button v-if="!connectionLocked && !showAdvancedConnectionEntry" class="text-button" type="button" @click="$emit('showAdvancedConnection')">
       {{ settingsStore.t("settings.showAdvancedConnection") }}
     </button>
     <details
-      v-if="showAdvancedConnectionEntry"
+      v-if="!connectionLocked && showAdvancedConnectionEntry"
       :open="advancedConnectionOpen"
       class="settings-advanced-details"
       @toggle="$emit('advancedConnectionToggle', $event)"

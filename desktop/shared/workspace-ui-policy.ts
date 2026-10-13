@@ -1,6 +1,6 @@
 export type WorkspaceSyncStatus = "idle" | "syncing" | "offline" | "error" | "synced";
 
-export type WorkspaceIndicator = "ready" | "working" | "offline" | "attention";
+export type WorkspaceIndicator = "ready" | "pending" | "working" | "offline" | "attention";
 
 export type WorkspaceBanner = "none" | "offline" | "attention";
 
@@ -46,6 +46,9 @@ export function deriveWorkspaceStatus(
   }
   if (status === "syncing") {
     return { indicator: "working", banner: "none", issueCount: 0 };
+  }
+  if (diagnostics.pendingQueueCount > 0) {
+    return { indicator: "pending", banner: "none", issueCount: 0 };
   }
   return { indicator: "ready", banner: "none", issueCount: 0 };
 }

@@ -204,10 +204,10 @@ test("today view integrates reliable quick add and save error feedback", async (
   assert.doesNotMatch(today, /TaskSyncHealthBar|taskSyncHealth|showTaskSyncHealth|diagnosticSyncIssueCount|taskRecordSyncIssueCount|useSyncStore|action-feedback|eyebrow/);
 
   assert.ok(quickAddMatch, "quickAddTask must be declared");
-  assert.match(quickAddMatch[1], /if \(isQuickAdding\.value\) return;\s*isQuickAdding\.value = true;\s*quickAddError\.value = "";/);
-  assert.match(quickAddMatch[1], /await taskStore\.addTask\(\{[\s\S]*?title,[\s\S]*?listType: "today",[\s\S]*?plannedDate: todayLocalDate\(taskStore\.timelineNow, settingsStore\.displayTimeZone\),?[\s\S]*?\}\)/);
-  assert.match(quickAddMatch[1], /await taskStore\.addTask\([\s\S]*?quickAddRef\.value\?\.clear\(title\);[\s\S]*?showNotice\(settingsStore\.t\("task\.feedbackSaved"\)\);/);
-  assert.match(quickAddMatch[1], /catch \{\s*quickAddError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
+  assert.match(quickAddMatch[1], /if \(isQuickAdding\.value\) return;[\s\S]{0,120}isQuickAdding\.value = true;\s*quickAddError\.value = "";/);
+  assert.match(quickAddMatch[1], /await taskStore\.addTask\(\{[\s\S]*?title,[\s\S]*?listType: captured\.draft\.listType \|\| "today",[\s\S]*?plannedDate: captured\.draft\.plannedDate \?\? todayLocalDate\(taskStore\.timelineNow, settingsStore\.displayTimeZone\),?[\s\S]*?\}\)/);
+  assert.match(quickAddMatch[1], /await taskStore\.addTask\([\s\S]*?captureStore\.clearIfCurrent\(captured\);[\s\S]*?showNotice\(settingsStore\.t\("task\.feedbackSaved"\)\);/);
+  assert.match(quickAddMatch[1], /catch \{[\s\S]{0,100}quickAddError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
   const quickAddFinally = quickAddMatch[1].match(/finally \{([\s\S]*?)\n  \}/);
   assert.ok(quickAddFinally, "quick add must release busy state in finally");
   assert.match(quickAddFinally[1], /isQuickAdding\.value = false;\s*await nextTick\(\);\s*quickAddRef\.value\?\.focus\(\);/);
@@ -217,19 +217,19 @@ test("today view integrates reliable quick add and save error feedback", async (
 
   assert.match(today, /<WorkspaceQuickAdd[\s\S]{0,320}:disabled="isQuickAdding"[\s\S]{0,320}:invalid="Boolean\(quickAddError\)"[\s\S]{0,320}:error-id="'today-quick-add-error'"[\s\S]{0,320}@submit="quickAddTask"[\s\S]{0,320}@open-editor="openCreate"/);
   assert.match(today, /id="today-quick-add-error"[\s\S]{0,180}class="inline-error quick-add-error"[\s\S]{0,120}role="alert"[\s\S]{0,120}aria-live="assertive"/);
-  assert.match(today, /<TaskEditor[\s\S]{0,320}:error-message="editorSaveError"[\s\S]{0,160}error-id="today-editor-save-error"/);
+  assert.match(today, /<TaskEditor[\s\S]{0,600}:error-message="editorSaveError"[\s\S]{0,160}error-id="today-editor-save-error"/);
   assert.doesNotMatch(today, /<p v-if="editorSaveError"/);
   assert.match(today, /<AppToast :message="notice" \/>/);
   assert.match(today, /import \{ computed, nextTick, onBeforeUnmount, ref, useTemplateRef \} from "vue"/);
-  assert.match(today, /onBeforeUnmount\(\(\) => \{\s*if \(noticeTimer !== undefined\) window\.clearTimeout\(noticeTimer\);\s*\}\)/);
+  assert.match(today, /onBeforeUnmount\(\(\) => \{\s*cancelRequestedAction\(\);\s*if \(noticeTimer !== undefined\) window\.clearTimeout\(noticeTimer\);\s*\}\)/);
 
   assert.ok(saveMatch, "save must be declared");
   assert.match(saveMatch[1], /editorSaveError\.value = "";/);
   assert.match(saveMatch[1], /try \{[\s\S]*?editorOpen\.value = false;[\s\S]*?editingTask\.value = null;[\s\S]*?setEditorDirty\(false\);/);
-  assert.match(saveMatch[1], /catch \{\s*editorSaveError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
+  assert.match(saveMatch[1], /catch \{[\s\S]{0,100}editorSaveError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
   assert.doesNotMatch(saveMatch[1].match(/catch \{([\s\S]*?)\n\s*\}/)?.[1] ?? "", /editorOpen\.value = false|editingTask\.value = null|setEditorDirty\(false\)/);
-  assert.match(today, /function openCreate\(\): void \{\s*editorSaveError\.value = "";/);
-  assert.match(today, /function openEdit\(task: TaskRecord\): void \{\s*editorSaveError\.value = "";/);
+  assert.match(today, /async function openCreate\(\): Promise<void> \{[\s\S]{0,280}editorSaveError\.value = "";/);
+  assert.match(today, /async function openEdit\(task: TaskRecord\): Promise<void> \{[\s\S]{0,280}editorSaveError\.value = "";/);
 });
 
 test("all-tasks view centralizes save feedback and drops inline sync diagnostics", async () => {
@@ -248,7 +248,7 @@ test("all-tasks view centralizes save feedback and drops inline sync diagnostics
   assert.doesNotMatch(tasks, /TaskSyncHealthBar|showTaskSyncHealth|useSyncStore|action-feedback/);
   assert.doesNotMatch(tasks, /diagnosticSyncIssueCount|taskRecordSyncIssueCount|taskSyncIssueCount|taskSyncHealthTone|taskSyncHealthText/);
   assert.match(tasks, /const editorSaveError = ref\(""\)/);
-  assert.match(tasks, /<TaskEditor[\s\S]{0,320}:error-message="editorSaveError"[\s\S]{0,160}error-id="task-editor-save-error"/);
+  assert.match(tasks, /<TaskEditor[\s\S]{0,600}:error-message="editorSaveError"[\s\S]{0,160}error-id="task-editor-save-error"/);
   assert.match(tasks, /<AppToast :message="notice" \/>/);
   assert.doesNotMatch(tasks, /openSettings:\s*\[\]/);
   assert.doesNotMatch(today, /openSettings:\s*\[\]/);
@@ -265,16 +265,16 @@ test("all-tasks view centralizes save feedback and drops inline sync diagnostics
   assert.ok(saveSections, "save must keep success, failure, and cleanup branches separate");
   const [, saveTry, saveCatch, saveFinally] = saveSections;
   assert.match(saveTry, /editorOpen\.value = false;\s*editingTask\.value = null;\s*setEditorDirty\(false\);\s*showNotice\(settingsStore\.t\("task\.feedbackSaved"\)\);/);
-  assert.match(saveCatch, /^\s*editorSaveError\.value = settingsStore\.t\("task\.saveFailed"\);\s*$/);
-  assert.match(saveFinally, /^\s*isSaving\.value = false;\s*$/);
+  assert.match(saveCatch, /if \(epoch === workspaceEpoch\) editorSaveError\.value = settingsStore\.t\("task\.saveFailed"\);/);
+  assert.match(saveFinally, /if \(epoch === workspaceEpoch\) isSaving\.value = false;/);
   for (const section of [saveCatch, saveFinally]) {
     assert.doesNotMatch(section, /editorOpen\.value = false|editingTask\.value = null|setEditorDirty\(false\)|showNotice\(/);
   }
   const taskUnmount = tasks.match(/onBeforeUnmount\(\(\) => \{([\s\S]*?)\n\}\);/);
   assert.ok(taskUnmount, "TaskView must clean up its notice timer when unmounted");
-  assert.match(taskUnmount[1], /^\s*if \(noticeTimer !== undefined\) \{\s*window\.clearTimeout\(noticeTimer\);\s*noticeTimer = undefined;\s*\}\s*$/);
-  assert.match(tasks, /function openCreate\(\): void \{\s*editorSaveError\.value = "";/);
-  assert.match(tasks, /function openEdit\(task: TaskRecord\): void \{\s*editorSaveError\.value = "";/);
+  assert.match(taskUnmount[1], /if \(noticeTimer !== undefined\) \{\s*window\.clearTimeout\(noticeTimer\);\s*noticeTimer = undefined;\s*\}/);
+  assert.match(tasks, /async function openCreate\(\): Promise<void> \{[\s\S]{0,280}editorSaveError\.value = "";/);
+  assert.match(tasks, /async function openEdit\(task: TaskRecord\): Promise<void> \{[\s\S]{0,280}editorSaveError\.value = "";/);
 });
 
 test("all tasks keeps common filters visible and moves secondary filters into menus", async () => {
@@ -306,10 +306,7 @@ test("all tasks keeps common filters visible and moves secondary filters into me
   assert.match(taskView, /<AppToast/);
   assert.match(taskView, /v-if="selectionMode" class="bulk-action-toolbar"/);
   assert.doesNotMatch(taskView, /TaskSyncHealthBar|currentFilters|activeFilterLabels|v-model="secondaryFilter"/);
-  assert.match(taskItem, /<MoreHorizontal/);
-  const taskMenuTrigger = taskItem.match(/<summary[\s\S]*?<MoreHorizontal[\s\S]*?<\/summary>/);
-  assert.ok(taskMenuTrigger, "task menu must expose an icon trigger");
-  assert.match(taskMenuTrigger[0], /task\.title/);
+  // Native menu semantics and lazy mounting are covered by task-list-remediation.test.mjs.
   assert.match(taskItem, /\.task-title\s*\{[\s\S]*?white-space:\s*normal;[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?\}/);
 });
 
@@ -421,14 +418,14 @@ test("desktop visual verifier rejects runtime errors and covers narrow interacti
   assert.match(narrowTasksBlock, /setWindowSize\(799, 700\)/);
   assert.match(narrowTasksBlock, /assertWorkspaceLayout\(64, metrics, "tasks-narrow"\)/);
   assert.match(narrowTasksBlock, /filter-menu\[open\]/);
-  assert.match(narrowTasksBlock, /task-menu\[open\]/);
+  assert.match(narrowTasksBlock, /task-menu-panel/);
   assert.match(narrowTasksBlock, /Boolean\(document\.querySelector\('\.side-panel'\)\)/);
   assert.match(narrowTasksBlock, /assertNoUnnamedInteractiveControls\("all tasks filter menu"\)/);
   assert.match(narrowTasksBlock, /assertNoUnnamedInteractiveControls\("all tasks task menu"\)/);
   assert.match(narrowTasksBlock, /assertNoUnnamedInteractiveControls\("all tasks narrow drawer"\)/);
 
   assert.match(settingsBlock, /setWindowSize\(1024, 768\)/);
-  assert.match(settingsBlock, /assertWorkspaceLayout\(72, mediumMetrics, "settings-medium"\)/);
+  assert.match(settingsBlock, /assertWorkspaceLayout\(184, mediumMetrics, "settings-medium"\)/);
   assert.match(settingsBlock, /setWindowSize\(800, 700\)/);
   assert.match(settingsBlock, /assertNoUnnamedInteractiveControls\(`settings \$\{label\}`\)/);
 });
@@ -448,7 +445,7 @@ test("workspace stylesheet defines stable desktop and narrow layouts", async () 
     baseImportIndex < workspaceImportIndex,
     "workspace styles must load after base styles",
   );
-  const mediumCss = extractBalancedBlock(css, "@media (max-width: 1099px)");
+  const mediumCss = extractBalancedBlock(css, "@media (max-width: 899px)");
   const narrowCss = extractBalancedBlock(css, "@media (max-width: 799px)");
   const reducedMotionCss = extractBalancedBlock(css, "@media (prefers-reduced-motion: reduce)");
   const reducedMotionRule = extractBalancedBlock(reducedMotionCss, ".focus-workspace *,");
@@ -489,7 +486,7 @@ test("task editor associates save errors with its form and submit action", async
   const formActions = editor.match(/<div class="form-actions">([\s\S]*?)<\/div>/);
 
   assert.match(editor, /errorMessage\?: string;\s*errorId\?: string;/);
-  assert.match(editor, /<form class="task-editor" :aria-busy="isSaving \|\| undefined" :aria-describedby="errorMessage \? errorId : undefined" @submit\.prevent="submit">/);
+  assert.match(editor, /<form class="task-editor" :aria-busy="isSaving \|\| undefined" :aria-describedby="errorMessage \? errorId : undefined" @submit\.prevent="submit" @keydown="onEditorKeyDown">/);
   assert.ok(formMatch, "TaskEditor must render a form");
   assert.ok(headerMatch, "TaskEditor must render its header");
   assert.ok(fieldsetMatch, "TaskEditor must group editable controls in a disabled fieldset");
@@ -512,7 +509,7 @@ test("workspace quick add preserves input until parent confirms success", async 
     /function submit\(\): void \{([\s\S]*?)\n\}(?=\n\nfunction clear\()/,
   );
 
-  assert.match(quickAdd, /<form class="workspace-quick-add" @submit\.prevent="submit">/);
+  assert.match(quickAdd, /<form class="workspace-quick-add" @submit\.prevent="submit" @keydown="onKeyDown">/);
   assert.match(quickAdd, /invalid\?: boolean;\s*errorId\?: string;/);
   assert.ok(submitMatch, "submit function must be declared");
   assert.match(submitMatch[1], /const trimmedTitle = title\.value\.trim\(\)/);
@@ -533,8 +530,8 @@ test("workspace quick add preserves input until parent confirms success", async 
   assert.match(quickAdd, /function focus\(\): void \{\s*input\.value\?\.focus\(\)/);
   assert.match(quickAdd, /defineExpose\(\{ clear, focus \}\)/);
 
-  assert.match(quickAdd, /maxlength="120"/);
-  assert.match(quickAdd, /<input[\s\S]{0,240}:disabled="disabled"/);
+  assert.match(quickAdd, /maxlength="255"/);
+  assert.match(quickAdd, /<input[\s\S]{0,240}:disabled="disabled \|\| editorOpen"/);
   assert.match(quickAdd, /:aria-invalid="invalid \|\| undefined"/);
   assert.match(quickAdd, /:aria-errormessage="invalid \? errorId : undefined"/);
   assert.match(quickAdd, /:aria-label="settingsStore\.t\('task\.quickAdd'\)"/);
@@ -543,7 +540,7 @@ test("workspace quick add preserves input until parent confirms success", async 
   assert.match(quickAdd, /import \{ Plus, SlidersHorizontal \} from "lucide-vue-next"/);
   assert.match(quickAdd, /<Plus aria-hidden="true" \/>/);
   assert.match(quickAdd, /<SlidersHorizontal aria-hidden="true" \/>/);
-  assert.match(quickAdd, /<button[\s\S]{0,160}type="submit"[\s\S]{0,160}:disabled="disabled"/);
+  assert.match(quickAdd, /<button[\s\S]{0,160}type="submit"[\s\S]{0,160}:disabled="disabled \|\| editorOpen"/);
   assert.match(quickAdd, /<button[\s\S]{0,160}type="submit"[\s\S]{0,160}:aria-label="settingsStore\.t\('task\.quickAdd'\)"/);
   assert.match(quickAdd, /<button[\s\S]{0,160}type="submit"[\s\S]{0,160}:title="settingsStore\.t\('task\.quickAdd'\)"/);
   assert.match(quickAdd, /<button[\s\S]{0,160}type="button"[\s\S]{0,160}:disabled="disabled"/);
@@ -552,7 +549,7 @@ test("workspace quick add preserves input until parent confirms success", async 
   assert.match(quickAdd, /@click="emit\('openEditor'\)"/);
   assert.doesNotMatch(quickAdd, /<svg\b/i);
   assert.doesNotMatch(quickAdd, />\s*\+\s*</);
-  assert.doesNotMatch(quickAdd, /(?:Press|按下|Enter|回车)/i);
+  assert.doesNotMatch(quickAdd.match(/<template>([\s\S]*?)<\/template>/)[1], /(?:Press|按下|Enter|回车)/i);
 });
 
 test("expired desktop sessions keep the real workspace and offer an explicit local mode", async () => {
@@ -597,7 +594,8 @@ test("desktop batch actions use an explicit selection mode without competing com
   assert.match(taskView, /const selectionMode = ref\(false\)/);
   assert.match(taskView, /<ListChecks/);
   assert.match(taskView, /v-if="selectionMode" class="bulk-action-toolbar"/);
-  assert.match(taskView, /:disabled="bulkActionTargets\.length === 0"/);
+  assert.match(taskView, /v-if="bulkActionTargets\.length > 0"/);
+  assert.match(taskView, /:disabled="bulkBusy"/);
   assert.match(taskView, /\$\{bulkActionTargets\.value\.length\} \$\{settingsStore\.t\("task\.selectedCountSuffix"\)\}/);
   const completeSelected = extractBalancedBlock(taskView, "async function completeVisibleTasks");
   assert.doesNotMatch(completeSelected, /requestConfirmation/);

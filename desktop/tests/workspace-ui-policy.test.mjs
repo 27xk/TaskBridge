@@ -105,12 +105,12 @@ describe("workspace status presentation", () => {
     });
   });
 
-  test("does not escalate a synced pending queue to an alert banner", () => {
+  test("presents a pending-only queue as neutral automatic sync", () => {
     assert.deepEqual(deriveWorkspaceStatus("synced", {
       ...zeroDiagnostics,
       pendingQueueCount: 2,
     }), {
-      indicator: "ready",
+      indicator: "pending",
       banner: "none",
       issueCount: 0,
     });

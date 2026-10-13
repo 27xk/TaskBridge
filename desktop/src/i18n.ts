@@ -23,11 +23,13 @@ type MessageKey =
   | "auth.register"
   | "auth.registrationConnectionHint"
   | "auth.registrationUnknown"
+  | "auth.registrationCheckFailed"
   | "auth.registrationClosed"
   | "auth.username"
   | "auth.usernameOrEmail"
   | "auth.email"
   | "auth.password"
+  | "auth.forgotPasswordHelp"
   | "auth.showPassword"
   | "auth.hidePassword"
   | "auth.processing"
@@ -155,6 +157,7 @@ type MessageKey =
   | "task.enterSelectionMode"
   | "task.clearSelection"
   | "sync.synced"
+  | "sync.pendingAuto"
   | "sync.syncing"
   | "sync.offline"
   | "sync.error"
@@ -200,6 +203,7 @@ type MessageKey =
   | "settings.desktopTheme"
   | "settings.desktopThemeHint"
   | "settings.connection"
+  | "settings.managedConnection"
   | "settings.serverUrl"
   | "settings.serverUrlHint"
   | "settings.applyServerUrl"
@@ -208,7 +212,6 @@ type MessageKey =
   | "settings.checkAndSaveAdvancedConnection"
   | "settings.testConnection"
   | "settings.connectionTesting"
-  | "settings.loginAutoChecksConnection"
   | "settings.connectionSaved"
   | "settings.apiConnectionReady"
   | "settings.connectionReady"
@@ -392,6 +395,10 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
     "zh-CN": "点击“注册”会自动检查当前服务器是否开放注册。已有账号可直接登录。",
     "en-US": "Click Register to check automatically whether this server allows registration. Existing accounts can sign in now.",
   },
+  "auth.registrationCheckFailed": {
+    "zh-CN": "暂时无法确认是否开放注册，请稍后重试或联系管理员。已有账号可直接登录。",
+    "en-US": "Registration availability could not be checked. Try again later or contact the administrator. Existing accounts can sign in.",
+  },
   "auth.registrationClosed": {
     "zh-CN": "当前服务器已关闭开放注册。请使用已有账号登录，或联系服务器管理员创建账号。",
     "en-US": "Open registration is disabled on this server. Use an existing account or ask the server admin to create one.",
@@ -400,6 +407,10 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "auth.usernameOrEmail": { "zh-CN": "用户名或邮箱", "en-US": "Username or email" },
   "auth.email": { "zh-CN": "邮箱", "en-US": "Email" },
   "auth.password": { "zh-CN": "密码", "en-US": "Password" },
+  "auth.forgotPasswordHelp": {
+    "zh-CN": "忘记密码？请联系服务器管理员重置。",
+    "en-US": "Forgot your password? Ask the server administrator to reset it.",
+  },
   "auth.showPassword": { "zh-CN": "显示密码", "en-US": "Show password" },
   "auth.hidePassword": { "zh-CN": "隐藏密码", "en-US": "Hide password" },
   "auth.processing": { "zh-CN": "处理中...", "en-US": "Working..." },
@@ -408,8 +419,8 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "auth.registerFailed": { "zh-CN": "注册失败", "en-US": "Registration failed" },
   "auth.serverUrlRequired": { "zh-CN": "请输入服务器地址。", "en-US": "Enter the server address." },
   "auth.networkError": {
-    "zh-CN": "无法连接服务器，请检查服务器地址和网络后重试。",
-    "en-US": "Cannot reach the server. Check the server URL and network, then try again.",
+    "zh-CN": "无法连接服务，请检查网络；若持续失败，请联系管理员。",
+    "en-US": "Cannot reach the service. Check your network, then contact the administrator if the issue continues.",
   },
   "auth.serverError": {
     "zh-CN": "服务器暂时无法完成请求，请稍后重试或联系管理员。",
@@ -593,6 +604,7 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "task.enterSelectionMode": { "zh-CN": "批量选择任务", "en-US": "Select multiple tasks" },
   "task.clearSelection": { "zh-CN": "取消选择", "en-US": "Clear selection" },
   "sync.synced": { "zh-CN": "已同步", "en-US": "Synced" },
+  "sync.pendingAuto": { "zh-CN": "联网后自动同步", "en-US": "Syncs automatically when online" },
   "sync.syncing": { "zh-CN": "同步中", "en-US": "Syncing" },
   "sync.offline": { "zh-CN": "离线", "en-US": "Offline" },
   "sync.error": { "zh-CN": "同步异常", "en-US": "Sync error" },
@@ -659,6 +671,10 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "settings.desktopTheme": { "zh-CN": "桌面主题", "en-US": "Desktop theme" },
   "settings.desktopThemeHint": { "zh-CN": "点击色块会立即切换，并自动记住当前选择。", "en-US": "Pick a palette to apply it immediately and remember the choice." },
   "settings.connection": { "zh-CN": "连接与同步", "en-US": "Connection and sync" },
+  "settings.managedConnection": {
+    "zh-CN": "无法同步时，可检查连接；若持续失败，请联系管理员。",
+    "en-US": "If sync is unavailable, check the connection or contact the administrator.",
+  },
   "settings.serverUrl": { "zh-CN": "服务器地址", "en-US": "Server URL" },
   "settings.serverUrlHint": { "zh-CN": "填写 TaskBridge 服务器地址即可，高级连接设置会自动生成。", "en-US": "Enter the TaskBridge server address. Advanced connection settings are generated automatically." },
   "settings.applyServerUrl": { "zh-CN": "应用地址", "en-US": "Apply URL" },
@@ -667,10 +683,6 @@ const messages: Record<MessageKey, Record<AppLanguage, string>> = {
   "settings.checkAndSaveAdvancedConnection": { "zh-CN": "保存并检查高级连接", "en-US": "Save and test advanced connection" },
   "settings.testConnection": { "zh-CN": "测试连接", "en-US": "Test connection" },
   "settings.connectionTesting": { "zh-CN": "测试中...", "en-US": "Testing..." },
-  "settings.loginAutoChecksConnection": {
-    "zh-CN": "登录会自动检查连接；检查连接只用于排查服务器地址。",
-    "en-US": "Signing in checks the connection automatically. Use Test connection only when troubleshooting the server address.",
-  },
   "settings.connectionSaved": { "zh-CN": "连接设置已保存。", "en-US": "Connection settings saved." },
   "settings.apiConnectionReady": {
     "zh-CN": "API 可用；登录后会继续验证实时同步。",

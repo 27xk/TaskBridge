@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
 import { workspaceRoot } from "./script-helpers.mjs";
 
 const desktopRoot = workspaceRoot(import.meta.url);
@@ -24,17 +25,10 @@ const [
   readFile(resolve(desktopRoot, "shared/task-ui-policy.ts"), "utf8"),
 ]);
 
-assert.match(taskDaoSource, /const TASK_PAGE_SIZE = 1_000;/, "task DAO must define a bounded page size");
-assert.match(taskDaoSource, /async function listAllTasks/, "task DAO must expose an all-page loader");
-assert.match(taskDaoSource, /bridge\(\)\.db\.listTasks\(TASK_PAGE_SIZE, offset, includeDeleted\)/, "all-task loader must call the paged IPC API");
-assert.match(taskDaoSource, /offset \+= page\.length;/, "all-task loader must advance by returned page length");
-assert.match(taskDaoSource, /page\.length < TASK_PAGE_SIZE/, "all-task loader must stop only after a short page");
-assert.match(taskDaoSource, /const TODAY_TASK_LIMIT = 5_000;/, "today list default must not silently hide normal-sized task sets");
-assert.match(
-  taskStoreSource,
-  /tasks\.value = await listTasks\(undefined, 0, true\);/,
-  "task store must use the all-page task loader while keeping deleted rows available for trash",
-);
+// Exercise SQLite pagination and the rendered list contract; a larger hard limit is not completeness.
+execFileSync(process.execPath, ["--test", "tests/task-data-remediation.test.mjs", "tests/task-list-remediation.test.mjs"], {
+  cwd: desktopRoot, stdio: "inherit", windowsHide: true,
+});
 for (const [viewName, source] of [
   ["TaskView", taskViewSource],
   ["TodayView", todayViewSource],

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
 import type { DesktopThemeId, DesktopThemeOption } from "../../../shared/desktop-theme";
 import type { AppLanguage } from "../../i18n";
 import { useSettingsStore } from "../../stores/settings";
@@ -20,6 +21,29 @@ const emit = defineEmits<{
 }>();
 
 const settingsStore = useSettingsStore();
+const displayError = ref("");
+const savingDisplay = ref(false);
+const english = computed(() => settingsStore.language === "en-US");
+
+async function updateDisplayPreference(event: Event, kind: "density" | "glass"): Promise<void> {
+  if (savingDisplay.value) return;
+  displayError.value = "";
+  savingDisplay.value = true;
+  try {
+    if (kind === "density") {
+      const value = (event.target as HTMLSelectElement).value;
+      await settingsStore.setDesktopDensity(value === "compact" ? "compact" : "comfortable");
+    } else {
+      await settingsStore.setDesktopGlassEnabled((event.target as HTMLInputElement).checked);
+    }
+  } catch {
+    displayError.value = english.value ? "Could not save the display preference. Try again." : "显示偏好未能保存，请重试。";
+    if (kind === "density") (event.target as HTMLSelectElement).value = settingsStore.desktopDensity;
+    else (event.target as HTMLInputElement).checked = settingsStore.desktopGlassEnabled;
+  } finally {
+    savingDisplay.value = false;
+  }
+}
 
 function updateThemeFromKeyboard(event: KeyboardEvent, currentTheme: DesktopThemeId): void {
   const currentIndex = props.themeOptions.findIndex((theme) => theme.value === currentTheme);
@@ -104,6 +128,18 @@ function onAutoStartChange(event: Event): void {
         </div>
         <small>{{ settingsStore.t("settings.desktopThemeHint") }}</small>
       </div>
+      <label>
+        <span>{{ english ? "Interface density" : "界面密度" }}</span>
+        <select :value="settingsStore.desktopDensity" :disabled="savingDisplay" @change="updateDisplayPreference($event, 'density')">
+          <option value="comfortable">{{ english ? "Comfortable" : "舒适" }}</option>
+          <option value="compact">{{ english ? "Compact" : "紧凑" }}</option>
+        </select>
+      </label>
+      <label class="checkbox-line">
+        <input type="checkbox" :checked="settingsStore.desktopGlassEnabled" :disabled="savingDisplay" @change="updateDisplayPreference($event, 'glass')" />
+        <span>{{ english ? "Subtle glass effects" : "轻量玻璃效果" }}</span>
+      </label>
+      <p v-if="displayError" class="inline-error" role="alert">{{ displayError }}</p>
       <label class="checkbox-line">
         <input
           type="checkbox"

@@ -320,7 +320,7 @@ p {
 
 .task-row {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: start;
   gap: 13px;
   padding: 14px 15px;
@@ -340,7 +340,7 @@ p {
 }
 
 .task-row.compact {
-  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr);
   gap: 10px;
   padding: 10px;
 }
@@ -351,24 +351,38 @@ p {
 }
 
 .check-button {
+  position: relative;
   display: inline-grid;
-  width: 24px;
-  height: 24px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   place-items: center;
   padding: 0;
-  border: 2px solid #167c70;
+  border: 0;
   border-radius: 50%;
   color: #ffffff;
-  background: #ffffff;
+  background: transparent;
   font-size: 14px;
   line-height: 1;
 }
 
-.task-row.completed .check-button {
+.check-button::before {
+  grid-area: 1 / 1;
+  width: 22px;
+  height: 22px;
+  border: 2px solid #167c70;
+  border-radius: 50%;
+  background: #ffffff;
+  content: "";
+}
+
+.task-row.completed .check-button::before {
   background: #167c70;
 }
 
 .task-row.completed .check-button::after {
+  grid-area: 1 / 1;
   width: 6px;
   height: 10px;
   border-right: 2px solid #ffffff;
@@ -671,6 +685,11 @@ p {
   gap: 14px;
 }
 
+.auth-labeled-field {
+  display: grid;
+  gap: 6px;
+}
+
 .password-field {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -686,13 +705,6 @@ p {
   min-height: 38px;
   padding: 0 8px;
   white-space: nowrap;
-}
-
-.login-connection {
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-alt);
 }
 
 .connection-secondary-actions {
@@ -1183,13 +1195,14 @@ p {
 }
 
 .check-button {
-  width: 22px;
-  height: 22px;
   margin-top: 1px;
+}
+
+.check-button::before {
   border: 1.7px solid #4b8e7f;
 }
 
-.task-row.completed .check-button {
+.task-row.completed .check-button::before {
   background: #4b8e7f;
 }
 
@@ -1379,42 +1392,6 @@ p {
   border-color: rgba(32, 48, 44, 0.16);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.52);
-}
-
-.today-layout {
-  display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
-  gap: 22px;
-  align-items: start;
-}
-
-.today-summary {
-  position: sticky;
-  top: 30px;
-  display: grid;
-  gap: 8px;
-  padding: 18px;
-  border: 1px solid rgba(26, 43, 39, 0.08);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.62);
-}
-
-.today-summary span {
-  color: #60706b;
-  font-size: 12px;
-  font-weight: 820;
-}
-
-.today-summary strong {
-  color: #101918;
-  font-size: 46px;
-  line-height: 1;
-}
-
-.today-summary p {
-  color: #8a2f25;
-  font-size: 13px;
-  font-weight: 780;
 }
 
 .today-task-list {
@@ -2175,11 +2152,11 @@ body {
   background: #fff7f2;
 }
 
-.check-button {
+.check-button::before {
   border-color: #2f6f62;
 }
 
-.task-row.completed .check-button {
+.task-row.completed .check-button::before {
   background: #2f6f62;
 }
 
@@ -2994,11 +2971,11 @@ body,
   color: var(--danger);
 }
 
-.check-button {
+.check-button::before {
   border-color: var(--primary);
 }
 
-.task-row.completed .check-button {
+.task-row.completed .check-button::before {
   background: var(--primary);
 }
 
@@ -3289,13 +3266,11 @@ body,
   .settings-row,
   .settings-primary-grid,
   .settings-window-grid,
-  .today-layout,
   .today-overview {
     grid-template-columns: 1fr;
   }
 
-  .settings-side,
-  .today-summary {
+  .settings-side {
     position: static;
   }
 

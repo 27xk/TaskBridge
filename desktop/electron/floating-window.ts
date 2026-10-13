@@ -6,36 +6,55 @@ import {
   getFloatingOpacity,
   getFloatingPosition,
   getFloatingSize,
+  normalizeFloatingSize,
+  saveFloatingBounds,
   saveFloatingPosition as persistFloatingPosition,
   saveFloatingSize as persistFloatingSize,
   setFloatingOpacity as persistFloatingOpacity,
-  settingsStore,
   windows,
 } from "./state";
+import {
+  ensureWindowOnScreen,
+  flushWindowLayout,
+  getVisibleWindowBounds,
+  trackWindowLayout,
+} from "./window-layout";
 
 const MIN_FLOATING_WIDTH = 280;
 const MIN_FLOATING_HEIGHT = 260;
 const MAX_FLOATING_WIDTH = 520;
 const MAX_FLOATING_HEIGHT = 720;
+const FLOATING_WINDOW_LIMITS = {
+  minWidth: MIN_FLOATING_WIDTH,
+  minHeight: MIN_FLOATING_HEIGHT,
+  maxWidth: MAX_FLOATING_WIDTH,
+  maxHeight: MAX_FLOATING_HEIGHT,
+};
 let floatingTasksChangedTimer: NodeJS.Timeout | null = null;
 let revealWhenReady = false;
+let floatingIdleTimer: NodeJS.Timeout | null = null;
+let floatingDraftDurable = false;
+const FLOATING_IDLE_MS = 60_000;
 
 export function createFloatingWindow(): BrowserWindow {
   if (windows.floatingWindow && !windows.floatingWindow.isDestroyed()) {
     return windows.floatingWindow;
   }
+  floatingDraftDurable = false;
 
   const restoredSize = getFloatingSize();
-  const restoredPosition = getSafeFloatingPosition() ?? getDefaultFloatingPosition();
+  const savedPosition = getFloatingPosition();
+  const position = savedPosition.x !== null && savedPosition.y !== null
+    ? { x: savedPosition.x, y: savedPosition.y }
+    : getDefaultFloatingPosition();
+  const bounds = getVisibleWindowBounds({ ...position, ...restoredSize }, FLOATING_WINDOW_LIMITS);
   const preloadPath = resolvePreloadPath();
   const floatingWindow = new BrowserWindow({
-    width: restoredSize.width,
-    height: restoredSize.height,
-    minWidth: MIN_FLOATING_WIDTH,
-    minHeight: MIN_FLOATING_HEIGHT,
+    ...bounds,
+    minWidth: Math.min(MIN_FLOATING_WIDTH, bounds.width),
+    minHeight: Math.min(MIN_FLOATING_HEIGHT, bounds.height),
     maxWidth: MAX_FLOATING_WIDTH,
     maxHeight: MAX_FLOATING_HEIGHT,
-    ...(restoredPosition ?? {}),
     frame: false,
     transparent: false,
     backgroundColor: "#f8faf9",
@@ -56,7 +75,14 @@ export function createFloatingWindow(): BrowserWindow {
   floatingWindow.webContents.on("preload-error", (_event, preload, error) => {
     console.error("[TaskBridge] floating preload failed", { preload, error });
   });
+  floatingWindow.webContents.on("did-start-loading", () => {
+    floatingDraftDurable = false;
+    cancelFloatingIdleTimer();
+  });
 
+  trackWindowLayout(floatingWindow, { bounds, maximized: false }, FLOATING_WINDOW_LIMITS, (layout) => {
+    saveFloatingBounds(layout.bounds);
+  });
   floatingWindow.setOpacity(getFloatingOpacity());
   floatingWindow.setAlwaysOnTop(true, "pop-up-menu");
   floatingWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -71,24 +97,27 @@ export function createFloatingWindow(): BrowserWindow {
     });
   }
 
-  floatingWindow.on("moved", () => {
-    saveCurrentFloatingPosition();
-  });
-  floatingWindow.on("resized", () => {
-    saveCurrentFloatingSize();
-    ensureFloatingWindowOnScreen(floatingWindow);
-  });
-
   floatingWindow.once("ready-to-show", () => {
-    if (settingsStore.get("floatingVisibleOnStart") || revealWhenReady) {
+    if (revealWhenReady) {
       revealWhenReady = false;
       revealFloatingWindow(floatingWindow);
     }
   });
 
+  floatingWindow.on("show", () => {
+    cancelFloatingIdleTimer();
+    floatingWindow.webContents.send("taskbridge:floating-visibility-changed", true);
+  });
+  floatingWindow.on("hide", () => {
+    if (floatingTasksChangedTimer !== null) clearTimeout(floatingTasksChangedTimer);
+    floatingTasksChangedTimer = null;
+    floatingWindow.webContents.send("taskbridge:floating-visibility-changed", false);
+    scheduleFloatingIdle(floatingWindow);
+  });
+
   floatingWindow.on("close", (event) => {
-    saveCurrentFloatingPosition();
-    saveCurrentFloatingSize();
+    revealWhenReady = false;
+    flushWindowLayout(floatingWindow);
     if (!windows.isQuitting) {
       event.preventDefault();
       floatingWindow.hide();
@@ -96,7 +125,13 @@ export function createFloatingWindow(): BrowserWindow {
   });
 
   floatingWindow.on("closed", () => {
-    windows.floatingWindow = null;
+    revealWhenReady = false;
+    if (windows.floatingWindow === floatingWindow) {
+      cancelFloatingIdleTimer();
+      if (floatingTasksChangedTimer !== null) clearTimeout(floatingTasksChangedTimer);
+      floatingTasksChangedTimer = null;
+      windows.floatingWindow = null;
+    }
   });
 
   windows.floatingWindow = floatingWindow;
@@ -118,25 +153,44 @@ function resolvePreloadPath(): string {
 }
 
 export function showFloatingWindow(): boolean {
+  cancelFloatingIdleTimer();
   const floatingWindow = createFloatingWindow();
-  if (floatingWindow.webContents.isLoading()) {
-    revealWhenReady = true;
-  }
-  revealFloatingWindow(floatingWindow, true);
+  revealWhenReady = floatingWindow.webContents.isLoading();
+  revealFloatingWindow(floatingWindow);
   return floatingWindow.isVisible();
 }
 
-function revealFloatingWindow(floatingWindow: BrowserWindow, preferActiveDisplay = false): void {
+function cancelFloatingIdleTimer(): void {
+  if (floatingIdleTimer !== null) clearTimeout(floatingIdleTimer);
+  floatingIdleTimer = null;
+}
+
+function scheduleFloatingIdle(window: BrowserWindow): void {
+  cancelFloatingIdleTimer();
+  if (!floatingDraftDurable || window.isDestroyed() || window.isVisible()) return;
+  floatingIdleTimer = setTimeout(() => {
+    floatingIdleTimer = null;
+    if (!floatingDraftDurable || windows.floatingWindow !== window || window.isDestroyed() || window.isVisible()) return;
+    flushWindowLayout(window);
+    window.destroy();
+  }, FLOATING_IDLE_MS);
+  floatingIdleTimer.unref?.();
+}
+
+export function setFloatingDraftDurable(durable: boolean): void {
+  floatingDraftDurable = durable;
+  const window = windows.floatingWindow;
+  if (!window || window.isDestroyed()) return;
+  if (!durable) cancelFloatingIdleTimer();
+  else if (!window.isVisible()) scheduleFloatingIdle(window);
+}
+
+function revealFloatingWindow(floatingWindow: BrowserWindow): void {
   if (floatingWindow.isDestroyed()) return;
   if (floatingWindow.isMinimized()) {
     floatingWindow.restore();
   }
-  if (preferActiveDisplay) {
-    const target = getDefaultFloatingPosition();
-    floatingWindow.setPosition(target.x, target.y, false);
-  } else {
-    ensureFloatingWindowOnScreen(floatingWindow);
-  }
+  ensureWindowOnScreen(floatingWindow);
   floatingWindow.setSkipTaskbar(true);
   floatingWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   floatingWindow.setAlwaysOnTop(true, "pop-up-menu");
@@ -146,8 +200,9 @@ function revealFloatingWindow(floatingWindow: BrowserWindow, preferActiveDisplay
 }
 
 export function hideFloatingWindow(): boolean {
-  saveCurrentFloatingPosition();
+  revealWhenReady = false;
   if (windows.floatingWindow && !windows.floatingWindow.isDestroyed()) {
+    flushWindowLayout(windows.floatingWindow);
     windows.floatingWindow.hide();
   }
   return false;
@@ -180,7 +235,7 @@ export function setFloatingWindowOpacity(opacity: number): number {
 
 export function getFloatingWindowPosition(): { x: number | null; y: number | null } {
   if (windows.floatingWindow && !windows.floatingWindow.isDestroyed()) {
-    const [x, y] = windows.floatingWindow.getPosition();
+    const { x, y } = windows.floatingWindow.getNormalBounds();
     return { x, y };
   }
   return getFloatingPosition();
@@ -188,81 +243,50 @@ export function getFloatingWindowPosition(): { x: number | null; y: number | nul
 
 export function getFloatingWindowSize(): { width: number; height: number } {
   if (windows.floatingWindow && !windows.floatingWindow.isDestroyed()) {
-    const [width, height] = windows.floatingWindow.getSize();
+    const { width, height } = windows.floatingWindow.getNormalBounds();
     return { width, height };
   }
   return getFloatingSize();
 }
 
 export function setFloatingWindowSize(width: number, height: number): { width: number; height: number } {
-  const next = persistFloatingSize(width, height);
+  const next = normalizeFloatingSize(width, height);
   if (windows.floatingWindow && !windows.floatingWindow.isDestroyed()) {
     windows.floatingWindow.setSize(next.width, next.height, false);
-    ensureFloatingWindowOnScreen(windows.floatingWindow);
+    ensureWindowOnScreen(windows.floatingWindow);
+    return getFloatingWindowSize();
   }
-  return next;
+  return persistFloatingSize(next.width, next.height);
 }
 
 export function saveFloatingWindowPosition(x?: number, y?: number): { x: number | null; y: number | null } {
-  if (typeof x === "number" && typeof y === "number") {
-    persistFloatingPosition(x, y);
-    return { x: Math.round(x), y: Math.round(y) };
+  if (typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y)) {
+    const position = getVisibleWindowBounds({ x, y, ...getFloatingWindowSize() }, FLOATING_WINDOW_LIMITS);
+    persistFloatingPosition(position.x, position.y);
+    return { x: position.x, y: position.y };
   }
 
-  saveCurrentFloatingPosition();
+  if (windows.floatingWindow && !windows.floatingWindow.isDestroyed()) flushWindowLayout(windows.floatingWindow);
   return getFloatingWindowPosition();
 }
 
 export function notifyFloatingTasksChanged(): void {
+  if (!isFloatingWindowVisible()) return;
   if (floatingTasksChangedTimer !== null) {
     clearTimeout(floatingTasksChangedTimer);
   }
   floatingTasksChangedTimer = setTimeout(() => {
     floatingTasksChangedTimer = null;
-    if (windows.floatingWindow && !windows.floatingWindow.isDestroyed()) {
+    if (windows.floatingWindow && isFloatingWindowVisible()) {
       windows.floatingWindow.webContents.send("taskbridge:tasks-changed");
     }
   }, 150);
 }
 
 export function notifyFloatingSyncStatusChanged(): void {
-  if (windows.floatingWindow && !windows.floatingWindow.isDestroyed()) {
+  if (windows.floatingWindow && isFloatingWindowVisible()) {
     windows.floatingWindow.webContents.send("taskbridge:sync-status-changed");
   }
-}
-
-function saveCurrentFloatingPosition(): void {
-  if (!windows.floatingWindow || windows.floatingWindow.isDestroyed()) return;
-  const [x, y] = windows.floatingWindow.getPosition();
-  persistFloatingPosition(x, y);
-}
-
-function saveCurrentFloatingSize(): void {
-  if (!windows.floatingWindow || windows.floatingWindow.isDestroyed()) return;
-  const [width, height] = windows.floatingWindow.getSize();
-  persistFloatingSize(width, height);
-}
-
-function getSafeFloatingPosition(): Pick<Rectangle, "x" | "y"> | null {
-  const position = getFloatingPosition();
-  if (position.x === null || position.y === null) return null;
-  const { x, y } = position;
-  const size = getFloatingSize();
-
-  const displays = screen.getAllDisplays();
-  const isVisible = displays.some((display) => {
-    const area = display.workArea;
-    const right = x + size.width;
-    const bottom = y + size.height;
-    return (
-      x >= area.x &&
-      y >= area.y &&
-      right <= area.x + area.width &&
-      bottom <= area.y + area.height
-    );
-  });
-
-  return isVisible ? { x, y } : null;
 }
 
 function getDefaultFloatingPosition(): Pick<Rectangle, "x" | "y"> {
@@ -272,32 +296,6 @@ function getDefaultFloatingPosition(): Pick<Rectangle, "x" | "y"> {
     x: Math.max(area.x, area.x + area.width - size.width - 24),
     y: Math.max(area.y, area.y + 64),
   };
-}
-
-function ensureFloatingWindowOnScreen(floatingWindow: BrowserWindow): void {
-  const [currentX, currentY] = floatingWindow.getPosition();
-  const target = getSafePositionForBounds(currentX, currentY) ?? getDefaultFloatingPosition();
-  if (target.x !== currentX || target.y !== currentY) {
-    floatingWindow.setPosition(target.x, target.y, false);
-  }
-}
-
-function getSafePositionForBounds(x: number, y: number): Pick<Rectangle, "x" | "y"> | null {
-  const size = getFloatingSize();
-  for (const display of screen.getAllDisplays()) {
-    const area = display.workArea;
-    const nextX = Math.min(Math.max(x, area.x), area.x + area.width - size.width);
-    const nextY = Math.min(Math.max(y, area.y), area.y + area.height - size.height);
-    if (
-      nextX >= area.x &&
-      nextY >= area.y &&
-      nextX + size.width <= area.x + area.width &&
-      nextY + size.height <= area.y + area.height
-    ) {
-      return { x: Math.round(nextX), y: Math.round(nextY) };
-    }
-  }
-  return null;
 }
 
 function hardenNavigation(window: BrowserWindow): void {

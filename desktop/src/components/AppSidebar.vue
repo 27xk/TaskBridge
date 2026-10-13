@@ -37,6 +37,7 @@ const accountTrigger = useTemplateRef<HTMLButtonElement>("accountTrigger");
 const statusTitle = computed(() => {
   const key = {
     ready: "sync.synced",
+    pending: "sync.pendingAuto",
     working: "sync.syncing",
     offline: "sync.offline",
     attention: "sync.error",

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu } from "electron";
+import { app, BrowserWindow, Menu, screen } from "electron";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -7,13 +7,26 @@ import { createFloatingWindow, showFloatingWindow } from "./floating-window";
 import { registerIpcHandlers } from "./ipc";
 import { showTaskNotification } from "./notification";
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "./shortcut";
-import { consumeSettingsRecoveryNotice, getSettings, hasTokens, windows } from "./state";
+import {
+  consumeSettingsRecoveryNotice,
+  getMainWindowState,
+  getSettings,
+  hasTokens,
+  saveMainWindowState,
+  windows,
+} from "./state";
 import { createAppTray } from "./tray";
 import { initializeAutoUpdater } from "./updater";
+import { flushWindowLayouts, getVisibleWindowBounds, showWindow, trackWindowLayout } from "./window-layout";
 
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch("disable-gpu");
-app.commandLine.appendSwitch("disable-gpu-compositing");
+// Compatibility default introduced in 038e6b2; opt in only for GPU measurements.
+if (process.env.TASKBRIDGE_ENABLE_GPU !== "1") {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("disable-gpu-compositing");
+}
+
+const MAIN_WINDOW_LIMITS = { minWidth: 760, minHeight: 600 };
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 let closeToTrayNoticeShown = false;
@@ -33,11 +46,18 @@ function createMainWindow(showOnReady = true): BrowserWindow {
   }
 
   const preloadPath = resolvePreloadPath();
-  const mainWindow = new BrowserWindow({
+  const savedLayout = getMainWindowState();
+  const area = screen.getPrimaryDisplay().workArea;
+  const bounds = getVisibleWindowBounds(savedLayout.bounds ?? {
+    x: Math.round(area.x + (area.width - 1120) / 2),
+    y: Math.round(area.y + (area.height - 760) / 2),
     width: 1120,
     height: 760,
-    minWidth: 760,
-    minHeight: 600,
+  }, MAIN_WINDOW_LIMITS);
+  const mainWindow = new BrowserWindow({
+    ...bounds,
+    minWidth: Math.min(MAIN_WINDOW_LIMITS.minWidth, bounds.width),
+    minHeight: Math.min(MAIN_WINDOW_LIMITS.minHeight, bounds.height),
     title: "TaskBridge",
     icon: resolveAppIconPath(),
     show: false,
@@ -50,6 +70,7 @@ function createMainWindow(showOnReady = true): BrowserWindow {
     },
   });
   mainWindow.setMenuBarVisibility(false);
+  trackWindowLayout(mainWindow, { bounds, maximized: savedLayout.maximized }, MAIN_WINDOW_LIMITS, saveMainWindowState);
 
   mainWindow.webContents.on("preload-error", (_event, preload, error) => {
     console.error("[TaskBridge] preload failed", { preload, error });
@@ -109,6 +130,7 @@ function hardenNavigation(window: BrowserWindow): void {
 
 app.on("before-quit", () => {
   windows.isQuitting = true;
+  flushWindowLayouts();
 });
 
 if (hasSingleInstanceLock) app.whenReady().then(() => {
@@ -144,16 +166,11 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
   createAppTray();
   registerGlobalShortcuts();
 
-  app.on("activate", () => {
-    createMainWindow().show();
-  });
+  app.on("activate", restoreMainWindow);
 });
 
 function restoreMainWindow(): void {
-  const mainWindow = createMainWindow(false);
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+  showWindow(createMainWindow(false));
 }
 
 function showCloseToTrayNotice(): void {
@@ -188,6 +205,7 @@ function waitForRendererLoad(window: BrowserWindow): Promise<void> {
 }
 
 app.on("will-quit", () => {
+  flushWindowLayouts();
   unregisterGlobalShortcuts();
 });
 

@@ -2,7 +2,8 @@ import { globalShortcut } from "electron";
 
 import { toggleFloatingWindow } from "./floating-window";
 import { showTaskNotification } from "./notification";
-import { getSettings, windows } from "./state";
+import { openQuickCapture } from "./quick-capture";
+import { getSettings } from "./state";
 
 export function registerGlobalShortcuts(): void {
   const failedShortcuts: string[] = [];
@@ -10,12 +11,7 @@ export function registerGlobalShortcuts(): void {
     toggleFloatingWindow();
   }, failedShortcuts);
 
-  registerShortcut("CommandOrControl+Shift+Space", () => {
-    windows.mainWindow?.show();
-    windows.mainWindow?.webContents.send("taskbridge:quick-add");
-    windows.floatingWindow?.webContents.send("taskbridge:quick-add");
-    showTaskNotification("TaskBridge", getSettings().language === "en-US" ? "Quick add is ready." : "快速添加已就绪。");
-  }, failedShortcuts);
+  registerShortcut("CommandOrControl+Shift+Space", openQuickCapture, failedShortcuts);
 
   if (failedShortcuts.length > 0) {
     console.warn("[TaskBridge] shortcut registration failed", failedShortcuts);

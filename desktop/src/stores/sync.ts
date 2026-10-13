@@ -1,9 +1,10 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, shallowRef } from "vue";
 
 import { bridge } from "../db/sqlite";
 import { getSyncQueueCounts, listSyncQueue } from "../db/sync-queue.dao";
-import { listTasks } from "../db/task.dao";
+import { getTaskSyncCounts } from "../db/task.dao";
+import type { TaskSyncCounts } from "../../shared/task-index";
 import { SyncManager } from "../sync/SyncManager";
 
 export interface SyncDiagnostics {
@@ -29,7 +30,7 @@ export interface SyncQueueIssue {
 export const useSyncStore = defineStore("sync", () => {
   const status = ref<"idle" | "syncing" | "offline" | "error" | "synced">("idle");
   const message = ref("已同步");
-  const manager = ref<SyncManager | null>(null);
+  const manager = shallowRef<SyncManager | null>(null);
   const diagnostics = ref<SyncDiagnostics>({
     pendingQueueCount: 0,
     exhaustedQueueCount: 0,
@@ -85,24 +86,24 @@ export const useSyncStore = defineStore("sync", () => {
   }
 
   async function refreshDiagnostics(): Promise<void> {
-    const [queue, queueCounts, tasks, settings]: [
+    const [queue, queueCounts, taskCounts, settings]: [
       SyncQueueRecord[],
       SyncQueueCounts,
-      TaskRecord[],
+      TaskSyncCounts,
       TaskBridgeSettings,
     ] = await Promise.all([
       listSyncQueue(500, true),
       getSyncQueueCounts(),
-      listTasks(500, 0, true),
+      getTaskSyncCounts(),
       bridge().app.getSettings(),
     ]);
-    const failedCount = tasks.filter((task) => task.syncStatus === "sync_failed").length;
+    const failedCount = taskCounts.failed;
     diagnostics.value = {
       pendingQueueCount: queueCounts.pending,
       exhaustedQueueCount: queueCounts.exhausted,
       failedCount,
       recoverableSyncIssueCount: queueCounts.pending + queueCounts.exhausted + failedCount,
-      conflictCount: tasks.filter((task) => task.syncStatus === "conflict").length,
+      conflictCount: taskCounts.conflicts,
       lastSyncTime: settings.lastSyncTime,
       updatedAt: new Date().toISOString(),
       exhaustedQueueItems: queue

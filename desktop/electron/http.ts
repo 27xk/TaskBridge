@@ -1,4 +1,4 @@
-import { broadcastSessionExpired, expireTokens, getSettings, getTokens, setTokens } from "./state";
+import { broadcastSessionExpired, expireTokens, getActiveWorkspaceKey, getSettings, getTokens, setTokens } from "./state";
 import { setTraySyncStatus } from "./tray";
 import {
   canInvalidateAuthSession,
@@ -18,6 +18,7 @@ export interface ApiRequestPayload {
   url: string;
   data?: unknown;
   params?: Record<string, unknown>;
+  expectedWorkspaceKey?: string;
 }
 
 class ApiHttpError extends Error {
@@ -61,6 +62,12 @@ export async function performApiRequest<T = unknown>(
   payload: ApiRequestPayload,
 ): Promise<ApiEnvelope<T>> {
   const safePath = normalizeApiPath(payload.url);
+  const assertRequestWorkspace = () => {
+    if (payload.expectedWorkspaceKey !== undefined && payload.expectedWorkspaceKey !== getActiveWorkspaceKey()) {
+      throw new Error("Workspace changed during the request");
+    }
+  };
+  assertRequestWorkspace();
   let tokens = getTokens();
   const initialSettings = getSettings();
   const refreshSession = tokens?.refreshToken
@@ -69,6 +76,7 @@ export async function performApiRequest<T = unknown>(
 
   try {
     const response = await sendApiRequest<T>(payload, safePath, tokens?.accessToken);
+    assertRequestWorkspace();
     persistAuthTokensFromResponse(safePath, response as ApiEnvelope<unknown>);
     return response;
   } catch (error) {
@@ -78,11 +86,15 @@ export async function performApiRequest<T = unknown>(
   }
 
   try {
+    assertRequestWorkspace();
     if (!refreshSession) throw new StaleAuthSessionError();
     const refreshed = await refreshTokenOnce(refreshSession);
     commitRefreshResult(refreshSession, refreshed);
     tokens = getTokens();
-    return await sendApiRequest<T>(payload, safePath, tokens?.accessToken);
+    assertRequestWorkspace();
+    const response = await sendApiRequest<T>(payload, safePath, tokens?.accessToken);
+    assertRequestWorkspace();
+    return response;
   } catch (refreshError) {
     if (
       refreshSession &&

@@ -82,13 +82,13 @@ assert.match(
 );
 assert.match(
   settingsSurfaceSource,
-  /testConnection/,
+  /checkAndSaveConnection/,
   "settings page must include a connection test action",
 );
 assert.match(
   settingsSurfaceSource,
-  /saveConnection/,
-  "settings page must include a dedicated save connection action",
+  /connectionLocked/,
+  "settings page must use the packaged endpoint lock",
 );
 assert.match(
   settingsViewSource,
@@ -102,7 +102,7 @@ assert.match(
 );
 assert.match(
   settingsSurfaceSource,
-  /(:base-url="settings\.baseUrl"|v-model(?:\.trim)?="settings\.baseUrl")/,
+  /(v-model:base-url="settings\.baseUrl"|v-model(?:\.trim)?="settings\.baseUrl")/,
   "settings page must pass the API base URL to the connection field",
 );
 assert.match(
@@ -112,7 +112,7 @@ assert.match(
 );
 assert.match(
   settingsSurfaceSource,
-  /(:ws-url="settings\.wsUrl"|v-model(?:\.trim)?="settings\.wsUrl")/,
+  /(v-model:ws-url="settings\.wsUrl"|v-model(?:\.trim)?="settings\.wsUrl")/,
   "settings page must pass the sync WebSocket URL to the connection field",
 );
 assert.match(

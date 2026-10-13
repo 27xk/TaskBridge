@@ -13,6 +13,8 @@ import {
   getSettings,
 } from "./state";
 import { migrateSqliteDatabase } from "./sqlite-migration";
+import type { TaskCommitRequest, TaskCommitResult, TaskMutationState } from "../shared/task-mutation-policy";
+import type { TaskChangeCursor, TaskChangesPage, TaskSnapshotPage, TaskSyncCounts } from "../shared/task-index";
 
 export type SyncStatus = "synced" | "pending_create" | "pending_update" | "pending_delete" | "sync_failed" | "conflict";
 export type SyncAction = "create" | "update" | "delete" | "complete" | "restore";
@@ -160,6 +162,7 @@ interface SyncQueueRow {
 
 let db: Database.Database | null = null;
 let dbUserKey = "";
+const TASK_CHANGE_HISTORY_LIMIT = 10_000;
 
 export function database(): Database.Database {
   const { key: nextUserKey, path: dbPath } = currentUserDatabaseKey();
@@ -241,6 +244,7 @@ export function database(): Database.Database {
     CREATE INDEX IF NOT EXISTS ix_sync_queue_attempt_created ON sync_queue(attempt_count, created_at);
   `);
   migrateSchema(db);
+  installTaskChangeJournal(db);
   db.pragma("optimize");
   dbUserKey = nextUserKey;
   return db;
@@ -351,6 +355,69 @@ function ensureColumn(target: Database.Database, table: string, column: string, 
   target.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
 }
 
+function installTaskChangeJournal(target: Database.Database): void {
+  target.exec(`
+    CREATE TABLE IF NOT EXISTS task_change_clock (id INTEGER PRIMARY KEY CHECK (id = 1), epoch TEXT NOT NULL, revision INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS task_changes (revision INTEGER PRIMARY KEY, local_id TEXT NOT NULL);
+  `);
+  target.prepare("INSERT OR IGNORE INTO task_change_clock(id, epoch, revision) VALUES (1, ?, 0)").run(randomUUID());
+  // Keep a fixed-size journal. A reader that falls behind starts a fresh keyset snapshot.
+  for (const operation of ["INSERT", "UPDATE", "DELETE"]) {
+    const record = operation === "DELETE" ? "OLD" : "NEW";
+    target.exec(`
+      CREATE TRIGGER IF NOT EXISTS task_changes_after_${operation.toLowerCase()} AFTER ${operation} ON tasks
+      BEGIN
+        UPDATE task_change_clock SET revision = revision + 1 WHERE id = 1;
+        INSERT INTO task_changes(revision, local_id) SELECT revision, ${record}.local_id FROM task_change_clock WHERE id = 1;
+        DELETE FROM task_changes WHERE revision <= (SELECT revision - ${TASK_CHANGE_HISTORY_LIMIT} FROM task_change_clock WHERE id = 1);
+      END;
+    `);
+  }
+}
+
+function taskChangeCursor(): TaskChangeCursor {
+  return database().prepare("SELECT epoch, revision FROM task_change_clock WHERE id = 1").get() as TaskChangeCursor;
+}
+
+export function listTaskSnapshotPage(afterLocalId: string | null = null, limit = 1_000): TaskSnapshotPage<TaskRecord> {
+  const cursor = taskChangeCursor();
+  const pageSize = clampLimit(limit, 1, 1_000);
+  const rows = database().prepare(`SELECT * FROM tasks WHERE @afterLocalId IS NULL OR local_id > @afterLocalId ORDER BY local_id LIMIT @limit`)
+    .all({ afterLocalId, limit: pageSize + 1 }) as TaskRow[];
+  const hasMore = rows.length > pageSize;
+  const tasks = rows.slice(0, pageSize).map(taskFromRow);
+  return { tasks, cursor, nextLocalId: hasMore ? tasks[tasks.length - 1].localId : null };
+}
+
+export function listTaskChanges(cursor: TaskChangeCursor, limit = 1_000): TaskChangesPage<TaskRecord> {
+  const current = taskChangeCursor();
+  const resetRequired = cursor.epoch !== current.epoch || cursor.revision > current.revision
+    || cursor.revision < current.revision - TASK_CHANGE_HISTORY_LIMIT;
+  if (resetRequired) return { tasks: [], removedIds: [], cursor: current, hasMore: false, resetRequired: true };
+  const pageSize = clampLimit(limit, 1, 1_000);
+  const rows = database().prepare(`
+    SELECT tasks.*, changed.local_id AS changed_id, changed.revision AS change_revision FROM (
+      SELECT local_id, MAX(revision) AS revision FROM task_changes WHERE revision > @revision
+      GROUP BY local_id ORDER BY revision LIMIT @limit
+    ) AS changed LEFT JOIN tasks ON tasks.local_id = changed.local_id ORDER BY changed.revision
+  `).all({ revision: cursor.revision, limit: pageSize + 1 }) as Array<TaskRow & { changed_id: string; change_revision: number }>;
+  const page = rows.slice(0, pageSize);
+  const hasMore = rows.length > pageSize;
+  return {
+    tasks: page.filter((row) => row.local_id !== null).map(taskFromRow),
+    removedIds: page.filter((row) => row.local_id === null).map((row) => row.changed_id),
+    cursor: hasMore ? { ...current, revision: page[page.length - 1].change_revision } : current,
+    hasMore,
+    resetRequired: false,
+  };
+}
+
+export function getTaskSyncCounts(): TaskSyncCounts {
+  return database().prepare(`SELECT
+    COUNT(CASE WHEN sync_status = 'sync_failed' THEN 1 END) AS failed,
+    COUNT(CASE WHEN sync_status = 'conflict' THEN 1 END) AS conflicts FROM tasks`).get() as TaskSyncCounts;
+}
+
 function clampLimit(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.trunc(value)));
@@ -376,7 +443,7 @@ export function listTasks(includeDeleted: boolean, limit = 200, offset = 0): Tas
   return rows.map(taskFromRow);
 }
 
-export function listTodayTasks(limit = 120): TaskRecord[] {
+export function listTodayTasks(limit = 200, offset = 0): TaskRecord[] {
   const timeZone = getSettings().displayTimeZone;
   const today = todayLocalDate(new Date(), timeZone);
   const { startTime, endTime } = shanghaiDayBounds(today, timeZone);
@@ -411,10 +478,10 @@ export function listTodayTasks(limit = 120): TaskRecord[] {
         priority DESC,
         updated_at DESC,
         local_id ASC
-      LIMIT @limit
+      LIMIT @limit OFFSET @offset
       `,
     )
-    .all({ startTime, endTime, nowTime, plannedDate: today, limit: clampLimit(limit, 1, 200) }) as TaskRow[];
+    .all({ startTime, endTime, nowTime, plannedDate: today, limit: clampLimit(limit, 1, 1_000), offset: Math.max(0, Math.trunc(offset)) }) as TaskRow[];
   return rows.map(taskFromRow);
 }
 
@@ -510,11 +577,50 @@ export function listTasksByServerIds(serverIds: unknown): TaskRecord[] {
   return rows.map(taskFromRow);
 }
 
-export function upsertTask(task: TaskRecord): TaskRecord {
-  return upsertTasks([task])[0] ?? task;
+export function readTaskMutationState(localId: string, expectedWorkspaceKey: string): TaskMutationState {
+  if (!expectedWorkspaceKey || expectedWorkspaceKey !== getActiveWorkspaceKey()) {
+    throw new Error("Workspace changed before reading the task mutation");
+  }
+  const target = database();
+  return target.transaction(() => {
+    const task = getTask(localId);
+    const queue = target.prepare("SELECT id FROM sync_queue WHERE local_id = ? ORDER BY id DESC LIMIT 1").get(localId) as { id: number } | undefined;
+    return { task, queueId: queue?.id ?? null };
+  })();
 }
 
-export function upsertTasks(tasks: TaskRecord[]): TaskRecord[] {
+export function commitTaskChange(request: TaskCommitRequest): TaskCommitResult {
+  if (!request.expectedWorkspaceKey || request.expectedWorkspaceKey !== getActiveWorkspaceKey()) {
+    throw new Error("Workspace changed before committing the task mutation");
+  }
+  if (request.expected && request.expected.localId !== request.task.localId) {
+    throw new Error("Task identity changed before committing the mutation");
+  }
+  const target = database();
+  return target.transaction(() => {
+    const current = readTaskMutationState(request.task.localId, request.expectedWorkspaceKey);
+    const sameTask = current.task === null ? request.expected === null
+      : request.expected !== null && (Object.keys(current.task) as Array<keyof TaskRecord>).every((field) => current.task![field] === request.expected![field]);
+    if (!sameTask || current.queueId !== request.expectedQueueId) return { ...current, applied: false };
+    const saved = upsertTask(request.task, false, request.expectedWorkspaceKey);
+    if (saved.localId !== request.task.localId) throw new Error("Task identity changed during the mutation");
+    if (request.queueAction === null) removeQueueByLocalId(saved.localId);
+    else if (request.queueAction !== undefined) enqueueTaskChange(saved, request.queueAction);
+    if (request.removeQueueId !== undefined) {
+      target.prepare("DELETE FROM sync_queue WHERE id = ? AND local_id = ?").run(request.removeQueueId, saved.localId);
+    }
+    return { ...readTaskMutationState(saved.localId, request.expectedWorkspaceKey), applied: true };
+  })();
+}
+
+export function upsertTask(task: TaskRecord, preserveLocalChanges = false, expectedWorkspaceKey?: string): TaskRecord {
+  if (expectedWorkspaceKey !== undefined && expectedWorkspaceKey !== getActiveWorkspaceKey()) {
+    throw new Error("Workspace changed before saving the task");
+  }
+  return upsertTasks([task], preserveLocalChanges)[0] ?? task;
+}
+
+export function upsertTasks(tasks: TaskRecord[], preserveLocalChanges = false): TaskRecord[] {
   if (tasks.length === 0) return [];
   const target = database();
   const getByServerId = target.prepare("SELECT * FROM tasks WHERE server_id = ? LIMIT 1");
@@ -565,7 +671,7 @@ export function upsertTasks(tasks: TaskRecord[]): TaskRecord[] {
   const deleteMergedLocalTask = target.prepare("DELETE FROM tasks WHERE local_id = ? AND server_id IS NULL");
   const deleteMergedQueue = target.prepare("DELETE FROM sync_queue WHERE local_id = ?");
   const saveMany = target.transaction((items: TaskRecord[]) => {
-    return items.map((item) => saveTaskRecord(item, getByServerId, saveTask, deleteMergedLocalTask, deleteMergedQueue));
+    return items.map((item) => saveTaskRecord(item, getByServerId, saveTask, deleteMergedLocalTask, deleteMergedQueue, preserveLocalChanges));
   });
   return saveMany(tasks) as TaskRecord[];
 }
@@ -576,11 +682,16 @@ function saveTaskRecord(
   saveTask: Database.Statement,
   deleteMergedLocalTask: Database.Statement,
   deleteMergedQueue: Database.Statement,
+  preserveLocalChanges: boolean,
 ): TaskRecord {
   const existingByServerId = task.serverId === null
     ? null
     : (getByServerId.get(task.serverId) as TaskRow | undefined);
   const existingTask = existingByServerId ? taskFromRow(existingByServerId) : null;
+  // Read and decide in the write transaction, after any concurrent local edit.
+  if (preserveLocalChanges && existingTask && (existingTask.syncStatus !== "synced" || existingTask.version > task.version)) {
+    return existingTask;
+  }
   const shouldRemoveMergedDuplicate = Boolean(existingTask && existingTask.localId !== task.localId);
   const normalizedTask = existingTask && existingTask.localId !== task.localId
     ? {
@@ -751,9 +862,12 @@ export function markTaskCompleted(localId: string): TaskRecord | null {
   return upsertTask(next);
 }
 
-export function createLocalTask(title: string): TaskRecord | null {
+export function createLocalTask(title: string, submissionId?: string): TaskRecord | null {
   const trimmed = title.trim();
   if (!trimmed) return null;
+  const localId = submissionId ? `capture-${submissionId}` : `local-${randomUUID()}`;
+  const existing = submissionId ? getTask(localId) : null;
+  if (existing) return existing;
 
   const nowDate = new Date();
   const now = nowDate.toISOString();
@@ -770,7 +884,7 @@ export function createLocalTask(title: string): TaskRecord | null {
   const plannedDate = parsed.plannedDate ?? (shouldDefaultToToday ? today : null);
   const isTodayTask = plannedDate === today || hasDueTimeToday;
   const task: TaskRecord = {
-    localId: `local-${randomUUID()}`,
+    localId,
     serverId: null,
     title: parsed.title,
     content: null,
@@ -800,8 +914,10 @@ export function createLocalTask(title: string): TaskRecord | null {
     conflictLocalJson: null,
   };
 
-  upsertTask(task);
-  enqueueTaskChange(task, "create");
+  database().transaction(() => {
+    upsertTask(task);
+    enqueueTaskChange(task, "create");
+  })();
   return task;
 }
 

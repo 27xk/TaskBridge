@@ -21,6 +21,7 @@ const emit = defineEmits<{
 
 const titleId = `confirm-dialog-title-${++dialogIdSeed}`;
 const dialogPanel = ref<HTMLElement | null>(null);
+const cancelButton = ref<HTMLButtonElement | null>(null);
 const confirmButton = ref<HTMLButtonElement | null>(null);
 const previousActiveElement = ref<HTMLElement | null>(null);
 
@@ -55,7 +56,8 @@ function onKeyDown(event: KeyboardEvent): void {
 
 function focusInitialDialogControl(): void {
   const firstFocusable = focusableDialogElements()[0];
-  (confirmButton.value ?? firstFocusable ?? dialogPanel.value)?.focus();
+  const preferredControl = props.danger ? cancelButton.value : confirmButton.value;
+  (preferredControl ?? firstFocusable ?? dialogPanel.value)?.focus();
 }
 
 function focusableDialogElements(): HTMLElement[] {
@@ -117,7 +119,9 @@ function cleanupDialogFocus(): void {
         <h2 :id="titleId">{{ title }}</h2>
         <p>{{ message }}</p>
         <div class="confirm-dialog-actions">
-          <button type="button" class="secondary-button" @click="$emit('cancel')">{{ cancelText }}</button>
+          <button ref="cancelButton" type="button" class="secondary-button" @click="$emit('cancel')">
+            {{ cancelText }}
+          </button>
           <button
             ref="confirmButton"
             type="button"

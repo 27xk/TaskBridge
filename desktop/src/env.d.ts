@@ -1,16 +1,21 @@
 /// <reference types="vite/client" />
 
 import type { DesktopThemeId } from "../shared/desktop-theme";
+import type { TaskCommitRequest, TaskCommitResult, TaskMutationState } from "../shared/task-mutation-policy";
+import type { TaskChangeCursor, TaskChangesPage, TaskSnapshotPage, TaskSyncCounts } from "../shared/task-index";
 
 export {};
 
 declare global {
   interface TaskBridgeSettings {
+    connectionLocked: boolean;
     baseUrl: string;
     wsUrl: string;
     currentUserId: number | null;
     language: "zh-CN" | "en-US";
     desktopTheme: DesktopThemeId;
+    desktopDensity: "comfortable" | "compact";
+    desktopGlassEnabled: boolean;
     displayTimeZone: string;
     deviceId: string;
     lastSyncTime: string;
@@ -26,6 +31,8 @@ declare global {
   type TaskBridgeMutableSettingKey =
     | "language"
     | "desktopTheme"
+    | "desktopDensity"
+    | "desktopGlassEnabled"
     | "displayTimeZone"
     | "lastSyncTime"
     | "autoStart"
@@ -159,6 +166,7 @@ declare global {
         node: string;
       };
       app: {
+        getRenderingCapabilities: () => Promise<{ hardwareAcceleration: boolean; gpuCompositing: string }>;
         getSettings: () => Promise<TaskBridgeSettings>;
         setSetting: <Key extends TaskBridgeMutableSettingKey>(key: Key, value: TaskBridgeSettings[Key]) => Promise<TaskBridgeSettings>;
         setConnection: (baseUrl: string, wsUrl: string) => Promise<TaskBridgeSettings>;
@@ -183,6 +191,7 @@ declare global {
           url: string;
           data?: unknown;
           params?: Record<string, unknown>;
+          expectedWorkspaceKey?: string;
         }) => Promise<{
           code: number;
           message: string;
@@ -191,11 +200,16 @@ declare global {
       };
       db: {
         listTasks: (limit?: number, offset?: number, includeDeleted?: boolean) => Promise<TaskRecord[]>;
-        listTodayTasks: (limit?: number) => Promise<TaskRecord[]>;
+        listTodayTasks: (limit?: number, offset?: number) => Promise<TaskRecord[]>;
+        listTaskSnapshotPage: (afterLocalId?: string | null, limit?: number) => Promise<TaskSnapshotPage<TaskRecord>>;
+        listTaskChanges: (cursor: TaskChangeCursor, limit?: number) => Promise<TaskChangesPage<TaskRecord>>;
+        getTaskSyncCounts: () => Promise<TaskSyncCounts>;
         listFloatingTodayTasks: (limit?: number) => Promise<TaskRecord[]>;
         getTask: (localId: string) => Promise<TaskRecord | null>;
+        readTaskMutationState: (localId: string, workspaceKey: string) => Promise<TaskMutationState>;
+        commitTaskChange: (request: TaskCommitRequest) => Promise<TaskCommitResult>;
         getTasksByServerIds: (serverIds: number[]) => Promise<TaskRecord[]>;
-        upsertTask: (task: TaskRecord) => Promise<TaskRecord>;
+        upsertTask: (task: TaskRecord, preserveLocalChanges?: boolean, expectedWorkspaceKey?: string) => Promise<TaskRecord>;
         upsertTasks: (tasks: TaskRecord[]) => Promise<TaskRecord[]>;
         deleteLocalTask: (localId: string) => Promise<void>;
         purgeLocalTask: (localId: string) => Promise<void>;
@@ -211,6 +225,7 @@ declare global {
       window: {
         openMain: () => Promise<void>;
         quickAdd: () => Promise<void>;
+        quickAddReady: () => Promise<boolean>;
         onQuickAdd: (callback: () => void) => () => void;
         onShowSettings: (callback: () => void) => () => void;
         onTasksChanged: (callback: () => void) => () => void;
@@ -219,6 +234,9 @@ declare global {
         onSyncNow: (callback: () => void) => () => void;
       };
       floating: {
+        isVisible: () => Promise<boolean>;
+        setDraftDurable: (durable: boolean) => Promise<void>;
+        onVisibilityChanged: (callback: (visible: boolean) => void) => () => void;
         show: () => Promise<boolean>;
         hide: () => Promise<boolean>;
         toggle: () => Promise<boolean>;
@@ -232,7 +250,7 @@ declare global {
       task: {
         listToday: (limit?: number) => Promise<TaskRecord[]>;
         getTodaySummary: (limit?: number) => Promise<FloatingTaskSummary>;
-        quickAdd: (title: string) => Promise<TaskRecord | null>;
+        quickAdd: (title: string, submissionId?: string, workspaceKey?: string) => Promise<TaskRecord | null>;
         complete: (localId: string) => Promise<TaskRecord | null>;
         openDetail: (localId: string) => Promise<void>;
         exportJson: () => Promise<{ canceled: boolean; filePath?: string; exportedCount?: number }>;

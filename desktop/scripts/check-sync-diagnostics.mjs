@@ -54,8 +54,9 @@ for (const token of [
   "recoverableSyncIssueCount",
   "refreshDiagnostics",
   "listSyncQueue(500, true)",
-  'task.syncStatus === "conflict"',
-  'task.syncStatus === "sync_failed"',
+  "getTaskSyncCounts",
+  "taskCounts.conflicts",
+  "taskCounts.failed",
 ]) {
   assert.match(syncStoreSource, new RegExp(escapeRegExp(token)), `sync store must include ${token}`);
 }

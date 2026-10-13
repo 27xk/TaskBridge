@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 
 import AppSidebar from "./components/AppSidebar.vue";
+import UndoNotice from "./components/UndoNotice.vue";
+import { useWorkspaceStore } from "./stores/workspace";
+import { useCaptureStore } from "./stores/capture";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import ReauthenticationBanner from "./components/ReauthenticationBanner.vue";
 import WorkspaceStatusBanner from "./components/WorkspaceStatusBanner.vue";
@@ -25,14 +28,22 @@ const activeView = ref<AppView>("today");
 const editorDirty = ref(false);
 const settingsConnectionDirty = ref(false);
 const quickAddSignal = ref(0);
+const searchSignal = ref(0);
+const workspaceMain = useTemplateRef<HTMLElement>("workspaceMain");
+let scrollRestorePending = true;
+let restoringScroll = false;
 const openTaskRequest = ref<{ localId: string; nonce: number } | null>(null);
 const settingsSectionRequest = ref<{ sectionId: string; nonce: number } | null>(null);
 const workspaceInstanceKey = ref(0);
 const continueOfflineAfterExpiry = ref(false);
 const auth = useAuthStore();
 const taskStore = useTaskStore();
+const workspaceStore = useWorkspaceStore();
+const captureStore = useCaptureStore();
 const syncStore = useSyncStore();
 const settingsStore = useSettingsStore();
+watch(() => taskStore.loading, onTaskLoadingChanged, { flush: "post" });
+
 const workspaceStatus = computed(() =>
   deriveWorkspaceStatus(syncStore.status, syncStore.diagnostics),
 );
@@ -98,6 +109,7 @@ onMounted(async () => {
   if (isFloating) return;
   loadNotifiedReminderIds();
   window.addEventListener("beforeunload", handleBeforeUnload);
+  window.addEventListener("keydown", handleAppKeyDown);
 
   removeQuickAddListener = bridge().window.onQuickAdd(() => {
     void openQuickAdd();
@@ -133,6 +145,9 @@ onBeforeUnmount(() => {
   removeSyncNowListener?.();
   removeSessionExpiredListener?.();
   window.removeEventListener("beforeunload", handleBeforeUnload);
+  window.removeEventListener("keydown", handleAppKeyDown);
+  rememberCurrentScroll();
+  workspaceStore.persist();
   stopReminderLoop();
   syncStore.stop();
 });
@@ -212,6 +227,7 @@ function isCurrentWorkspaceActivation(workspaceKey: string, activationId: number
 }
 
 function resetWorkspaceUiState(): void {
+  scrollRestorePending = true;
   taskStore.resetWorkspace();
   syncStore.resetWorkspace();
   editorDirty.value = false;
@@ -226,6 +242,12 @@ function resetWorkspaceUiState(): void {
 
 async function logout(): Promise<void> {
   if (!(await confirmDiscardCurrentEditor())) return;
+  if (captureStore.hasContent && !(await requestConfirmation({
+    message: settingsStore.language === "zh-CN" ? "还有未保存的新任务草稿，仍要退出登录吗？" : "You have an unsaved task draft. Sign out anyway?",
+    danger: true,
+  }))) return;
+  rememberCurrentScroll();
+  workspaceStore.persist();
   if (
     await hasUnsyncedWork() &&
     !(await requestConfirmation({
@@ -278,11 +300,55 @@ async function openSettingsSection(sectionId: string): Promise<void> {
 
 async function requestViewChange(nextView: AppView): Promise<boolean> {
   if (nextView === activeView.value) return true;
-  if (!(await confirmDiscardCurrentEditor())) return false;
+  const workspaceKey = auth.workspaceKey;
+  if (!(await confirmDiscardCurrentEditor()) || workspaceKey !== auth.workspaceKey) return false;
+  rememberCurrentScroll();
   editorDirty.value = false;
   settingsConnectionDirty.value = false;
+  scrollRestorePending = true;
   activeView.value = nextView;
+  await restoreCurrentScroll();
   return true;
+}
+
+function rememberCurrentScroll(): void {
+  if (restoringScroll || scrollRestorePending || !workspaceMain.value) return;
+  if (activeView.value === "tasks") workspaceStore.rememberScroll("all", workspaceMain.value.scrollTop);
+  else if (activeView.value === "today") workspaceStore.rememberScroll("today", workspaceMain.value.scrollTop);
+}
+
+async function onTaskLoadingChanged(loading: boolean): Promise<void> {
+  if (!isFloating && !loading && scrollRestorePending) await restoreCurrentScroll();
+}
+
+async function restoreCurrentScroll(): Promise<void> {
+  if (!scrollRestorePending || taskStore.loading) return;
+  const workspaceKey = auth.workspaceKey;
+  const view = activeView.value;
+  await nextTick();
+  if (workspaceKey !== auth.workspaceKey || view !== activeView.value || !workspaceMain.value) return;
+  restoringScroll = true;
+  const position = view === "tasks" ? workspaceStore.taskView.scrollTop : view === "today" ? workspaceStore.todayScrollTop : 0;
+  workspaceMain.value.scrollTop = position;
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  restoringScroll = false;
+  if (workspaceKey === auth.workspaceKey && view === activeView.value) scrollRestorePending = false;
+}
+
+function handleAppKeyDown(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || event.altKey) return;
+  if (!auth.isAuthenticated && !continueOfflineAfterExpiry.value) return;
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "f") return;
+  if (document.querySelector('[aria-modal="true"]')) return;
+  event.preventDefault();
+  void focusTaskSearch();
+}
+
+async function focusTaskSearch(): Promise<void> {
+  if (!(await requestViewChange("tasks"))) return;
+  workspaceStore.rememberScroll("all", 0);
+  await nextTick();
+  searchSignal.value += 1;
 }
 
 async function confirmDiscardCurrentEditor(): Promise<boolean> {
@@ -302,22 +368,13 @@ async function confirmDiscardCurrentEditor(): Promise<boolean> {
 }
 
 async function openQuickAdd(): Promise<void> {
-  if (!(await confirmDiscardCurrentEditor())) return;
-  editorDirty.value = false;
-  settingsConnectionDirty.value = false;
-  activeView.value = "tasks";
+  if (!(await requestViewChange("tasks"))) return;
   quickAddSignal.value += 1;
 }
 
 async function openTaskDetail(localId: string): Promise<void> {
-  if (!(await confirmDiscardCurrentEditor())) return;
-  editorDirty.value = false;
-  settingsConnectionDirty.value = false;
-  activeView.value = "tasks";
-  openTaskRequest.value = {
-    localId,
-    nonce: Date.now(),
-  };
+  if (!(await requestViewChange("tasks"))) return;
+  openTaskRequest.value = { localId, nonce: Date.now() };
 }
 
 function updateEditorDirty(dirty: boolean): void {
@@ -329,13 +386,16 @@ function updateSettingsConnectionDirty(dirty: boolean): void {
 }
 
 function handleBeforeUnload(event: BeforeUnloadEvent): void {
-  if (!editorDirty.value && !settingsConnectionDirty.value) return;
+  rememberCurrentScroll();
+  workspaceStore.persist();
+  if (!editorDirty.value && !settingsConnectionDirty.value && !captureStore.hasContent) return;
   event.preventDefault();
   event.returnValue = "";
 }
 
 async function reloadTasksAndPruneReminders(): Promise<void> {
   await taskStore.load();
+  await restoreCurrentScroll();
   pruneNotifiedReminders();
 }
 
@@ -447,7 +507,7 @@ function saveNotifiedReminderIds(): void {
       @logout="logout"
     />
 
-    <section class="workspace-main">
+    <section ref="workspaceMain" class="workspace-main" @scroll.passive="rememberCurrentScroll">
       <ReauthenticationBanner
         v-if="continueOfflineAfterExpiry"
         @reauthenticate="showReauthentication"
@@ -461,6 +521,7 @@ function saveNotifiedReminderIds(): void {
       <TaskView
         v-if="activeView === 'tasks'"
         :quick-add-signal="quickAddSignal"
+        :search-signal="searchSignal"
         :open-task-request="openTaskRequest"
         @editor-dirty-change="updateEditorDirty"
       />
@@ -474,6 +535,7 @@ function saveNotifiedReminderIds(): void {
         @connection-dirty-change="updateSettingsConnectionDirty"
       />
     </section>
+    <UndoNotice />
   </main>
 
   <ConfirmDialog

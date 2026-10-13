@@ -333,7 +333,7 @@
 
 .focus-workspace input::placeholder,
 .focus-workspace textarea::placeholder {
-  color: color-mix(in srgb, var(--workspace-muted) 76%, transparent);
+  color: var(--workspace-muted);
 }
 
 .focus-workspace .workspace-status-banner {
@@ -736,8 +736,8 @@
 }
 
 .focus-workspace .task-row.overdue:not(.completed) {
-  padding-left: 5px;
-  border-left: 3px solid var(--workspace-danger);
+  padding-left: 7px;
+  border-left: 1px solid var(--workspace-danger);
   border-bottom-color: var(--workspace-line);
   background: transparent;
 }
@@ -982,6 +982,16 @@
   background: transparent;
 }
 
+.focus-workspace .settings-primary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.focus-workspace .settings-grid > label,
+.focus-workspace .settings-grid input,
+.focus-workspace .settings-grid select {
+  min-width: 0;
+}
+
 .focus-workspace .settings-grid label,
 .focus-workspace .settings-field-label {
   color: var(--workspace-text);
@@ -1105,7 +1115,7 @@
   }
 }
 
-@media (max-width: 1099px) {
+@media (max-width: 899px) {
   .focus-workspace {
     grid-template-columns: 72px minmax(0, 1fr);
   }
@@ -1226,13 +1236,13 @@
   }
 
   .focus-workspace .task-row {
-    grid-template-columns: 24px minmax(0, 1fr) auto;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
     gap: 8px;
     padding-right: 0;
   }
 
   .focus-workspace .task-row.selectable {
-    grid-template-columns: 22px 24px minmax(0, 1fr) auto;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
   }
 
   .focus-workspace .task-row.deleted {
@@ -1298,6 +1308,180 @@
   .app-toast {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+    animation: none !important;
+  }
+}
+
+/* Shared desktop material and density, aligned with the Android glass surfaces. */
+.focus-workspace {
+  --detail-width: 408px;
+  --task-row-padding: 14px;
+  --task-row-height: 64px;
+  --task-title-size: 15px;
+  --glass-surface: color-mix(in srgb, var(--surface) 88%, transparent);
+  --glass-edge: color-mix(in srgb, var(--surface) 68%, var(--border));
+}
+
+:root[data-density="compact"] .focus-workspace {
+  --task-row-padding: 8px;
+  --task-row-height: 48px;
+  --task-title-size: 14px;
+}
+
+.focus-workspace .task-row {
+  min-height: var(--task-row-height);
+  padding-top: var(--task-row-padding);
+  padding-bottom: var(--task-row-padding);
+}
+
+.focus-workspace .task-title-line .task-title {
+  font-size: var(--task-title-size);
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.focus-workspace .task-body > p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.focus-workspace .task-meta {
+  margin-top: 6px;
+  gap: 5px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-workspace .sync-pill,
+.focus-workspace .overdue-pill {
+  font-size: 11px;
+}
+
+:root[data-density="compact"] .focus-workspace .task-meta {
+  margin-top: 3px;
+  gap: 3px 9px;
+}
+
+:root[data-glass="on"] .focus-workspace .sidebar {
+  background: color-mix(in srgb, var(--workspace-sidebar) 88%, transparent);
+  border-right-color: var(--glass-edge);
+  box-shadow: inset -1px 0 color-mix(in srgb, var(--surface) 65%, transparent);
+}
+
+:root[data-glass="on"] .focus-workspace .task-filter-toolbar,
+:root[data-glass="on"] .focus-workspace .bulk-action-toolbar {
+  padding: 8px;
+  border: 1px solid var(--glass-edge);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-muted) 74%, transparent);
+  box-shadow: inset 0 1px color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+:root[data-glass="on"] .focus-workspace .side-panel {
+  background: var(--glass-surface);
+  border-left-color: var(--glass-edge);
+  box-shadow: -12px 0 30px color-mix(in srgb, var(--text) 8%, transparent), inset 1px 0 color-mix(in srgb, var(--surface) 80%, transparent);
+}
+
+:root[data-glass="on"] .focus-workspace .task-editor {
+  background: transparent;
+}
+
+@supports (backdrop-filter: blur(8px)) {
+  :root[data-glass="on"][data-renderer="hardware"] .focus-workspace .sidebar,
+  :root[data-glass="on"][data-renderer="hardware"] .focus-workspace .task-filter-toolbar,
+  :root[data-glass="on"][data-renderer="hardware"] .focus-workspace .bulk-action-toolbar,
+  :root[data-glass="on"][data-renderer="hardware"] .focus-workspace .side-panel {
+    backdrop-filter: blur(8px) saturate(112%);
+  }
+}
+
+@media (min-width: 1280px) {
+  .focus-workspace .view-shell.has-editor {
+    width: calc(100% - var(--detail-width));
+    max-width: none;
+    margin-right: var(--detail-width);
+    margin-left: 0;
+    padding-right: 28px;
+    padding-left: 28px;
+  }
+
+  .focus-workspace .drawer-docked .side-panel {
+    width: var(--detail-width);
+    box-shadow: none;
+  }
+
+  .focus-workspace .drawer-docked .task-editor {
+    padding: 24px;
+  }
+}
+
+.undo-notice {
+  position: fixed;
+  z-index: 102;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: min(560px, calc(100vw - 32px));
+  min-height: 52px;
+  padding: 8px 10px 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+.undo-notice > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.undo-notice .undo-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+  border-radius: 6px;
+  color: var(--primary);
+  background: var(--surface-muted);
+  font-weight: 600;
+}
+
+.undo-notice .icon-button {
+  flex: none;
+  width: 30px;
+  height: 32px;
+  padding: 0;
+}
+
+.undo-notice-error { border-color: var(--danger); }
+body:has(.undo-notice) > .app-toast { bottom: 92px; }
+.floating-capture-error { margin: 0 12px 6px; color: var(--danger); font-size: 12px; }
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-glass="on"] .focus-workspace .sidebar,
+  :root[data-glass="on"] .focus-workspace .task-filter-toolbar,
+  :root[data-glass="on"] .focus-workspace .bulk-action-toolbar,
+  :root[data-glass="on"] .focus-workspace .side-panel {
+    backdrop-filter: none;
+    background: var(--surface);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .undo-notice {
+    transition: none !important;
     animation: none !important;
   }
 }

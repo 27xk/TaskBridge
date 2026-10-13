@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, useTemplateRef, watch } from "vue";
 
 import { useSettingsStore } from "../stores/settings";
 import type { ChecklistDraftItem, TaskDraft } from "../stores/task";
@@ -8,6 +8,7 @@ import { getTaskPriorityOptions } from "../../shared/task-ui-policy";
 
 const props = defineProps<{
   task?: TaskRecord | null;
+  draft?: TaskDraft;
   createPreset?: "default" | "today";
   title?: string;
   isSaving?: boolean;
@@ -17,6 +18,8 @@ const props = defineProps<{
 type ChecklistDraftViewItem = ChecklistDraftItem & { id: string; title: string; done: boolean };
 
 const settingsStore = useSettingsStore();
+const titleInput = useTemplateRef<HTMLInputElement>("titleInput");
+onMounted(async () => { await nextTick(); titleInput.value?.focus(); });
 const bodyOpen = ref(false);
 const arrangeOpen = ref(false);
 const detailsOpen = ref(false);
@@ -54,6 +57,7 @@ const emit = defineEmits<{
   save: [draft: TaskDraft];
   cancel: [];
   "dirty-change": [dirty: boolean];
+  "draft-change": [draft: TaskDraft];
 }>();
 
 interface TaskEditorForm extends TaskDraft {
@@ -142,17 +146,19 @@ watch(
 watch(
   () => [props.task, props.createPreset] as const,
   ([task]) => {
-    form.title = task?.title ?? "";
-    form.content = task?.content ?? "";
-    form.priority = task?.priority ?? 0;
-    form.tag = task?.tag ?? "";
-    form.project = task?.project ?? "";
-    form.dueTime = toDateTimeInput(task?.dueTime);
-    form.remindTime = toDateTimeInput(task?.remindTime);
-    form.repeatRule = task?.repeatRule ?? "";
-    if (task) {
-      form.listType = task.listType;
-      form.plannedDate = task.plannedDate ?? "";
+    const draft = task ? undefined : props.draft;
+    const source = task ?? draft;
+    form.title = source?.title ?? "";
+    form.content = source?.content ?? "";
+    form.priority = source?.priority ?? 0;
+    form.tag = source?.tag ?? "";
+    form.project = source?.project ?? "";
+    form.dueTime = toDateTimeInput(source?.dueTime);
+    form.remindTime = toDateTimeInput(source?.remindTime);
+    form.repeatRule = source?.repeatRule ?? "";
+    if (source?.listType) {
+      form.listType = source.listType;
+      form.plannedDate = source.plannedDate ?? "";
     } else if (props.createPreset === "today") {
       form.listType = "today";
       form.plannedDate = todayDateInputValue();
@@ -160,32 +166,53 @@ watch(
       form.listType = "inbox";
       form.plannedDate = "";
     }
-    checklistDraftItems.value = checklistJsonToItems(task?.checklistJson);
+    if (!task && draft?.plannedDate !== undefined) form.plannedDate = draft.plannedDate ?? "";
+    checklistDraftItems.value = task
+      ? checklistJsonToItems(task.checklistJson)
+      : draft?.checklistItems?.map((item, index) => ({ id: item.id || `draft-${index}`, title: item.title, done: item.done ?? false }))
+        ?? checklistTextToDraftItems(draft?.checklistText ?? "", []);
     form.checklistText = checklistItemsToText(checklistDraftItems.value);
-    form.isTemplate = task?.isTemplate ?? false;
-    form.templateName = task?.templateName ?? "";
-    bodyOpen.value = Boolean(task && hasTaskBodyFields(task));
-    arrangeOpen.value = Boolean(task && hasArrangementFields(task));
-    detailsOpen.value = Boolean(task && hasAdvancedMetadataFields(task));
+    form.isTemplate = source?.isTemplate ?? false;
+    form.templateName = source?.templateName ?? "";
+    bodyOpen.value = Boolean(form.content || form.checklistText);
+    arrangeOpen.value = Boolean(form.dueTime || form.remindTime || form.priority || (task && hasArrangementFields(task)));
+    detailsOpen.value = Boolean(form.tag || form.project || form.repeatRule || form.isTemplate || form.templateName);
   },
   { immediate: true },
 );
+
+watch(currentFormSignature, () => {
+  if (!props.task) emit("draft-change", buildDraft());
+});
+
+function buildDraft(): TaskDraft {
+  return {
+    ...form,
+    dueTime: fromDateTimeInput(form.dueTime),
+    remindTime: fromDateTimeInput(form.remindTime),
+    plannedDate: form.plannedDate || null,
+    checklistItems: checklistDraftItems.value.map((item) => ({ ...item })),
+  };
+}
 
 function submit(): void {
   if (props.isSaving) return;
   const title = form.title.trim();
   if (!title) return;
-  emit("save", {
-    ...form,
-    title,
-    dueTime: fromDateTimeInput(form.dueTime),
-    remindTime: fromDateTimeInput(form.remindTime),
-    plannedDate: form.plannedDate || null,
-    checklistText: form.checklistText,
-    checklistItems: checklistDraftItems.value,
-    isTemplate: form.isTemplate,
-    templateName: form.templateName,
-  });
+  form.title = title;
+  const draft = { ...buildDraft(), title };
+  if (!props.task) emit("draft-change", draft);
+  emit("save", draft);
+}
+
+function onEditorKeyDown(event: KeyboardEvent): void {
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const formElement = event.currentTarget as HTMLFormElement;
+    if (formElement.reportValidity()) submit();
+  }
 }
 
 function toDateTimeInput(value?: string | null): string {
@@ -308,7 +335,7 @@ function hasAdvancedMetadataFields(task: TaskRecord): boolean {
 </script>
 
 <template>
-  <form class="task-editor" :aria-busy="isSaving || undefined" :aria-describedby="errorMessage ? errorId : undefined" @submit.prevent="submit">
+  <form class="task-editor" :aria-busy="isSaving || undefined" :aria-describedby="errorMessage ? errorId : undefined" @submit.prevent="submit" @keydown="onEditorKeyDown">
     <header class="panel-header">
       <h2>{{ title ?? (task ? settingsStore.t("task.edit") : settingsStore.t("task.add")) }}</h2>
       <button type="button" class="ghost-button" :disabled="isSaving" @click="$emit('cancel')">{{ settingsStore.t("task.close") }}</button>
@@ -318,6 +345,7 @@ function hasAdvancedMetadataFields(task: TaskRecord): boolean {
     <label>
       <span>{{ settingsStore.t("task.title") }}</span>
       <input
+        ref="titleInput"
         v-model="form.title"
         type="text"
         required

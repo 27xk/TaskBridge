@@ -1,15 +1,65 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 
 import FloatingHeader from "../components/FloatingHeader.vue";
 import FloatingTaskItem from "../components/FloatingTaskItem.vue";
 import QuickAddTask from "../components/QuickAddTask.vue";
 import { useFloatingStore } from "../stores/floating";
 import { useSettingsStore } from "../stores/settings";
+import { bridge } from "../db/sqlite";
 import { formatShanghaiDate } from "../../shared/quick-add-parser";
+import { useFloatingCaptureDraft } from "../composables/useFloatingCaptureDraft";
 
 const floating = useFloatingStore();
 const settingsStore = useSettingsStore();
+const captureDraft = useFloatingCaptureDraft(() => floating.workspaceKey, (durable) => {
+  void bridge().floating.setDraftDurable(durable).catch(() => { /* The main process defaults to retaining the renderer until acknowledged. */ });
+});
+const captureTitle = captureDraft.title;
+const captureError = ref("");
+const isAdding = ref(false);
+const captureInput = useTemplateRef<{ focus(): void }>("captureInput");
+let captureFocusPending = false;
+let removeQuickAdd: (() => void) | undefined;
+
+watch(() => floating.workspaceKey, () => {
+  captureError.value = "";
+});
+watch(() => floating.authenticated, async (authenticated) => {
+  if (authenticated && captureFocusPending) await focusCapture();
+});
+watch(() => floating.visible, (visible) => { if (visible) captureDraft.retryPersistence(); });
+
+async function focusCapture(): Promise<void> {
+  captureFocusPending = true;
+  await nextTick();
+  if (captureInput.value) {
+    captureInput.value.focus();
+    captureFocusPending = false;
+  }
+}
+
+async function saveCapture(title: string): Promise<void> {
+  if (isAdding.value) return;
+  const workspaceKey = floating.workspaceKey;
+  const submitted = captureDraft.snapshot();
+  isAdding.value = true;
+  captureError.value = "";
+  try {
+    const saved = await floating.quickAdd(title, submitted.submissionId);
+    if (workspaceKey !== floating.workspaceKey) return;
+    if (saved) {
+      captureDraft.clearIfCurrent(submitted);
+    } else {
+      captureError.value = settingsStore.t("task.saveFailed");
+    }
+  } catch {
+    if (workspaceKey === floating.workspaceKey) captureError.value = settingsStore.t("task.saveFailed");
+  } finally {
+    isAdding.value = false;
+    await focusCapture();
+  }
+}
 
 const dateLabel = computed(() => formatShanghaiDate(new Date(), settingsStore.language, settingsStore.displayTimeZone));
 const hiddenTaskCountLabel = computed(() =>
@@ -28,13 +78,29 @@ let unsubscribe: (() => void) | undefined;
 let resizeStart: { x: number; y: number; width: number; height: number } | null = null;
 let resizeFrame = 0;
 
+async function initializeFloatingView(): Promise<void> {
+  const initialization = floating.init().catch(() => {
+    captureError.value = settingsStore.t("task.saveFailed");
+  });
+  // The listener is ready independently of task loading. focusCapture waits for the input.
+  await nextTick();
+  try {
+    await bridge().window.quickAddReady();
+  } catch {
+    captureError.value = settingsStore.t("task.saveFailed");
+  }
+  await initialization;
+}
+
 onMounted(async () => {
-  await floating.init();
+  removeQuickAdd = bridge().window.onQuickAdd(() => { void focusCapture(); });
   unsubscribe = floating.subscribe();
+  await initializeFloatingView();
 });
 
 onBeforeUnmount(() => {
   unsubscribe?.();
+  removeQuickAdd?.();
   stopResize();
 });
 
@@ -119,7 +185,15 @@ function stopResize(): void {
     </section>
 
     <p v-if="floating.feedback" class="floating-feedback">{{ floating.feedback }}</p>
-    <QuickAddTask v-if="floating.authenticated" @submit="floating.quickAdd" />
+    <p v-if="captureError" id="floating-quick-add-error" class="floating-capture-error" role="alert">{{ captureError }}</p>
+    <QuickAddTask
+      v-if="floating.authenticated"
+      ref="captureInput"
+      v-model="captureTitle"
+      :disabled="isAdding"
+      :error-message="captureError"
+      @submit="saveCapture"
+    />
     <button
       type="button"
       class="floating-resize-handle"

@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("taskBridge", {
     node: process.versions.node,
   },
   app: {
+    getRenderingCapabilities: () => ipcRenderer.invoke("app:get-rendering-capabilities"),
     getSettings: () => ipcRenderer.invoke("app:get-settings"),
     setSetting: (key: MutableAppSettingKey, value: unknown) => ipcRenderer.invoke("app:set-setting", key, value),
     setConnection: (baseUrl: string, wsUrl: string) => ipcRenderer.invoke("app:set-connection", baseUrl, wsUrl),
@@ -42,11 +43,16 @@ contextBridge.exposeInMainWorld("taskBridge", {
     listTasks: (limit?: number, offset?: number, includeDeleted?: boolean) => {
       return ipcRenderer.invoke("db:tasks:list", limit, offset, includeDeleted);
     },
-    listTodayTasks: (limit?: number) => ipcRenderer.invoke("db:tasks:today", limit),
+    listTodayTasks: (limit?: number, offset?: number) => ipcRenderer.invoke("db:tasks:today", limit, offset),
+    listTaskSnapshotPage: (afterLocalId?: string | null, limit?: number) => ipcRenderer.invoke("db:tasks:snapshot", afterLocalId, limit),
+    listTaskChanges: (cursor: { epoch: string; revision: number }, limit?: number) => ipcRenderer.invoke("db:tasks:changes", cursor, limit),
+    getTaskSyncCounts: () => ipcRenderer.invoke("db:tasks:sync-counts"),
     listFloatingTodayTasks: (limit?: number) => ipcRenderer.invoke("db:tasks:floating-today", limit),
     getTask: (localId: string) => ipcRenderer.invoke("db:tasks:get", localId),
+    readTaskMutationState: (localId: string, workspaceKey: string) => ipcRenderer.invoke("db:tasks:read-mutation", localId, workspaceKey),
+    commitTaskChange: (request: unknown) => ipcRenderer.invoke("db:tasks:commit", request),
     getTasksByServerIds: (serverIds: number[]) => ipcRenderer.invoke("db:tasks:get-by-server-ids", serverIds),
-    upsertTask: (task: unknown) => ipcRenderer.invoke("db:tasks:upsert", task),
+    upsertTask: (task: unknown, preserveLocalChanges = false, expectedWorkspaceKey?: string) => ipcRenderer.invoke("db:tasks:upsert", task, preserveLocalChanges, expectedWorkspaceKey),
     upsertTasks: (tasks: unknown[]) => ipcRenderer.invoke("db:tasks:upsert-many", tasks),
     deleteLocalTask: (localId: string) => ipcRenderer.invoke("db:tasks:delete-local", localId),
     purgeLocalTask: (localId: string) => ipcRenderer.invoke("db:tasks:purge-local", localId),
@@ -62,6 +68,7 @@ contextBridge.exposeInMainWorld("taskBridge", {
   window: {
     openMain: () => ipcRenderer.invoke("window:open-main"),
     quickAdd: () => ipcRenderer.invoke("window:quick-add"),
+    quickAddReady: () => ipcRenderer.invoke("window:quick-add-ready"),
     onQuickAdd: (callback: Listener) => on("taskbridge:quick-add", callback),
     onShowSettings: (callback: Listener) => on("taskbridge:show-settings", callback),
     onTasksChanged: (callback: Listener) => on("taskbridge:tasks-changed", callback),
@@ -70,6 +77,9 @@ contextBridge.exposeInMainWorld("taskBridge", {
     onSyncNow: (callback: Listener) => on("taskbridge:sync-now", callback),
   },
   floating: {
+    isVisible: () => ipcRenderer.invoke("floating:is-visible"),
+    setDraftDurable: (durable: boolean) => ipcRenderer.invoke("floating:set-draft-durable", durable),
+    onVisibilityChanged: (callback: (visible: boolean) => void) => on("taskbridge:floating-visibility-changed", callback),
     show: () => ipcRenderer.invoke("floating:show"),
     hide: () => ipcRenderer.invoke("floating:hide"),
     toggle: () => ipcRenderer.invoke("floating:toggle"),
@@ -83,7 +93,7 @@ contextBridge.exposeInMainWorld("taskBridge", {
   task: {
     listToday: (limit?: number) => ipcRenderer.invoke("task:list-today", limit),
     getTodaySummary: (limit?: number) => ipcRenderer.invoke("task:today-summary", limit),
-    quickAdd: (title: string) => ipcRenderer.invoke("task:quick-add", title),
+    quickAdd: (title: string, submissionId?: string, workspaceKey?: string) => ipcRenderer.invoke("task:quick-add", title, submissionId, workspaceKey),
     complete: (localId: string) => ipcRenderer.invoke("task:complete", localId),
     openDetail: (localId: string) => ipcRenderer.invoke("task:open-detail", localId),
     exportJson: () => ipcRenderer.invoke("task:export-json"),

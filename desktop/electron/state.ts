@@ -8,6 +8,7 @@ import {
   type DesktopThemeId,
 } from "../shared/desktop-theme";
 import { getSystemTimeZone, normalizeTimeZone } from "../shared/quick-add-parser";
+import { normalizeWindowBounds, type WindowBounds, type WindowLayoutState } from "../shared/window-layout";
 import {
   EPOCH_SYNC_TIME,
   isLegacyWorkspaceOwner,
@@ -22,6 +23,7 @@ const FALLBACK_BASE_URL = "";
 const FALLBACK_WS_URL = "";
 const DEFAULT_BASE_URL = normalizeEndpointDefault(__TASKBRIDGE_BASE_URL__, FALLBACK_BASE_URL, isHttpUrl);
 const DEFAULT_WS_URL = normalizeEndpointDefault(__TASKBRIDGE_WS_URL__, FALLBACK_WS_URL, isWebSocketUrl);
+const CONNECTION_LOCKED = app.isPackaged || Boolean(DEFAULT_BASE_URL && DEFAULT_WS_URL);
 const CURRENT_SETTINGS_SCHEMA_VERSION = 4;
 const LEGACY_BASE_URLS = new Set([
   "http://127.0.0.1:8000/api/v1",
@@ -51,9 +53,12 @@ export interface BackupImportUndoItem {
 export interface AppSettings {
   baseUrl: string;
   wsUrl: string;
+  connectionLocked: boolean;
   currentUserId: number | null;
   language: "zh-CN" | "en-US";
   desktopTheme: DesktopThemeId;
+  desktopDensity: "comfortable" | "compact";
+  desktopGlassEnabled: boolean;
   displayTimeZone: string;
   deviceId: string;
   lastSyncTime: string;
@@ -75,6 +80,8 @@ export interface StoreSchema {
   wsUrl: string;
   language: "zh-CN" | "en-US";
   desktopTheme: DesktopThemeId;
+  desktopDensity: "comfortable" | "compact";
+  desktopGlassEnabled: boolean;
   displayTimeZone: string;
   displayTimeZoneByUser?: Record<string, string>;
   networkSettingsMigrated?: boolean;
@@ -94,6 +101,7 @@ export interface StoreSchema {
   floatingWidth?: number;
   floatingHeight?: number;
   lastBackupImportUndoItems?: BackupImportUndoItem[];
+  mainWindowState?: WindowLayoutState;
 }
 
 class JsonSettingsStore<T extends object> {
@@ -182,6 +190,8 @@ export const settingsStore = new JsonSettingsStore<StoreSchema>({
   wsUrl: DEFAULT_WS_URL,
   language: "zh-CN",
   desktopTheme: DEFAULT_DESKTOP_THEME,
+  desktopDensity: "comfortable",
+  desktopGlassEnabled: true,
   displayTimeZone: getSystemTimeZone(),
   lastSyncTime: EPOCH_SYNC_TIME,
   autoStart: false,
@@ -194,8 +204,8 @@ export const settingsStore = new JsonSettingsStore<StoreSchema>({
 const previousSettingsSchemaVersion = normalizeSettingsSchemaVersion(
   settingsStore.get("settingsSchemaVersion"),
 );
-migrateNetworkSettings();
 initializeLegacyWorkspaceOwnership(previousSettingsSchemaVersion);
+migrateNetworkSettings();
 normalizeStoredSettings();
 
 export function getLastBackupImportUndoItems(): BackupImportUndoItem[] {
@@ -301,8 +311,19 @@ export function setSetting<Key extends keyof AppSettings>(
   key: Key,
   value: AppSettings[Key],
 ): AppSettings {
+  if (CONNECTION_LOCKED && (key === "baseUrl" || key === "wsUrl")) {
+    throw new Error("connection_locked");
+  }
   if (key === "desktopTheme") {
     settingsStore.set("desktopTheme", normalizeDesktopTheme(value));
+    return getSettings();
+  }
+  if (key === "desktopDensity") {
+    settingsStore.set("desktopDensity", normalizeDesktopDensity(value));
+    return getSettings();
+  }
+  if (key === "desktopGlassEnabled") {
+    settingsStore.set("desktopGlassEnabled", normalizeDesktopGlassEnabled(value));
     return getSettings();
   }
   if (key === "displayTimeZone") {
@@ -337,17 +358,20 @@ export function getSettings(): AppSettings {
   return {
     baseUrl: settingsStore.get("baseUrl"),
     wsUrl: settingsStore.get("wsUrl"),
+    connectionLocked: CONNECTION_LOCKED,
     currentUserId: typeof currentUserId === "number" ? currentUserId : null,
     language: normalizeLanguage(settingsStore.get("language")),
     desktopTheme: normalizeDesktopTheme(settingsStore.get("desktopTheme")),
+    desktopDensity: normalizeDesktopDensity(settingsStore.get("desktopDensity")),
+    desktopGlassEnabled: normalizeDesktopGlassEnabled(settingsStore.get("desktopGlassEnabled")),
     displayTimeZone: normalizeTimeZone(displayTimeZone),
     deviceId: getDeviceId(),
     lastSyncTime: getActiveWorkspaceLastSyncTime(),
     autoStart: settingsStore.get("autoStart"),
     floatingOpacity: normalizeFloatingOpacity(settingsStore.get("floatingOpacity")),
     floatingVisibleOnStart: settingsStore.get("floatingVisibleOnStart"),
-    floatingX: typeof floatingX === "number" ? floatingX : null,
-    floatingY: typeof floatingY === "number" ? floatingY : null,
+    floatingX: typeof floatingX === "number" && Number.isFinite(floatingX) ? Math.round(floatingX) : null,
+    floatingY: typeof floatingY === "number" && Number.isFinite(floatingY) ? Math.round(floatingY) : null,
     floatingWidth: normalizeFloatingWidth(settingsStore.get("floatingWidth")),
     floatingHeight: normalizeFloatingHeight(settingsStore.get("floatingHeight")),
   };
@@ -436,6 +460,24 @@ function normalizeLanguage(language: unknown): "zh-CN" | "en-US" {
 }
 
 function migrateNetworkSettings(): void {
+  if (CONNECTION_LOCKED) {
+    const previousBaseUrl = settingsStore.get("baseUrl").trim().replace(/\/+$/, "");
+    const previousWsUrl = settingsStore.get("wsUrl").trim().replace(/\/+$/, "");
+    if (
+      previousBaseUrl !== DEFAULT_BASE_URL.replace(/\/+$/, "") ||
+      previousWsUrl !== DEFAULT_WS_URL.replace(/\/+$/, "")
+    ) {
+      clearTokens();
+    }
+    settingsStore.setMany({
+      baseUrl: DEFAULT_BASE_URL,
+      wsUrl: DEFAULT_WS_URL,
+      networkSettingsDefaultBaseUrl: DEFAULT_BASE_URL,
+      networkSettingsDefaultWsUrl: DEFAULT_WS_URL,
+    });
+    settingsStore.delete("networkSettingsMigrated");
+    return;
+  }
   migrateStringSetting(
     "baseUrl",
     DEFAULT_BASE_URL,
@@ -462,6 +504,8 @@ function normalizeStoredSettings(): void {
     settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
     language: normalizeLanguage(settingsStore.get("language")),
     desktopTheme: normalizeDesktopTheme(settingsStore.get("desktopTheme")),
+    desktopDensity: normalizeDesktopDensity(settingsStore.get("desktopDensity")),
+    desktopGlassEnabled: normalizeDesktopGlassEnabled(settingsStore.get("desktopGlassEnabled")),
     displayTimeZone: normalizeTimeZone(settingsStore.get("displayTimeZone")),
     floatingOpacity: normalizeFloatingOpacity(settingsStore.get("floatingOpacity")),
     floatingWidth: normalizeFloatingWidth(settingsStore.get("floatingWidth")),
@@ -567,14 +611,14 @@ export function getFloatingPosition(): { x: number | null; y: number | null } {
   const x = settingsStore.get("floatingX");
   const y = settingsStore.get("floatingY");
   return {
-    x: typeof x === "number" ? x : null,
-    y: typeof y === "number" ? y : null,
+    x: typeof x === "number" && Number.isFinite(x) ? Math.round(x) : null,
+    y: typeof y === "number" && Number.isFinite(y) ? Math.round(y) : null,
   };
 }
 
 export function saveFloatingPosition(x: number, y: number): void {
-  settingsStore.set("floatingX", Math.round(x));
-  settingsStore.set("floatingY", Math.round(y));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  settingsStore.setMany({ floatingX: Math.round(x), floatingY: Math.round(y) });
 }
 
 export function getFloatingSize(): { width: number; height: number } {
@@ -584,14 +628,40 @@ export function getFloatingSize(): { width: number; height: number } {
   };
 }
 
+export function normalizeFloatingSize(width: unknown, height: unknown): { width: number; height: number } {
+  return { width: normalizeFloatingWidth(width), height: normalizeFloatingHeight(height) };
+}
+
 export function saveFloatingSize(width: number, height: number): { width: number; height: number } {
-  const next = {
-    width: normalizeFloatingWidth(width),
-    height: normalizeFloatingHeight(height),
-  };
-  settingsStore.set("floatingWidth", next.width);
-  settingsStore.set("floatingHeight", next.height);
+  const next = normalizeFloatingSize(width, height);
+  settingsStore.setMany({ floatingWidth: next.width, floatingHeight: next.height });
   return next;
+}
+
+export function saveFloatingBounds(bounds: WindowBounds): void {
+  const normalized = normalizeWindowBounds(bounds);
+  if (!normalized) return;
+  const size = normalizeFloatingSize(normalized.width, normalized.height);
+  settingsStore.setMany({ floatingX: normalized.x, floatingY: normalized.y, floatingWidth: size.width, floatingHeight: size.height });
+}
+
+export function getMainWindowState(): { bounds: WindowBounds | null; maximized: boolean } {
+  const stored = settingsStore.get("mainWindowState");
+  return { bounds: normalizeWindowBounds(stored?.bounds), maximized: stored?.maximized === true };
+}
+
+export function saveMainWindowState(state: WindowLayoutState): void {
+  const bounds = normalizeWindowBounds(state.bounds);
+  if (!bounds) return;
+  settingsStore.set("mainWindowState", { bounds, maximized: state.maximized === true });
+}
+
+function normalizeDesktopDensity(value: unknown): "comfortable" | "compact" {
+  return value === "compact" ? "compact" : "comfortable";
+}
+
+function normalizeDesktopGlassEnabled(value: unknown): boolean {
+  return typeof value === "boolean" ? value : true;
 }
 
 function normalizeFloatingOpacity(opacity: number): number {

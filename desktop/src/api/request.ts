@@ -8,6 +8,7 @@ export interface ApiEnvelope<T> {
 
 interface RequestConfig {
   params?: Record<string, unknown>;
+  expectedWorkspaceKey?: string;
 }
 
 type ApiMethod = "GET" | "POST" | "PUT" | "DELETE";
@@ -46,6 +47,7 @@ async function send<T>(
     url,
     data,
     params: config?.params,
+    expectedWorkspaceKey: config?.expectedWorkspaceKey,
   });
   return { data: envelope };
 }

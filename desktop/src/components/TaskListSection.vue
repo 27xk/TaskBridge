@@ -1,14 +1,18 @@
 <script setup lang="ts">
+import { useTemplateRef } from "vue";
 import TaskItem from "./TaskItem.vue";
+import { useTaskVirtualList } from "../composables/useTaskVirtualList";
+import { useSettingsStore } from "../stores/settings";
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   title?: string;
   tasks: TaskRecord[];
   tone?: "default" | "overdue" | "completed";
   trash?: boolean;
   selectable?: boolean;
   selectionMode?: boolean;
-  selectedTaskIds: Set<string>;
+  selectedTaskIds?: Set<string>;
+  busy?: boolean;
 }>(), {
   title: "",
   tone: "default",
@@ -17,6 +21,12 @@ withDefaults(defineProps<{
   selectionMode: false,
   selectedTaskIds: () => new Set<string>(),
 });
+
+const settings = useSettingsStore();
+const list = useTemplateRef<HTMLElement>("list");
+const { rows, totalHeight, scrollMargin, measure, onFocusIn, onFocusOut, onKeyDown } = useTaskVirtualList(
+  list, () => props.tasks, () => settings.desktopDensity,
+);
 
 defineEmits<{
   edit: [task: TaskRecord];
@@ -36,7 +46,7 @@ defineEmits<{
 </script>
 
 <template>
-  <template v-if="tasks.length > 0">
+  <section v-if="tasks.length > 0" class="task-list-section">
     <div
       v-if="title"
       class="task-section-header"
@@ -45,13 +55,18 @@ defineEmits<{
       <span>{{ title }}</span>
       <strong>{{ tasks.length }}</strong>
     </div>
+    <div ref="list" class="virtual-task-list" role="list" :aria-label="title || settings.t('nav.all')" :data-task-count="tasks.length"
+      :style="{ height: `${totalHeight}px` }" @focusin="onFocusIn" @focusout="onFocusOut" @keydown="onKeyDown">
+    <div v-for="row in rows" :key="tasks[row.index].localId" :ref="measure"
+      class="virtual-task-row" role="listitem" tabindex="-1" :aria-setsize="tasks.length" :aria-posinset="row.index + 1"
+      :data-index="row.index" :data-task-id="tasks[row.index].localId"
+      :style="{ transform: `translateY(${row.start - scrollMargin}px)` }">
     <TaskItem
-      v-for="task in tasks"
-      :key="task.localId"
-      :task="task"
+      :task="tasks[row.index]"
       :trash="trash"
       :selectable="selectionMode && selectable"
-      :selected="selectedTaskIds.has(task.localId)"
+      :selected="selectedTaskIds.has(tasks[row.index].localId)"
+      :busy="busy"
       @edit="$emit('edit', $event)"
       @selection-change="(selectedTask, selected) => $emit('selection-change', selectedTask, selected)"
       @complete="$emit('complete', $event)"
@@ -66,5 +81,13 @@ defineEmits<{
       @delete="$emit('delete', $event)"
       @purge="$emit('purge', $event)"
     />
-  </template>
+    </div>
+    </div>
+  </section>
 </template>
+
+<style scoped>
+.task-list-section { min-width: 0; }
+.virtual-task-list { position: relative; width: 100%; overflow-anchor: none; transition-property: none; }
+.virtual-task-row { position: absolute; top: 0; left: 0; width: 100%; outline-offset: -2px; transition-property: none; }
+</style>

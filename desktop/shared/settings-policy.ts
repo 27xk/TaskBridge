@@ -1,6 +1,8 @@
 export const MUTABLE_APP_SETTING_KEYS = [
   "language",
   "desktopTheme",
+  "desktopDensity",
+  "desktopGlassEnabled",
   "displayTimeZone",
   "lastSyncTime",
   "autoStart",
