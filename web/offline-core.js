@@ -6,9 +6,11 @@ const TASK_VIEW_LABELS = {
   inbox: "收件箱",
   overdue: "逾期",
   high: "高优先级",
+  week: "本周",
   pending: "待同步",
   conflict: "冲突",
   completed: "已完成",
+  templates: "模板",
   trash: "回收站",
 };
 
@@ -36,6 +38,165 @@ export function normalizeOfflineApiBaseUrl(value) {
   const path = url.pathname.replace(/\/+$/, "");
   url.pathname = path.endsWith("/api/v1") ? path : `${path}/api/v1`;
   return url.toString().replace(/\/+$/, "");
+}
+
+export function getApiRequestCredentialsMode(apiBaseUrl, pageOrigin) {
+  try {
+    return new URL(apiBaseUrl).origin === new URL(pageOrigin).origin ? "include" : "omit";
+  } catch {
+    return "omit";
+  }
+}
+
+export function buildRefreshRequestBody(credentialsMode, refreshToken, deviceId) {
+  const normalizedRefreshToken = String(refreshToken ?? "");
+  if (credentialsMode === "include" && !normalizedRefreshToken) {
+    return { device_id: deviceId };
+  }
+  return {
+    refresh_token: normalizedRefreshToken,
+    device_id: deviceId,
+  };
+}
+
+export function canApplySessionRefreshResult({
+  expectedGeneration,
+  currentGeneration,
+  expectedRefreshToken,
+  currentRefreshToken,
+  sessionAllowed = true,
+  expectedUserId = null,
+  currentUserId = null,
+  resultUserId = null,
+}) {
+  if (!sessionAllowed || currentGeneration !== expectedGeneration) return false;
+  if (String(currentRefreshToken ?? "") !== String(expectedRefreshToken ?? "")) return false;
+  const normalizedExpectedUserId = Number(expectedUserId);
+  if (Number.isFinite(normalizedExpectedUserId) && normalizedExpectedUserId > 0) {
+    return (
+      Number(currentUserId) === normalizedExpectedUserId &&
+      Number(resultUserId) === normalizedExpectedUserId
+    );
+  }
+  return true;
+}
+
+export function buildPersistentSessionSuppressionMarker(apiBaseUrl, deviceId, userIdInput = null) {
+  const userId = Number(userIdInput);
+  return JSON.stringify({
+    apiBaseUrl: String(apiBaseUrl ?? ""),
+    deviceId: String(deviceId ?? ""),
+    userId: Number.isFinite(userId) && userId > 0 ? Math.trunc(userId) : null,
+  });
+}
+
+export function isPersistentSessionSuppressed(rawMarker, { apiBaseUrl, deviceId, userId = null } = {}) {
+  const currentUserId = Number(userId);
+  const hasCurrentUser = Number.isFinite(currentUserId) && currentUserId > 0;
+  if (rawMarker === "true") return !hasCurrentUser;
+  if (!rawMarker) return false;
+
+  let marker;
+  try {
+    marker = typeof rawMarker === "string" ? JSON.parse(rawMarker) : rawMarker;
+  } catch {
+    return false;
+  }
+  if (!marker || typeof marker !== "object") return false;
+  if (marker.apiBaseUrl !== String(apiBaseUrl ?? "") || marker.deviceId !== String(deviceId ?? "")) {
+    return false;
+  }
+
+  const suppressedUserId = Number(marker.userId);
+  const hasSuppressedUser = Number.isFinite(suppressedUserId) && suppressedUserId > 0;
+  if (!hasCurrentUser) return true;
+  return hasSuppressedUser && Math.trunc(currentUserId) === Math.trunc(suppressedUserId);
+}
+
+export async function withRefreshLease({
+  lockName,
+  owner,
+  readLease,
+  writeLease,
+  clearLease,
+  callback,
+  wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  now = () => Date.now(),
+  leaseDurationMs = 60_000,
+  retryDelayMs = 100,
+  settleDelayMs = 25,
+  timeoutMs = 65_000,
+}) {
+  const deadline = now() + timeoutMs;
+  while (now() <= deadline) {
+    const current = readLease();
+    const currentIsActive = current?.lockName === lockName && Number(current.expiresAt) > now();
+    if (!currentIsActive || current.owner === owner) {
+      writeLease({
+        lockName,
+        owner,
+        expiresAt: now() + leaseDurationMs,
+      });
+      await wait(settleDelayMs);
+      const confirmed = readLease();
+      if (
+        confirmed?.lockName === lockName &&
+        confirmed?.owner === owner &&
+        Number(confirmed.expiresAt) > now()
+      ) {
+        try {
+          return await callback();
+        } finally {
+          const latest = readLease();
+          if (latest?.lockName === lockName && latest?.owner === owner) {
+            clearLease();
+          }
+        }
+      }
+    }
+    await wait(retryDelayMs);
+  }
+  throw new Error("Timed out waiting for the session refresh lock");
+}
+
+export async function attemptSessionRevocation(revoke) {
+  try {
+    await revoke();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function deleteIndexedDatabase(indexedDb, dbName, { onBlocked = () => {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDb.deleteDatabase(dbName);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error || new Error("Failed to delete offline database"));
+    request.onblocked = () => {
+      try {
+        onBlocked();
+      } catch {
+        // A status callback must not turn a pending delete into a false failure.
+      }
+    };
+  });
+}
+
+export async function coordinateRefreshSession({
+  expectedRefreshToken,
+  getCurrentRefreshToken,
+  refresh,
+  withLock = (callback) => callback(),
+  yieldTurn = () => Promise.resolve(),
+}) {
+  const run = async () => {
+    await yieldTurn();
+    const currentRefreshToken = String(getCurrentRefreshToken?.() ?? "");
+    if (currentRefreshToken !== String(expectedRefreshToken ?? "")) return false;
+    return (await refresh()) !== false;
+  };
+  return withLock(run);
 }
 
 export function buildOfflineWorkspaceKey(apiBaseUrl, userIdInput) {
@@ -254,6 +415,32 @@ export function applyOfflineTaskAction(task, action, offlineQueueId, nowInput = 
   return next;
 }
 
+export function buildTaskSchedulePatch(action, nowInput = new Date(), options = {}) {
+  const now = normalizeNow(nowInput);
+  if (action === "plan-today") {
+    return {
+      list_type: "today",
+      planned_date: formatLocalDateKey(now, options),
+      snoozed_until: null,
+    };
+  }
+  if (action === "plan-tomorrow") {
+    const [year, month, day] = formatLocalDateKey(now, options).split("-").map(Number);
+    const tomorrow = new Date(Date.UTC(year, month - 1, day + 1));
+    return {
+      list_type: "inbox",
+      planned_date: tomorrow.toISOString().slice(0, 10),
+      snoozed_until: null,
+    };
+  }
+  if (action === "snooze-later") {
+    return {
+      snoozed_until: new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
+    };
+  }
+  throw new Error(`Unsupported task schedule action: ${action}`);
+}
+
 export function normalizeRemoteTaskForOffline(task) {
   return {
     ...task,
@@ -306,6 +493,12 @@ export function matchesTaskView(task, options = {}) {
   if (!matchesTaskSearch(task, options.search ?? "")) {
     return false;
   }
+  if (options.project && String(task.project ?? "") !== String(options.project)) {
+    return false;
+  }
+  if (options.tag && String(task.tag ?? "") !== String(options.tag)) {
+    return false;
+  }
   if (view === "trash") {
     return Boolean(task.is_deleted);
   }
@@ -319,13 +512,16 @@ export function matchesTaskView(task, options = {}) {
     return task.offline_status === "conflict";
   }
   if (view === "completed") {
-    return task.status === "completed";
+    return isCompletedTask(task);
   }
   if (view === "today") {
     return isTodayTask(task, options.now, options);
   }
   if (view === "inbox") {
-    return (task.list_type || "inbox") === "inbox" && task.status !== "completed";
+    return (task.list_type || "inbox") === "inbox" && !isCompletedTask(task);
+  }
+  if (view === "week") {
+    return isWithinNextWeekTask(task, options.now, options);
   }
   if (view === "overdue") {
     return isOverdueTask(task, options.now, options);
@@ -333,12 +529,29 @@ export function matchesTaskView(task, options = {}) {
   if (view === "high") {
     return !isCompletedTask(task) && Number(task.priority || 0) >= 3;
   }
+  if (view === "templates") {
+    return Boolean(task.is_template);
+  }
   return !isCompletedTask(task);
 }
 
 export function mapTaskViewForServer(view) {
   if (view === "pending" || view === "conflict") return null;
   return view === "high" ? "high_priority" : view;
+}
+
+export function getSelectableTaskIds(tasks) {
+  if (!Array.isArray(tasks)) return [];
+  return tasks
+    .filter((task) => task?.id !== null && task?.id !== undefined && !task.is_deleted && !isCompletedTask(task))
+    .map((task) => String(task.id))
+    .filter(Boolean);
+}
+
+export function reconcileSelectedTaskIds(selectedTaskIds, tasks) {
+  const selectableIds = new Set(getSelectableTaskIds(tasks));
+  const selectedIds = selectedTaskIds instanceof Set ? selectedTaskIds : new Set(selectedTaskIds || []);
+  return new Set([...selectedIds].map(String).filter((taskId) => selectableIds.has(taskId)));
 }
 
 export function reconcileCachedTaskSnapshot(cachedTasks, remoteTasks, viewContext = {}) {
@@ -395,6 +608,7 @@ export function buildLocalMeta(tasks, nowInput = new Date(), options = {}) {
     pending: 0,
     conflict: 0,
     completed: 0,
+    templates: 0,
     trash: 0,
   };
   for (const task of tasks) {
@@ -410,8 +624,10 @@ export function buildLocalMeta(tasks, nowInput = new Date(), options = {}) {
     }
     if (isCompletedTask(task)) {
       counts.completed += 1;
+      if (task.is_template) counts.templates += 1;
       continue;
     }
+    if (task.is_template) counts.templates += 1;
     if (Number(task.priority || 0) >= 3) {
       counts.high += 1;
     }
@@ -426,7 +642,19 @@ export function buildLocalMeta(tasks, nowInput = new Date(), options = {}) {
       counts.overdue += 1;
     }
   }
-  return { counts };
+  return {
+    projects: uniqueTaskMetaValues(tasks, "project"),
+    tags: uniqueTaskMetaValues(tasks, "tag"),
+    counts,
+  };
+}
+
+function uniqueTaskMetaValues(tasks, field) {
+  return Array.from(new Set(
+    tasks
+      .map((task) => String(task?.[field] ?? "").trim())
+      .filter(Boolean),
+  )).sort((left, right) => left.localeCompare(right));
 }
 
 export function getTaskViewLabel(view) {
@@ -494,7 +722,7 @@ function getTaskSortTime(task) {
 
 function getTaskSortBucket(task, nowInput = new Date(), options = {}) {
   if (task.is_deleted) return 0;
-  if (task.status === "completed") return 1;
+  if (isCompletedTask(task)) return 1;
   if (isSnoozedTask(task, nowInput)) return 2;
   if (isOverdueTask(task, nowInput, options)) return 4;
   return 3;
@@ -520,6 +748,26 @@ function isTodayTask(task, nowInput = new Date(), options = {}) {
   );
 }
 
+function isWithinNextWeekTask(task, nowInput = new Date(), options = {}) {
+  const now = normalizeNow(nowInput);
+  const today = formatLocalDateKey(now, options);
+  const end = formatLocalDateKey(new Date(now.getTime() + 7 * 86_400_000), options);
+  const dates = [
+    task.planned_date,
+    task.due_at ?? task.due_time,
+    task.reminder_at ?? task.remind_time,
+  ];
+  return dates.some((value) => {
+    if (!value) return false;
+    const raw = String(value);
+    const date = parseDate(value);
+    const key = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+      ? raw
+      : (date ? formatLocalDateKey(date, options) : raw.slice(0, 10));
+    return key >= today && key <= end;
+  });
+}
+
 function isOverdueTask(task, nowInput = new Date(), options = {}) {
   if (isCompletedTask(task)) return false;
   const now = normalizeNow(nowInput);
@@ -541,7 +789,7 @@ function isSnoozedTask(task, nowInput = new Date()) {
   return !Number.isNaN(snoozedUntil.getTime()) && snoozedUntil.getTime() > now.getTime();
 }
 
-function isCompletedTask(task) {
+export function isCompletedTask(task) {
   return task?.status === "completed" || task?.status === "done";
 }
 

@@ -344,10 +344,53 @@ test("cached task ordering demotes future snoozed work below actionable work", (
   );
 });
 
+test("completed aliases and secondary task views remain visible offline", () => {
+  const doneTask = {
+    id: 1,
+    title: "Legacy completed",
+    status: "done",
+    is_deleted: false,
+    list_type: "inbox",
+  };
+  const weeklyTask = {
+    id: 2,
+    title: "This week",
+    status: "open",
+    is_deleted: false,
+    planned_date: "2026-06-08",
+  };
+  const template = {
+    id: 3,
+    title: "Template",
+    status: "open",
+    is_deleted: false,
+    is_template: true,
+  };
+
+  assert.equal(matchesTaskView(doneTask, { view: "completed", now: fixedNow, timeZone: "Asia/Shanghai" }), true);
+  assert.equal(matchesTaskView(weeklyTask, { view: "week", now: fixedNow, timeZone: "Asia/Shanghai" }), true);
+  assert.equal(matchesTaskView(template, { view: "templates", now: fixedNow, timeZone: "Asia/Shanghai" }), true);
+  assert.equal(matchesTaskView({ ...weeklyTask, project: "Work", tag: "review" }, {
+    view: "week",
+    project: "Work",
+    tag: "review",
+    now: fixedNow,
+    timeZone: "Asia/Shanghai",
+  }), true);
+  assert.equal(matchesTaskView({ ...weeklyTask, project: "Personal" }, {
+    view: "week",
+    project: "Work",
+    now: fixedNow,
+    timeZone: "Asia/Shanghai",
+  }), false);
+});
+
 test("local meta counts preserved offline reminders and templates without mutating tasks", () => {
   const template = makeOfflineTask(
     {
       title: "Template",
+      project: "Work",
+      tag: "review",
       is_template: true,
       checklist: [{ id: "1", title: "step", done: true }],
       planned_date: "2026-06-05",
@@ -359,6 +402,9 @@ test("local meta counts preserved offline reminders and templates without mutati
   const meta = buildLocalMeta([template], fixedNow);
 
   assert.equal(meta.counts.today, 1);
+  assert.equal(meta.counts.templates, 1);
+  assert.deepEqual(meta.projects, ["Work"]);
+  assert.deepEqual(meta.tags, ["review"]);
   assert.deepEqual(template, before);
 });
 

@@ -68,43 +68,11 @@
             </div>
           </div>
           <form id="authForm" class="form-grid">
-            <label class="field">
-              <span data-i18n="auth.serverUrl">服务器地址</span>
-              <input
-                id="serverBaseUrl"
-                type="text"
-                inputmode="url"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="填写管理员给你的服务器地址"
-                data-i18n-placeholder="auth.serverUrlPlaceholder"
-              />
-              <small data-i18n="auth.serverUrlHint">填写 TaskBridge 服务器地址即可，高级连接设置会自动生成。</small>
-              <small id="serverLocalhostHint" class="field-warning" hidden></small>
-            </label>
             <section id="offlineResumePanel" class="offline-resume-panel" hidden>
               <button id="resumeOfflineButton" type="button" class="secondary-button" data-i18n="auth.resumeOffline">继续离线使用</button>
               <p id="offlineResumeHint" class="status-text" data-i18n="auth.resumeOfflineHint">打开这台设备上次同步的任务；重新联网后需要登录才能同步。</p>
             </section>
             <p id="registrationGateHint" class="status-text registration-gate-hint auth-register-only" aria-live="polite" hidden></p>
-            <button id="showAdvancedConnectionButton" type="button" class="text-button advanced-connection-reveal" data-i18n="auth.showAdvancedConnection">
-              自定义代理或高级部署设置
-            </button>
-            <details id="advancedConnectionSettings" class="advanced-connection-settings" hidden>
-              <summary data-i18n="auth.advancedConnection">高级连接设置</summary>
-              <div class="form-grid advanced-connection-grid">
-                <label class="field">
-                  <span data-i18n="auth.apiUrlGenerated">请求地址（自动生成）</span>
-                  <input id="apiBaseUrl" type="text" inputmode="url" autocomplete="off" spellcheck="false" />
-                </label>
-                <div class="field">
-                  <span data-i18n="auth.deviceIdGenerated">设备标识（自动生成）</span>
-                  <input id="deviceId" type="text" autocomplete="off" spellcheck="false" readonly />
-                  <small data-i18n="auth.deviceIdHint">用于区分这台设备的同步记录，普通用户不需要修改。</small>
-                  <button id="regenerateDeviceIdButton" type="button" class="text-button" data-i18n="auth.regenerateDeviceId">重新生成设备标识</button>
-                </div>
-              </div>
-            </details>
             <label class="field auth-register-only" hidden>
               <span data-i18n="auth.username">用户名</span>
               <input id="username" type="text" autocomplete="username" />
@@ -117,8 +85,8 @@
               <span data-i18n="auth.account">账号</span>
               <input id="usernameOrEmail" type="text" autocomplete="username" required />
             </label>
-            <label class="field">
-              <span data-i18n="auth.password">密码</span>
+            <div class="field">
+              <label for="password" data-i18n="auth.password">密码</label>
               <div class="password-field">
                 <input id="password" type="password" autocomplete="current-password" required />
                 <button
@@ -132,28 +100,17 @@
                   显示密码
                 </button>
               </div>
-            </label>
+            </div>
+            <p id="forgotPasswordHelp" class="field-help auth-recovery-help" data-i18n="auth.forgotPasswordHelp">
+              忘记密码？请联系服务器管理员重置。
+            </p>
 
             <div class="form-actions">
               <button id="authSubmitButton" type="submit" class="primary-button" data-i18n="auth.login">登录</button>
-              <button id="testConnectionButton" type="button" class="secondary-button" data-i18n="auth.checkConnection">检查连接</button>
             </div>
-            <p class="status-text auth-helper-text" data-i18n="auth.loginAutoChecksConnection">登录会自动检查连接；检查连接只用于排查服务器地址。</p>
             <p id="authMessage" class="status-text" aria-live="polite"></p>
           </form>
 
-          <details id="serverSetupHelp" class="first-run-guide server-setup-help">
-            <summary data-i18n="auth.serverSetupHelp">没有服务器地址？先确认来源</summary>
-            <div class="server-setup-help-body" aria-label="选择使用方式" data-i18n-aria-label="auth.firstUseTitle">
-              <strong data-i18n="auth.firstUseTitle">已有服务器地址就能登录</strong>
-              <span data-i18n="auth.firstUseExistingServer">把管理员给你的 TaskBridge 服务器地址填到上方，然后直接登录；客户端会自动检查连接。</span>
-              <p class="field-help" data-i18n="auth.serverSetupHelpHint">如果你只是使用别人部署好的 TaskBridge，请联系管理员或部署者索取地址；只有本机试用或长期自托管时，再按说明准备服务。</p>
-              <div class="first-run-link-row">
-                <a class="text-button local-trial-guide-link" href="./local-trial.html" target="_blank" rel="noreferrer" data-i18n="auth.openLocalTrialGuide">打开本机试用说明</a>
-                <a class="text-button self-host-guide-link" href="./self-hosting.html" target="_blank" rel="noreferrer" data-i18n="auth.openSelfHostGuide">打开自托管说明</a>
-              </div>
-            </div>
-          </details>
         </section>
 
         <section id="appScreen" class="workspace" hidden>
@@ -163,7 +120,7 @@
           </nav>
 
           <aside id="sidebar" class="panel sidebar">
-            <section class="stack">
+            <section class="stack sidebar-account-summary">
               <div class="section-head">
                 <h2 data-i18n="app.account">账户</h2>
                 <button id="refreshAllButton" type="button" class="text-button" data-i18n="app.refresh">刷新</button>
@@ -174,40 +131,6 @@
                   <dd id="userDisplay">-</dd>
                 </div>
               </dl>
-              <details id="accountSecurityTools" class="sidebar-details account-security-tools">
-                <summary data-i18n="account.security">账户安全与会话</summary>
-                <form id="passwordChangeForm" class="account-security-form">
-                  <label class="field">
-                    <span data-i18n="account.currentPassword">当前密码</span>
-                    <input id="currentPassword" type="password" autocomplete="current-password" maxlength="128" required />
-                  </label>
-                  <label class="field">
-                    <span data-i18n="account.newPassword">新密码</span>
-                    <input id="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
-                  </label>
-                  <label class="field">
-                    <span data-i18n="account.confirmNewPassword">确认新密码</span>
-                    <input id="confirmNewPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
-                  </label>
-                  <button type="submit" class="secondary-button" data-i18n="account.changePassword">修改密码</button>
-                </form>
-                <section class="account-session-tools" aria-labelledby="sessionListHeading">
-                  <div class="section-head compact-section-head">
-                    <h3 id="sessionListHeading" data-i18n="account.sessions">登录会话</h3>
-                    <button id="refreshSessionsButton" type="button" class="text-button" data-i18n="account.refreshSessions">刷新会话</button>
-                  </div>
-                  <ul id="sessionList" class="session-list" aria-live="polite"></ul>
-                  <button id="revokeOtherSessionsButton" type="button" class="text-button danger-text-button" data-i18n="account.revokeOtherSessions">退出其他设备</button>
-                </section>
-                <p id="accountSecurityMessage" class="status-text" role="status" aria-live="polite"></p>
-              </details>
-              <details id="notificationTools" class="sidebar-details notification-settings">
-                <summary data-i18n="notification.title">任务提醒</summary>
-                <div class="sidebar-details-body">
-                  <button id="notificationPermissionButton" type="button" class="text-button" data-i18n="notification.enable">开启系统通知</button>
-                  <p id="notificationStatus" class="sidebar-note" role="status" aria-live="polite" data-i18n="notification.closedAppLimit">页面打开时可按提醒或截止时间通知；关闭浏览器后的提醒取决于系统与 PWA 支持。</p>
-                </div>
-              </details>
             </section>
 
             <section id="syncOverview" class="stack" hidden>
@@ -232,72 +155,157 @@
                   <option value="" data-i18n="view.moreFilters">列表与状态</option>
                 </select>
               </label>
+              <label class="field">
+                <span data-i18n="view.project">项目</span>
+                <select id="projectFilter" aria-label="项目" data-i18n-aria-label="view.project">
+                  <option value="" data-i18n="view.allProjects">全部项目</option>
+                </select>
+              </label>
+              <label class="field">
+                <span data-i18n="view.tag">标签</span>
+                <select id="tagFilter" aria-label="标签" data-i18n-aria-label="view.tag">
+                  <option value="" data-i18n="view.allTags">全部标签</option>
+                </select>
+              </label>
             </section>
 
-            <section class="stack">
-              <details id="statisticsTools" class="sidebar-details statistics-tools">
-                <summary data-i18n="app.stats">统计</summary>
-                <div id="metaCounts" class="chip-grid sidebar-details-body"></div>
-              </details>
-            </section>
-
-            <section class="stack">
-              <details id="supportDataTools" class="sidebar-details support-tools-panel">
-                <summary data-i18n="app.supportDataTools">同步问题</summary>
-                <section id="syncAdvancedDiagnostics" class="support-tools-section">
-                  <h3>
-                    <span data-i18n="app.syncAdvancedDiagnostics">同步详情</span>
-                    <span data-i18n="app.syncDetails" hidden>同步详情</span>
-                  </h3>
-                  <dl id="syncDetails" class="info-list"></dl>
-                </section>
-                <section id="developerDiagnostics" class="support-tools-section technical-support-section">
-                  <h3 data-i18n="app.diagnostics">问题排查</h3>
-                  <dl class="info-list">
-                    <div>
-                      <dt data-i18n="app.apiAddress">接口地址</dt>
-                      <dd id="apiDisplay">-</dd>
-                    </div>
-                    <div>
-                      <dt data-i18n="app.deviceId">设备标识</dt>
-                      <dd id="deviceDisplay">-</dd>
-                    </div>
-                  </dl>
-                  <label class="checkbox-line diagnostics-toggle">
-                    <input id="clientErrorReportingToggle" type="checkbox" />
-                    <span data-i18n="app.clientErrorReporting">允许发送浏览器错误用于排障</span>
-                  </label>
-                  <p id="clientErrorDiagnosticsNotice" class="diagnostics-note" data-i18n="app.clientErrorReportingHint">
-                    登录后，浏览器错误会在开启后发送用于排障；上报内容包含应用版本、页面路径、浏览器类型和脱敏后的错误堆栈，不包含密码、令牌或完整链接参数。
-                  </p>
-                </section>
-              </details><!-- supportDataTools -->
-              <details id="localDataTools" class="sidebar-details support-tools-section local-data-tools-panel">
-                <summary data-i18n="app.localData">数据与备份</summary>
-                <div class="sidebar-details-body">
-                  <p class="sidebar-note" data-i18n="app.localDataHint">导出或导入这台设备的离线任务备份。清除此设备数据只会删除本机缓存和登录状态，不会删除服务器上的任务。</p>
-                  <p class="sidebar-note" data-i18n="app.localDataSafetyHint">清除前先确认没有待同步、同步失败或冲突的任务；不确定时先导出本机备份。</p>
-                  <p id="clearLocalDataBlockedHint" class="sidebar-note danger-note" data-i18n="app.clearLocalDataBlocked" hidden>当前还有待同步、同步失败或冲突的任务。请先在同步详情中处理，或先导出本机备份后再清除此设备数据。</p>
-                  <div class="local-data-action-group backup-action-group sidebar-actions">
-                    <button id="exportLocalBackupButton" type="button" class="text-button" data-i18n="app.exportLocalBackup">导出本机备份</button>
-                    <label class="file-button" for="importLocalBackupInput">
-                      <span data-i18n="app.importLocalBackup">导入本机备份</span>
-                      <input id="importLocalBackupInput" type="file" accept=".json,application/json" hidden />
-                    </label>
-                    <button id="undoLocalBackupImportButton" type="button" class="text-button" data-i18n="app.undoLocalBackupImport" hidden>撤销上次导入</button>
-                  </div>
-                  <div class="local-data-action-group danger-zone local-data-danger-zone sidebar-actions">
-                    <button id="clearLocalDataButton" type="button" class="text-button danger-text-button" data-i18n="app.clearLocalData">清除此设备数据</button>
-                  </div>
-                  <p id="localDataMessage" class="status-text" aria-live="polite"></p>
-                </div>
-              </details>
+            <section class="stack sidebar-settings-entry">
+              <button
+                id="settingsSupportButton"
+                type="button"
+                class="secondary-button"
+                aria-controls="settingsSupportPanel"
+                aria-expanded="false"
+                data-i18n="app.settingsSupport"
+              >
+                设置与支持
+              </button>
             </section>
           </aside>
 
+          <div id="settingsSupportBackdrop" class="settings-support-backdrop" hidden>
+            <section
+              id="settingsSupportPanel"
+              class="settings-support-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="settingsSupportHeading"
+              tabindex="-1"
+              hidden
+            >
+              <div class="section-head settings-support-heading">
+                <h2 id="settingsSupportHeading" data-i18n="app.settingsSupport">设置与支持</h2>
+                <button
+                  id="settingsSupportCloseButton"
+                  type="button"
+                  class="settings-support-close-button"
+                  aria-label="关闭设置与支持"
+                  data-i18n-aria-label="app.closeSettingsSupport"
+                >
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              </div>
+
+              <div class="settings-support-content">
+                <details id="accountSecurityTools" class="sidebar-details account-security-tools">
+                  <summary data-i18n="account.security">账户安全与会话</summary>
+                  <form id="passwordChangeForm" class="account-security-form">
+                    <label class="field">
+                      <span data-i18n="account.currentPassword">当前密码</span>
+                      <input id="currentPassword" type="password" autocomplete="current-password" maxlength="128" required />
+                    </label>
+                    <label class="field">
+                      <span data-i18n="account.newPassword">新密码</span>
+                      <input id="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
+                    </label>
+                    <label class="field">
+                      <span data-i18n="account.confirmNewPassword">确认新密码</span>
+                      <input id="confirmNewPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
+                    </label>
+                    <button type="submit" class="secondary-button" data-i18n="account.changePassword">修改密码</button>
+                  </form>
+                  <section class="account-session-tools" aria-labelledby="sessionListHeading">
+                    <div class="section-head compact-section-head">
+                      <h3 id="sessionListHeading" data-i18n="account.sessions">登录会话</h3>
+                      <button id="refreshSessionsButton" type="button" class="text-button" data-i18n="account.refreshSessions">刷新会话</button>
+                    </div>
+                    <ul id="sessionList" class="session-list" aria-live="polite"></ul>
+                    <button id="revokeOtherSessionsButton" type="button" class="text-button danger-text-button" data-i18n="account.revokeOtherSessions">退出其他设备</button>
+                  </section>
+                  <p id="accountSecurityMessage" class="status-text" role="status" aria-live="polite"></p>
+                </details>
+
+                <details id="notificationTools" class="sidebar-details notification-settings">
+                  <summary data-i18n="notification.title">任务提醒</summary>
+                  <div class="sidebar-details-body">
+                    <button id="notificationPermissionButton" type="button" class="text-button" data-i18n="notification.enable">开启系统通知</button>
+                    <p id="notificationStatus" class="sidebar-note" role="status" aria-live="polite" data-i18n="notification.closedAppLimit">页面打开时可按提醒或截止时间通知；关闭浏览器后的提醒取决于系统与 PWA 支持。</p>
+                  </div>
+                </details>
+
+                <details id="statisticsTools" class="sidebar-details statistics-tools">
+                  <summary data-i18n="app.stats">统计</summary>
+                  <div id="metaCounts" class="chip-grid sidebar-details-body"></div>
+                </details>
+
+                <details id="supportDataTools" class="sidebar-details support-tools-panel">
+                  <summary data-i18n="app.supportDataTools">同步问题</summary>
+                  <section id="syncAdvancedDiagnostics" class="support-tools-section">
+                    <h3>
+                      <span data-i18n="app.syncAdvancedDiagnostics">同步详情</span>
+                      <span data-i18n="app.syncDetails" hidden>同步详情</span>
+                    </h3>
+                    <dl id="syncDetails" class="info-list"></dl>
+                  </section>
+                  <section id="developerDiagnostics" class="support-tools-section technical-support-section">
+                    <h3 data-i18n="app.diagnostics">问题排查</h3>
+                    <dl class="info-list">
+                      <div>
+                        <dt data-i18n="app.apiAddress">接口地址</dt>
+                        <dd id="apiDisplay">-</dd>
+                      </div>
+                      <div>
+                        <dt data-i18n="app.deviceId">设备标识</dt>
+                        <dd id="deviceDisplay">-</dd>
+                      </div>
+                    </dl>
+                    <label class="checkbox-line diagnostics-toggle">
+                      <input id="clientErrorReportingToggle" type="checkbox" />
+                      <span data-i18n="app.clientErrorReporting">允许发送浏览器错误用于排障</span>
+                    </label>
+                    <p id="clientErrorDiagnosticsNotice" class="diagnostics-note" data-i18n="app.clientErrorReportingHint">
+                      登录后，浏览器错误会在开启后发送用于排障；上报内容包含应用版本、页面路径、浏览器类型和脱敏后的错误堆栈，不包含密码、令牌或完整链接参数。
+                    </p>
+                  </section>
+                </details>
+
+                <details id="localDataTools" class="sidebar-details support-tools-section local-data-tools-panel">
+                  <summary data-i18n="app.localData">数据与备份</summary>
+                  <div class="sidebar-details-body">
+                    <p class="sidebar-note" data-i18n="app.localDataHint">导出或导入这台设备的离线任务备份。清除此设备数据只会删除本机缓存和登录状态，不会删除服务器上的任务。</p>
+                    <p class="sidebar-note" data-i18n="app.localDataSafetyHint">清除前先确认没有待同步、同步失败或冲突的任务；不确定时先导出本机备份。</p>
+                    <p id="clearLocalDataBlockedHint" class="sidebar-note danger-note" data-i18n="app.clearLocalDataBlocked" hidden>当前还有待同步、同步失败或冲突的任务。请先在同步详情中处理，或先导出本机备份后再清除此设备数据。</p>
+                    <div class="local-data-action-group backup-action-group sidebar-actions">
+                      <button id="exportLocalBackupButton" type="button" class="text-button" data-i18n="app.exportLocalBackup">导出本机备份</button>
+                      <label class="file-button" for="importLocalBackupInput">
+                        <span data-i18n="app.importLocalBackup">导入本机备份</span>
+                        <input id="importLocalBackupInput" type="file" accept=".json,application/json" hidden />
+                      </label>
+                      <button id="undoLocalBackupImportButton" type="button" class="text-button" data-i18n="app.undoLocalBackupImport" hidden>撤销上次导入</button>
+                    </div>
+                    <div class="local-data-action-group danger-zone local-data-danger-zone sidebar-actions">
+                      <button id="clearLocalDataButton" type="button" class="text-button danger-text-button" data-i18n="app.clearLocalData">清除此设备数据</button>
+                    </div>
+                    <p id="localDataMessage" class="status-text" aria-live="polite"></p>
+                  </div>
+                </details>
+              </div>
+            </section>
+          </div>
+
           <section id="mainPanel" class="panel main-panel">
             <section class="stack task-create-stack">
-              <section id="taskCreateDetails" class="task-create-details task-create-panel" aria-labelledby="taskCreateHeading">
+              <section id="taskCreateDetails" class="task-create-details task-editor-drawer task-create-panel" role="dialog" aria-modal="true" aria-labelledby="taskCreateHeading" tabindex="-1" hidden>
                 <div class="section-head task-create-summary">
                   <h2 id="taskCreateHeading" data-i18n="task.newTask">新建任务</h2>
                   <span class="status-text task-create-summary-hint" data-i18n="task.createCollapsedHint">直接填写标题即可，日期、提醒和重复可稍后展开。</span>
@@ -399,14 +407,18 @@
               </section>
             </section>
 
-            <section class="stack task-list-stack">
+            <section id="taskListStack" class="stack task-list-stack">
               <div class="section-head">
                 <h2 data-i18n="task.tasks">任务</h2>
-                <div class="task-list-actions">
-                  <span id="taskSummary" class="status-text"></span>
-                  <button id="openTaskCreateButton" type="button" class="primary-button" data-i18n="task.backToNewTask">回到新建任务</button>
-                </div>
+                <span id="taskSummary" class="status-text"></span>
               </div>
+              <form id="quickTaskForm" class="quick-task-form">
+                <label class="sr-only" for="quickTaskTitle" data-i18n="task.quickAdd">快速添加任务</label>
+                <input id="quickTaskTitle" type="text" maxlength="255" autocomplete="off" required placeholder="例如：写周报" data-i18n-placeholder="task.quickPlaceholder" />
+                <button type="submit" class="primary-button" data-i18n="task.quickCreate">添加</button>
+                <button id="openTaskCreateButton" type="button" class="secondary-button" data-i18n="task.openAdvancedEditor">详细编辑</button>
+              </form>
+              <p id="quickTaskMessage" class="status-text" role="status" aria-live="polite"></p>
               <div id="offlineTaskLimitNotice" class="status-text offline-task-limit-notice" aria-live="polite" hidden>
                 <span id="offlineTaskLimitText"></span>
                 <button id="offlineTaskLimitLoadMoreButton" type="button" class="text-button" data-i18n="task.offlineLimitLoadMore">显示更多离线任务</button>
@@ -417,6 +429,7 @@
                   <input id="taskSearch" type="search" placeholder="标题、内容、项目、标签" data-i18n-placeholder="task.searchPlaceholder" />
                 </label>
                 <button id="clearSearchButton" type="button" class="ghost-button" data-i18n="task.clearSearch">清空</button>
+                <button id="enterTaskSelectionButton" type="button" class="secondary-button" data-i18n="task.bulkActions">批量操作</button>
               </div>
               <div id="taskSyncHealthBar" class="task-sync-health-bar" aria-live="polite" hidden>
                 <span id="taskSyncHealthText" data-i18n="task.syncHealthReady">当前无需处理，继续记录任务，TaskBridge 会自动同步。</span>
@@ -427,6 +440,15 @@
                 <div id="taskActiveFilterChips" class="active-filter-chips"></div>
                 <button id="clearTaskFiltersButton" type="button" class="text-button" data-i18n="task.clearFilters">清空筛选</button>
               </div>
+              <section id="taskSelectionToolbar" class="task-selection-toolbar" aria-label="批量操作" data-i18n-aria-label="task.bulkActions" hidden>
+                <p id="taskSelectionStatus" class="status-text" role="status" aria-live="polite" aria-atomic="true"></p>
+                <div id="taskSelectionActions" class="task-selection-toolbar__actions">
+                  <button id="selectAllVisibleTasksButton" type="button" class="text-button" data-i18n="task.selectAllVisible">选择当前列表</button>
+                  <button id="completeSelectedTasksButton" type="button" class="secondary-button" data-i18n="task.completeSelected">完成所选</button>
+                  <button id="deleteSelectedTasksButton" type="button" class="secondary-button danger-outline-button" data-i18n="task.deleteSelected">删除所选</button>
+                  <button id="cancelTaskSelectionButton" type="button" class="text-button" data-i18n="task.exitSelection">取消批量操作</button>
+                </div>
+              </section>
               <ul id="taskList" class="task-list"></ul>
             </section>
           </section>

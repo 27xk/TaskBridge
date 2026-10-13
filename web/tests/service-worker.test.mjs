@@ -24,6 +24,7 @@ function loadServiceWorker(overrides = {}) {
   };
   const context = vm.createContext({
     URL,
+    Request,
     Promise,
     self,
     fetch: overrides.fetch || (async () => ({ clone() { return this; } })),
@@ -100,4 +101,71 @@ test("notification clicks focus an existing app window at the linked task", asyn
   assert.equal(closed, 1);
   assert.deepEqual(navigated, ["https://tasks.example.com/web/?task=42"]);
   assert.equal(focused, 1);
+});
+
+test("stylesheets refresh online even when an installed shell has an older cached copy", async () => {
+  const stale = { body: "old CSS" };
+  const fresh = { body: "current CSS", clone() { return this; } };
+  const writes = [];
+  const requests = [];
+  const { listeners } = loadServiceWorker({
+    fetch: async (request, options) => { requests.push({ request, options }); return fresh; },
+    caches: {
+      open: async () => ({ put: async (...args) => writes.push(args) }),
+      match: async () => stale,
+    },
+  });
+  let work;
+  listeners.get("fetch")({
+    request: { method: "GET", mode: "cors", url: "https://tasks.example.com/web/styles.css" },
+    respondWith(value) { work = value; },
+  });
+  assert.equal(await work, fresh);
+  assert.equal(requests[0].options.cache, "no-cache");
+  assert.equal(writes[0][0], "./styles.css");
+});
+
+test("the revised shell retires the old release cache without touching unrelated caches", async () => {
+  const removed = [];
+  const { listeners } = loadServiceWorker({ caches: {
+    keys: async () => ["taskbridge-web-shell-v0.1.8", "unrelated-cache"],
+    delete: async (key) => { removed.push(key); return true; },
+  } });
+  let work;
+  listeners.get("activate")({ waitUntil(value) { work = value; } });
+  await work;
+  assert.deepEqual(removed, ["taskbridge-web-shell-v0.1.8"]);
+});
+
+test("installing a shell revision bypasses stale HTTP asset caches", async () => {
+  let assets;
+  const { listeners } = loadServiceWorker({ caches: {
+    open: async () => ({ addAll: async (requests) => { assets = requests; } }),
+  } });
+  let work;
+  listeners.get("install")({ waitUntil(value) { work = value; } });
+  await work;
+  assert.ok(assets.length > 0);
+  assert.ok(assets.every((asset) => asset.cache === "reload"));
+  assert.ok(assets.some((asset) => asset.url.endsWith("/styles.css")));
+});
+
+test("the new worker claims clients after old shell deletion has completed", async () => {
+  let finishDeletion;
+  const pendingDeletion = new Promise((resolve) => { finishDeletion = resolve; });
+  let claims = 0;
+  const { listeners } = loadServiceWorker({
+    self: { clients: { claim: async () => { claims += 1; } } },
+    caches: {
+      keys: async () => ["taskbridge-web-shell-v0.1.8"],
+      delete: async () => pendingDeletion,
+    },
+  });
+  let work;
+  listeners.get("activate")({ waitUntil(value) { work = value; } });
+  await Promise.resolve();
+  assert.equal(claims, 0);
+  finishDeletion(true);
+  await work;
+  assert.equal(claims, 1);
 });

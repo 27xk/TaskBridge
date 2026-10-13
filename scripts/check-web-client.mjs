@@ -1,3 +1,4 @@
+import { createAppHarness, descendants } from "../web/tests/helpers/app-harness.mjs";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -102,9 +103,6 @@ for (const token of [
   'href="./styles.css"',
   `src="./app.js?v=${webVersion}"`,
   `src="./startup.js?v=${webVersion}"`,
-  'id="serverBaseUrl"',
-  'id="apiBaseUrl"',
-  'id="testConnectionButton"',
   'id="authForm"',
   'id="taskList"',
   'id="appScreen" class="workspace" hidden',
@@ -132,7 +130,6 @@ assert.match(appSource, /setAttribute\("aria-pressed"/, "auth mode buttons must 
 assert.match(htmlSource, /id="confirmDialog"/, "web must provide an in-app confirmation dialog");
 assert.match(htmlSource, /id="confirmDialogConfirmButton"/, "web confirmation dialog must expose an explicit confirm button");
 assert.match(htmlSource, /id="confirmDialogCancelButton"/, "web confirmation dialog must expose an explicit cancel button");
-assert.match(htmlSource, /href="\.\/self-hosting\.html"/, "web first-run self-hosting help must link to a same-origin guide page");
 assert.match(htmlSource, /id="exportLocalBackupButton"/, "web account panel must let users export a local backup");
 assert.match(htmlSource, /id="importLocalBackupInput"/, "web account panel must let users import a local backup");
 assert.match(htmlSource, /id="undoLocalBackupImportButton"/, "web account panel must let users undo a safe local backup import");
@@ -161,32 +158,13 @@ assert.match(
   /connect-src 'self' https:\/\/taskbridge\.example\.com wss:\/\/taskbridge\.example\.com/,
   "web production CSP must pin connect-src to the documented public API and WebSocket origins",
 );
-assert.match(
-  htmlSource,
-  /\u670d\u52a1\u5668\u5730\u5740[\s\S]*?id="serverBaseUrl"/,
-  "web auth form must expose a user-facing server address before advanced endpoint fields",
-);
 assert.match(htmlSource, />\u8de8\u8bbe\u5907\u5f85\u529e</, "web brand subtitle must describe the product value");
 assert.match(htmlSource, /id="syncStatusButton"[\s\S]*?>\u540c\u6b65\u72b6\u6001</, "web top connection action must open saved-server sync status");
 assert.doesNotMatch(htmlSource, /id="syncStatusButton"[^>]*>\u68c0\u67e5\u8fde\u63a5/, "web top connection action must not duplicate the auth connection-test action");
 assert.match(htmlSource, /id="authSubmitButton"[\s\S]*?>\u767b\u5f55</, "web auth submit must keep login as the primary user action");
-assert.match(htmlSource, /id="testConnectionButton"[\s\S]*?>\u68c0\u67e5\u8fde\u63a5</, "web auth connection test must be a secondary troubleshooting action");
-assert.match(htmlSource, /\u767b\u5f55\u4f1a\u81ea\u52a8\u68c0\u67e5\u8fde\u63a5/, "web auth copy must explain that login automatically checks the connection");
 assert.doesNotMatch(htmlSource, /id="savePreferencesButton"/, "web auth must not show a separate remember-server action");
 assert.doesNotMatch(htmlSource, /Browser client|\u4fdd\u5b58\u914d\u7f6e/, "web auth chrome must avoid technical copy on the first screen");
-assert.match(
-  htmlSource,
-  /id="showAdvancedConnectionButton"[\s\S]*?\u81ea\u5b9a\u4e49\u4ee3\u7406\u6216\u9ad8\u7ea7\u90e8\u7f72\u8bbe\u7f6e/,
-  "web auth API and device fields must be revealed through an intentional advanced connection action",
-);
-assert.match(
-  htmlSource,
-  /<details id="advancedConnectionSettings" class="advanced-connection-settings" hidden>[\s\S]*?<summary[^>]*>\u9ad8\u7ea7\u8fde\u63a5\u8bbe\u7f6e<\/summary>[\s\S]*?id="apiBaseUrl"[\s\S]*?id="deviceId"[\s\S]*?<\/details>/,
-  "web auth API and device fields must stay hidden until the advanced connection action is used",
-);
-assert.match(htmlSource, /id="serverSetupHelp"/, "web first-use guide must keep no-server help behind one optional disclosure");
-assert.match(htmlSource, /href="\.\/local-trial\.html"/, "web first-use help must link to the same-origin local trial guide");
-assert.match(htmlSource, /href="\.\/self-hosting\.html"/, "web first-use help must link to the same-origin self-hosting guide");
+assert.doesNotMatch(htmlSource, /id="(?:serverBaseUrl|apiBaseUrl|serverSetupHelp|advancedConnectionSettings)"/, "web authentication must use the deployed service without endpoint inputs");
 assert.doesNotMatch(
   htmlSource,
   /id="localTrialGuide"|id="selfHostGuide"|class="setup-checklist"/,
@@ -212,9 +190,6 @@ for (const token of [
   "DEFAULT_API_BASE_URL",
   "DEFAULT_SERVER_BASE_URL",
   "deriveApiBaseUrlFromServer",
-  "deriveServerBaseUrlFromApi",
-  "applyServerBaseUrlToApi",
-  "testConnection",
   "/auth/login",
   "/auth/register",
   "/auth/refresh",
@@ -242,7 +217,6 @@ for (const token of [
   "APP_VERSION_META_SELECTOR",
   "sessionStorage",
   "navigator.serviceWorker.register",
-  'dataset.taskAction = "edit"',
   "refreshSessionPromise",
   "fetchTaskListPages",
   "cursor_id",
@@ -475,7 +449,7 @@ for (const token of [
 }
 assert.match(
   serviceWorkerSource,
-  /CACHE_NAME\s*=\s*`taskbridge-web-shell-v\$\{WEB_VERSION\}`/,
+  /CACHE_NAME\s*=\s*`taskbridge-web-shell-v\$\{WEB_VERSION\}-\$\{SHELL_REVISION\}`/,
   "web/sw.js must derive the shell cache version from the web client version",
 );
 assert.match(serviceWorkerSource, /isVersionedShellAssetRequest/, "web service worker must detect versioned shell assets");
@@ -572,10 +546,11 @@ assert.match(appSource, /async function clearLocalDeviceData/, "web must impleme
 assert.match(appSource, /function isConflictSyncError\(/, "web offline queue must distinguish real conflicts from generic sync failures");
 assert.match(appSource, /offline_status:\s*isConflict\s*\?\s*"conflict"\s*:\s*"sync_failed"/, "web offline queue must not mark every failed mutation as a conflict");
 assert.match(appSource, /isConflictSyncError\(error\)/, "web offline queue failure handling must use conflict detection");
-assert.match(appSource, /indexedDB\.deleteDatabase/, "web local data clearing must delete the offline database");
+assert.match(appSource, /return deleteIndexedDatabase\(indexedDB, dbName,/, "web local data clearing must use the tested IndexedDB deletion helper");
+assert.match(offlineCoreSource, /export function deleteIndexedDatabase[\s\S]{0,260}indexedDb\.deleteDatabase\(dbName\)/, "web IndexedDB deletion helper must issue the database delete request");
+assert.doesNotMatch(offlineCoreSource, /request\.onblocked\s*=\s*\(\)\s*=>\s*reject/, "web IndexedDB deletion must keep waiting when another tab temporarily blocks it");
 assert.match(appSource, /async function purgeTask/, "web trash must implement permanent delete");
 assert.match(appSource, /\/tasks\/\$\{taskId\}\/purge/, "web permanent delete must call the backend purge endpoint for synced tasks");
-assert.match(appSource, /dataset\.taskAction\s*=\s*"purge"/, "web trash task cards must expose a permanent delete action");
 assert.match(
   webHeadersSource,
   /Content-Security-Policy:/,
@@ -632,5 +607,19 @@ assert.match(ciSource, /check-web-client\.mjs/, "CI workflow must run the Web cl
 assert.match(ciSource, /smoke-web-client\.mjs/, "CI workflow must run the Web HTTP smoke test");
 assert.match(releaseSource, /check-web-client\.mjs/, "release workflow must run the Web client guard");
 assert.match(releaseSource, /smoke-web-client\.mjs/, "release workflow must run the Web HTTP smoke test");
+
+const menuHarness = createAppHarness();
+const taskItem = menuHarness.run('renderTaskItem({ id: 1, title: "Client check", status: "open", checklist: [] })');
+const taskMenu = descendants(taskItem).find((node) => node.classList.contains("task-action-menu"));
+assert.equal(descendants(taskMenu).filter((node) => node.dataset.taskAction).length, 0, "closed task menus must not mount action buttons");
+taskMenu.open = true;
+await menuHarness.dispatch(taskMenu, "toggle");
+assert.ok(descendants(taskMenu).some((node) => node.dataset.taskAction === "edit"), "an opened task menu must offer task editing");
+
+const trashItem = menuHarness.run('renderTaskItem({ id: 2, title: "Trash check", status: "open", is_deleted: true, checklist: [] })');
+const trashMenu = descendants(trashItem).find((node) => node.classList.contains("task-action-menu"));
+trashMenu.open = true;
+await menuHarness.dispatch(trashMenu, "toggle");
+assert.ok(descendants(trashMenu).some((node) => node.dataset.taskAction === "purge"), "an opened trash menu must offer permanent deletion");
 
 console.log("web client config check passed");

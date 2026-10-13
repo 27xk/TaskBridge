@@ -1,5 +1,9 @@
 import {
   applyOfflineTaskAction,
+  attemptSessionRevocation,
+  buildPersistentSessionSuppressionMarker,
+  buildRefreshRequestBody,
+  buildTaskSchedulePatch,
   buildPasswordChangePayload,
   buildOfflineDatabaseName,
   buildOfflineWorkspaceKey,
@@ -8,14 +12,20 @@ import {
   buildTaskDraftStorageKey,
   buildTaskNotificationUrl,
   canResolveTaskConflict,
+  canApplySessionRefreshResult,
   clearAccountScopedInputs,
   compareCachedTasks,
+  coordinateRefreshSession,
   createLatestRequestGate,
+  deleteIndexedDatabase,
   getTaskReminderAt,
+  getSelectableTaskIds,
+  getApiRequestCredentialsMode,
   hasOfflineQueueId,
-  isAuthHealthUsable,
+  isCompletedTask,
   isMixedContentApiUrl,
   isOfflineProfileForApi,
+  isPersistentSessionSuppressed,
   isTerminalRefreshStatus,
   makeOfflineTask,
   makeTaskFromTemplate,
@@ -27,9 +37,10 @@ import {
   normalizeRemoteTaskForOffline,
   processIndependentMutationQueue,
   reconcileCachedTaskSnapshot,
-  resetEndpointScopedConnectionState,
+  reconcileSelectedTaskIds,
   shouldConfirmTaskAction,
   shouldShowConnectionBadge,
+  withRefreshLease,
   withClientRequestId,
 } from "./offline-core.js?v=0.1.8";
 
@@ -38,6 +49,8 @@ const DEFAULT_SERVER_BASE_URL = supportsHttpOrigin() ? location.origin : LOCAL_F
 const DEFAULT_API_BASE_URL = deriveApiBaseUrlFromServer(DEFAULT_SERVER_BASE_URL);
 const DISPLAY_TIME_ZONE = normalizeBrowserTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
 const STORAGE_PREFIX = "taskbridge.web.v1";
+const SESSION_CHANNEL_NAME = `${STORAGE_PREFIX}.session`;
+const SESSION_REFRESH_LOCK_NAME = `${STORAGE_PREFIX}.refresh`;
 const WEB_BACKUP_FORMAT = "taskbridge.local.backup.v1";
 const ACCEPTED_WEB_BACKUP_FORMATS = new Set([
   WEB_BACKUP_FORMAT,
@@ -48,6 +61,9 @@ const WEB_BACKUP_MAX_IMPORT_BYTES = 20_000_000;
 const WEB_BACKUP_MAX_IMPORT_TASKS = 100_000;
 const LAST_IMPORTED_BACKUP_TASK_IDS_STORAGE_KEY = "lastImportedBackupTaskIds";
 const OFFLINE_PROFILE_STORAGE_KEY = "offlineProfile";
+const LEGACY_OFFLINE_PROFILE_STORAGE_KEY = "legacyOfflineProfile";
+const PERSISTENT_SESSION_SUPPRESSED_KEY = "persistentSessionSuppressed";
+const SESSION_REFRESH_LEASE_STORAGE_KEY = "sessionRefreshLease";
 const TASK_LIMIT = 100;
 const OFFLINE_TASK_RENDER_STEP = TASK_LIMIT;
 const MAX_TASK_PAGES = 50;
@@ -64,17 +80,19 @@ const LOCAL_STORAGE_STRING_KEYS = new Set([
   "deviceId",
   "taskSearch",
   "taskView",
+  "taskProjectFilter",
+  "taskTagFilter",
   "language",
   "clientErrorReportingEnabled",
   OFFLINE_PROFILE_STORAGE_KEY,
+  LEGACY_OFFLINE_PROFILE_STORAGE_KEY,
   LAST_IMPORTED_BACKUP_TASK_IDS_STORAGE_KEY,
+  PERSISTENT_SESSION_SUPPRESSED_KEY,
+  SESSION_REFRESH_LEASE_STORAGE_KEY,
 ]);
-const INITIAL_API_BASE_URL = normalizeApiBaseUrl(readStoredString("apiBaseUrl", DEFAULT_API_BASE_URL));
-const INITIAL_SERVER_BASE_URL = readStoredString(
-  "serverBaseUrl",
-  deriveServerBaseUrlFromApi(INITIAL_API_BASE_URL),
-);
-const INITIAL_NORMALIZED_SERVER_BASE_URL = normalizeServerBaseUrl(INITIAL_SERVER_BASE_URL);
+const STORED_API_BASE_URL = readStoredString("apiBaseUrl", "");
+const INITIAL_API_BASE_URL = DEFAULT_API_BASE_URL;
+const STORED_SESSION_MATCHES_DEPLOYMENT = readSessionString("apiBaseUrl", "") === DEFAULT_API_BASE_URL;
 let offlineProfileLegacyMigrationPending = false;
 const PRIMARY_VIEW_OPTIONS = [
   { value: "", labelKey: "view.all" },
@@ -84,40 +102,45 @@ const PRIMARY_VIEW_OPTIONS = [
 ];
 const MORE_VIEW_OPTIONS = [
   { value: "inbox", labelKey: "view.inbox" },
+  { value: "week", labelKey: "view.week" },
   { value: "high", labelKey: "view.high" },
   { value: "pending", labelKey: "view.pending" },
   { value: "conflict", labelKey: "view.conflict" },
+  { value: "templates", labelKey: "view.templates" },
   { value: "trash", labelKey: "view.trash" },
 ];
 const VIEW_OPTIONS = [...PRIMARY_VIEW_OPTIONS, ...MORE_VIEW_OPTIONS];
 const EMPTY_STATE_CREATE_VIEWS = new Set(["", "inbox", "today"]);
 
 const state = {
-  serverBaseUrl: INITIAL_NORMALIZED_SERVER_BASE_URL,
   apiBaseUrl: INITIAL_API_BASE_URL,
   deviceId: readStoredString("deviceId", `web-${crypto.randomUUID()}`),
   language: getInitialLanguage(),
   authMode: "login",
   passwordVisible: false,
-  advancedConnectionManuallyRequested: false,
   registrationEnabled: false,
   registrationStatusKnown: false,
-  accessToken: readSessionString("accessToken", ""),
-  refreshToken: readSessionString("refreshToken", ""),
-  user: readSessionJson("user", null),
+  accessToken: STORED_SESSION_MATCHES_DEPLOYMENT ? readSessionString("accessToken", "") : "",
+  refreshToken: STORED_SESSION_MATCHES_DEPLOYMENT ? readSessionString("refreshToken", "") : "",
+  user: STORED_SESSION_MATCHES_DEPLOYMENT ? readSessionJson("user", null) : null,
   offlineMode: false,
   offlineProfile: readOfflineProfile(),
   offlineCacheReady: false,
   tasks: [],
+  selectedTaskIds: new Set(),
   selectedTrashTaskIds: new Set(),
+  taskSelectionMode: false,
   meta: null,
   syncStatus: null,
   sessions: [],
   search: "",
   view: "today",
+  projectFilter: "",
+  tagFilter: "",
   checklistDraftItems: [],
   editingTaskId: null,
   editingTaskVersion: null,
+  editorOpen: false,
   offlineQueueCount: 0,
   offlineLastSyncedAt: "",
   cachedTaskTotalCount: 0,
@@ -167,41 +190,21 @@ const I18N = {
     "auth.modeLabel": "登录模式",
     "auth.login": "登录",
     "auth.register": "注册",
-    "auth.firstUseTitle": "已有服务器地址就能登录",
-    "auth.firstUseExistingServer": "把管理员给你的 TaskBridge 服务器地址填到下方，然后直接登录；客户端会自动检查连接。",
-    "auth.firstUseSimpleStart": "还没有服务器地址时，请先联系管理员或部署者获取地址；自己试用或自托管时再打开准备服务说明。",
-    "auth.setupChecklistTitle": "推荐顺序",
-    "auth.setupStepServer": "先确认服务器地址。",
-    "auth.setupStepCheck": "直接登录或注册，客户端会自动检查连接。",
-    "auth.setupStepAccount": "检查连接只用于排查服务器地址。",
-    "auth.openLocalTrialGuide": "打开本机试用说明",
-    "auth.serverSetupHelp": "没有服务器地址？先确认来源",
-    "auth.serverSetupHelpHint": "先确认这个地址应由谁提供：如果你只是使用别人部署好的 TaskBridge，请联系管理员或部署者索取；只有本机试用或长期自托管时，再按说明准备服务。",
-    "auth.openSelfHostGuide": "打开自托管说明",
-    "auth.serverUrl": "服务器地址",
-    "auth.serverUrlPlaceholder": "填写管理员给你的服务器地址",
-    "auth.serverUrlHint": "填写 TaskBridge 服务器地址即可；本机或内网可以使用 http://，高级连接设置会自动生成。",
-    "auth.showAdvancedConnection": "自定义代理或高级部署设置",
-    "auth.advancedConnection": "高级连接设置",
-    "auth.apiUrlGenerated": "请求地址（自动生成）",
-    "auth.deviceIdGenerated": "设备标识（自动生成）",
-    "auth.deviceIdHint": "用于区分这台设备的同步记录，普通用户不需要修改。",
-    "auth.regenerateDeviceId": "重新生成设备标识",
     "auth.username": "用户名",
     "auth.email": "邮箱",
     "auth.account": "账号",
     "auth.password": "密码",
+    "auth.forgotPasswordHelp": "忘记密码？请联系服务器管理员重置。",
     "auth.showPassword": "显示密码",
     "auth.hidePassword": "隐藏密码",
-    "auth.saveAndTestConnection": "检查连接",
-    "auth.checkConnection": "检查连接",
-    "auth.loginAutoChecksConnection": "登录会自动检查连接；检查连接只用于排查服务器地址。",
     "auth.registrationPending": "点击“注册”会自动检查当前服务器是否开放注册。已有账号可直接登录。",
+    "auth.registrationCheckFailed": "暂时无法确认是否开放注册，请稍后重试或联系管理员。已有账号可直接登录。",
     "auth.registrationEnabled": "当前服务器允许开放注册，可以创建账号。",
     "auth.registrationDisabled": "当前服务器已关闭开放注册。请使用已有账号登录，或联系服务器管理员创建账号。",
     "auth.logoutTitle": "退出登录？",
     "auth.logoutConfirm": "仍要退出",
     "auth.loggedOut": "已退出",
+    "auth.loggedOutRevocationUnconfirmed": "本机已退出，但服务器未确认撤销此会话。网络恢复后请重新登录并检查登录设备。",
     "auth.logoutPendingWarning": "当前仍有未同步、同步失败或冲突的任务。退出后本机缓存仍保留，但其他设备暂时看不到这些修改。仍要退出吗？",
     "app.account": "账户",
     "account.security": "账户安全与会话",
@@ -253,10 +256,6 @@ const I18N = {
     "app.deviceId": "设备标识",
     "app.clientErrorReporting": "允许发送浏览器错误用于排障",
     "app.clientErrorReportingHint": "开启后，浏览器错误会发送用于排障；上报内容包含应用版本、页面路径、浏览器类型和脱敏后的错误堆栈，不包含密码、令牌或完整链接参数。",
-    "app.regenerateDeviceTitle": "重新生成设备标识？",
-    "app.regenerateDeviceMessage": "这会让这台设备以新身份同步，旧设备记录不会再用于后续同步。",
-    "app.regenerateDeviceConfirm": "重新生成",
-    "app.regeneratedDevice": "设备标识已重新生成",
     "app.localData": "数据与备份",
     "app.localDataHint": "导出或导入这台设备的离线任务备份。清除此设备数据只会删除本机缓存和登录状态，不会删除服务器上的任务。",
     "app.localDataSafetyHint": "清除前先确认没有待同步、同步失败或冲突的任务；不确定时先导出本机备份。",
@@ -287,6 +286,8 @@ const I18N = {
     "app.clearLocalDataMessage": "这会退出登录，并删除当前账号在本浏览器中的离线任务、等待同步的修改和本机缓存。服务器上的任务不会被删除。建议先导出本机备份。",
     "app.clearLocalDataConfirm": "清除此设备数据",
     "app.localDataCleared": "已清除此设备数据。",
+    "app.localDataClearedRevocationUnconfirmed": "本机数据已清除并已退出，但服务器未确认撤销此会话。网络恢复后请重新登录并检查登录设备。",
+    "app.localDataClearWaiting": "正在等待其他 TaskBridge 标签页关闭本机数据库，关闭后会自动继续。",
     "app.syncStatus": "同步状态",
     "app.syncDetails": "同步详情",
     "app.syncAdvancedDiagnostics": "同步详情",
@@ -295,8 +296,14 @@ const I18N = {
     "app.syncDecision": "只要这里没有显示待同步、失败或冲突，你通常不需要手动处理。",
     "app.views": "视图",
     "app.stats": "统计",
+    "app.settingsSupport": "设置与支持",
+    "app.closeSettingsSupport": "关闭设置与支持",
     "task.newTask": "新建任务",
     "task.backToNewTask": "回到新建任务",
+    "task.quickAdd": "快速添加任务",
+    "task.quickCreate": "添加",
+    "task.openAdvancedEditor": "详细编辑",
+    "task.closeEditor": "关闭编辑器",
     "task.createCollapsedHint": "直接填写标题即可，备注、清单和时间安排可稍后展开。",
     "task.title": "标题",
     "task.quickPlaceholder": "例如：写周报",
@@ -353,6 +360,20 @@ const I18N = {
     "task.undoComplete": "撤销完成",
     "task.delete": "删除",
     "task.moreActions": "操作",
+    "task.expandNote": "展开备注",
+    "task.collapseNote": "收起备注",
+    "task.moreActionsFor": "操作：{title}",
+    "task.bulkActions": "批量操作",
+    "task.exitSelection": "取消批量操作",
+    "task.selectAllVisible": "选择当前列表",
+    "task.completeSelected": "完成所选",
+    "task.deleteSelected": "删除所选",
+    "task.selectedCompleted": "所选任务已完成",
+    "task.selectedDeleted": "所选任务已删除",
+    "task.selectTaskFor": "选择任务：{title}",
+    "task.planToday": "安排到今天",
+    "task.planTomorrow": "安排到明天",
+    "task.snoozeLater": "稍后一小时",
     "task.useTemplate": "使用模板",
     "task.restore": "恢复",
     "task.purge": "永久删除",
@@ -419,11 +440,17 @@ const I18N = {
     "view.all": "全部",
     "view.today": "今日",
     "view.inbox": "收件箱",
+    "view.week": "本周",
+    "view.project": "项目",
+    "view.tag": "标签",
+    "view.allProjects": "全部项目",
+    "view.allTags": "全部标签",
     "view.overdue": "逾期",
     "view.high": "高优先级",
     "view.pending": "待同步",
     "view.conflict": "有冲突",
     "view.completed": "已完成",
+    "view.templates": "模板",
     "view.trash": "回收站",
     "view.moreFilters": "列表与状态",
     "meta.open": "未完成",
@@ -457,6 +484,8 @@ const I18N = {
     "confirm.cancel": "取消",
     "confirm.deleteTaskTitle": "删除任务？",
     "confirm.deleteTaskMessage": "确认删除{title}？删除后可以在回收站恢复。",
+    "confirm.deleteSelectedTitle": "删除所选任务？",
+    "confirm.deleteSelectedMessage": "确认删除 {count} 个所选任务？删除后可以在回收站恢复。",
     "confirm.purgeTaskTitle": "永久删除任务？",
     "confirm.purgeTaskMessage": "确认永久删除{title}？此操作不能从回收站恢复。",
     "confirm.purgeSelectedTitle": "永久删除所选任务？",
@@ -507,7 +536,7 @@ const I18N = {
     "sync.discarded": "已放弃本机修改。",
     "sync.discardNeedsConnection": "这条任务已有服务器版本，需要联网后才能安全放弃本机修改。",
     "sync.noFailedMutation": "没有找到可重试的失败记录。",
-    "sync.statusUnavailable": "暂时无法获取同步状态，请检查服务器地址或稍后重试。",
+    "sync.statusUnavailable": "暂时无法获取同步状态，请稍后重试；若持续失败，请联系管理员。",
     "connection.offlineAvailable": "离线可用",
     "connection.localMode": "本机模式",
     "connection.offlineDisconnected": "离线，未连接服务器",
@@ -517,9 +546,6 @@ const I18N = {
     "connection.disconnected": "服务器未连接",
     "connection.awaitingLogin": "等待登录",
     "connection.pendingSync": "待同步 {count}",
-    "connection.mobileLoopbackHint": "手机上 127.0.0.1 指手机本身；请填写后端所在电脑或服务器的局域网 IP / 域名。",
-    "connection.remotePageLoopbackHint": "当前页面不是从本机地址打开；127.0.0.1 只指当前设备，请改填后端所在设备的 IP 或域名。",
-    "connection.testing": "正在测试连接...",
     "connection.availableExistingLogin": "连接可用，请使用已有账号登录。",
     "validation.accountRequired": "请输入账号或邮箱。",
     "validation.usernameRequired": "请输入用户名。",
@@ -534,17 +560,17 @@ const I18N = {
     "validation.mixedContentApi": "当前页面使用 HTTPS，浏览器会阻止连接 HTTP 服务器。请改用 HTTPS 服务地址、同源反向代理，或通过 HTTP 打开此页面。",
     "error.authInvalidCredentials": "账号或密码不正确，请检查后重试。",
     "error.authForbidden": "当前账号无权访问此服务，请联系管理员确认权限或注册开关。",
-    "error.loginServiceNotFound": "没有找到登录服务，请检查服务器地址是否正确。",
+    "error.loginServiceNotFound": "没有找到登录服务，请联系管理员检查部署配置。",
     "error.serverUnavailableWithLocalData": "服务器暂时不可用，请稍后重试。已保存的本地数据不会被删除。",
-    "error.connectionServiceUnavailable": "无法连接服务，请检查网络、服务器地址或服务是否已启动。",
-    "error.authFallback": "{message}。请检查账号、密码、服务器地址或注册开关。",
+    "error.connectionServiceUnavailable": "无法连接服务，请检查网络；若持续失败，请联系管理员。",
+    "error.authFallback": "{message}。请检查账号和密码，或联系管理员。",
     "error.generic": "操作失败，请稍后重试",
     "error.versionConflict": "这条任务已被其他设备修改，请刷新后再保存。",
     "error.unsupportedRepeatRule": "当前重复规则暂不支持，请改成每天、每周或每月。",
     "error.sessionExpired": "登录状态已失效，请重新登录。",
     "error.taskNotFound": "没有找到这条任务，可能已在其他设备删除。",
     "error.serverUnavailable": "服务器暂时不可用，请稍后重试。",
-    "error.connectionServerUnavailable": "无法连接服务器，请检查网络或服务器地址。",
+    "error.connectionServerUnavailable": "无法连接服务，请检查网络或联系管理员。",
     "error.requestFailed": "请求失败",
   },
   "en-US": {
@@ -582,41 +608,21 @@ const I18N = {
     "auth.modeLabel": "Sign-in mode",
     "auth.login": "Log in",
     "auth.register": "Register",
-    "auth.firstUseTitle": "Sign in with a server address",
-    "auth.firstUseExistingServer": "Enter the TaskBridge server address your administrator gave you, then sign in. The app checks the connection automatically.",
-    "auth.firstUseSimpleStart": "If you do not have a server address yet, ask your administrator or deployer first. Open setup help only for a local trial or self-hosting.",
-    "auth.setupChecklistTitle": "Recommended order",
-    "auth.setupStepServer": "Confirm the server address first.",
-    "auth.setupStepCheck": "Sign in or register directly. The app checks the connection automatically.",
-    "auth.setupStepAccount": "Use connection testing only to troubleshoot the server address.",
-    "auth.openLocalTrialGuide": "Open local trial guide",
-    "auth.serverSetupHelp": "No server address? Confirm where it should come from",
-    "auth.serverSetupHelpHint": "Confirm who should provide the address first: if you use someone else's TaskBridge service, ask your administrator or deployer. Prepare the service only for a local trial or long-term self-hosting.",
-    "auth.openSelfHostGuide": "Open self-hosting guide",
-    "auth.serverUrl": "Server address",
-    "auth.serverUrlPlaceholder": "Enter the server address from your administrator",
-    "auth.serverUrlHint": "Enter the TaskBridge server address. Local or LAN setups can use http://. Advanced connection settings are generated automatically.",
-    "auth.showAdvancedConnection": "Custom proxy or advanced deployment settings",
-    "auth.advancedConnection": "Advanced connection settings",
-    "auth.apiUrlGenerated": "Request URL (generated)",
-    "auth.deviceIdGenerated": "Device ID (generated)",
-    "auth.deviceIdHint": "Used to distinguish sync records from this device. Most users do not need to change it.",
-    "auth.regenerateDeviceId": "Regenerate device ID",
     "auth.username": "Username",
     "auth.email": "Email",
     "auth.account": "Account",
     "auth.password": "Password",
+    "auth.forgotPasswordHelp": "Forgot your password? Ask the server administrator to reset it.",
     "auth.showPassword": "Show password",
     "auth.hidePassword": "Hide password",
-    "auth.saveAndTestConnection": "Test connection",
-    "auth.checkConnection": "Test connection",
-    "auth.loginAutoChecksConnection": "Signing in checks the connection automatically. Use Test connection only when troubleshooting the server address.",
     "auth.registrationPending": "Click Register to check automatically whether this server allows registration. Existing accounts can still sign in.",
+    "auth.registrationCheckFailed": "Registration availability could not be checked. Try again later or contact the administrator. Existing accounts can sign in.",
     "auth.registrationEnabled": "This server allows open registration. You can create an account.",
     "auth.registrationDisabled": "Registration is disabled on this server. Sign in with an existing account or ask the server administrator to create one.",
     "auth.logoutTitle": "Log out?",
     "auth.logoutConfirm": "Log out anyway",
     "auth.loggedOut": "Logged out",
+    "auth.loggedOutRevocationUnconfirmed": "Signed out on this device, but the server did not confirm session revocation. Sign in again after the connection recovers and check your active sessions.",
     "auth.logoutPendingWarning": "There are unsynced, failed, or conflicting tasks. Local cache will remain after logout, but other devices may not see these changes yet. Continue?",
     "app.account": "Account",
     "account.security": "Account security and sessions",
@@ -668,10 +674,6 @@ const I18N = {
     "app.deviceId": "Device ID",
     "app.clientErrorReporting": "Allow browser error reports for troubleshooting",
     "app.clientErrorReportingHint": "When enabled, browser errors are sent for troubleshooting. Reports include app version, page path, browser type, and a sanitized stack trace, but not passwords, tokens, or full URL parameters.",
-    "app.regenerateDeviceTitle": "Regenerate device ID?",
-    "app.regenerateDeviceMessage": "This device will sync with a new identity. Existing device records will no longer be used for later sync.",
-    "app.regenerateDeviceConfirm": "Regenerate",
-    "app.regeneratedDevice": "Device ID regenerated",
     "app.localData": "Data and backups",
     "app.localDataHint": "Export or import this device's offline task backup. Clearing this device only removes local cache and sign-in state, not server tasks.",
     "app.localDataSafetyHint": "Before clearing, check that there are no pending, failed, or conflicting tasks. Export a local backup if unsure.",
@@ -702,6 +704,8 @@ const I18N = {
     "app.clearLocalDataMessage": "This logs out and deletes this account's offline tasks, waiting-to-sync changes, and local cache in this browser. Server tasks will not be deleted. Export a local backup first if needed.",
     "app.clearLocalDataConfirm": "Clear this device",
     "app.localDataCleared": "This device's local data was cleared.",
+    "app.localDataClearedRevocationUnconfirmed": "This device's data was cleared and you were signed out, but the server did not confirm session revocation. Sign in again after the connection recovers and check your active sessions.",
+    "app.localDataClearWaiting": "Waiting for another TaskBridge tab to close the local database. It will continue automatically.",
     "app.syncStatus": "Sync status",
     "app.syncDetails": "Sync details",
     "app.syncAdvancedDiagnostics": "Sync details",
@@ -710,8 +714,14 @@ const I18N = {
     "app.syncDecision": "If this area shows no pending, failed, or conflicting tasks, you usually do not need to do anything.",
     "app.views": "Views",
     "app.stats": "Stats",
+    "app.settingsSupport": "Settings and support",
+    "app.closeSettingsSupport": "Close settings and support",
     "task.newTask": "New task",
     "task.backToNewTask": "Back to new task",
+    "task.quickAdd": "Quick add task",
+    "task.quickCreate": "Add",
+    "task.openAdvancedEditor": "Detailed editor",
+    "task.closeEditor": "Close editor",
     "task.createCollapsedHint": "Enter a title first. Notes, checklist, and scheduling can wait.",
     "task.title": "Title",
     "task.quickPlaceholder": "Example: write weekly report",
@@ -768,6 +778,20 @@ const I18N = {
     "task.undoComplete": "Undo complete",
     "task.delete": "Delete",
     "task.moreActions": "Actions",
+    "task.expandNote": "Expand note",
+    "task.collapseNote": "Collapse note",
+    "task.moreActionsFor": "Actions: {title}",
+    "task.bulkActions": "Bulk actions",
+    "task.exitSelection": "Cancel bulk actions",
+    "task.selectAllVisible": "Select visible tasks",
+    "task.completeSelected": "Complete selected",
+    "task.deleteSelected": "Delete selected",
+    "task.selectedCompleted": "Selected tasks completed",
+    "task.selectedDeleted": "Selected tasks deleted",
+    "task.selectTaskFor": "Select task: {title}",
+    "task.planToday": "Plan for today",
+    "task.planTomorrow": "Plan for tomorrow",
+    "task.snoozeLater": "Later by one hour",
     "task.useTemplate": "Use template",
     "task.restore": "Restore",
     "task.purge": "Delete permanently",
@@ -834,11 +858,17 @@ const I18N = {
     "view.all": "All",
     "view.today": "Today",
     "view.inbox": "Inbox",
+    "view.week": "This week",
+    "view.project": "Project",
+    "view.tag": "Tag",
+    "view.allProjects": "All projects",
+    "view.allTags": "All tags",
     "view.overdue": "Overdue",
     "view.high": "High priority",
     "view.pending": "Pending sync",
     "view.conflict": "Conflicts",
     "view.completed": "Completed",
+    "view.templates": "Templates",
     "view.trash": "Recycle bin",
     "view.moreFilters": "Lists and status",
     "meta.open": "Open",
@@ -872,6 +902,8 @@ const I18N = {
     "confirm.cancel": "Cancel",
     "confirm.deleteTaskTitle": "Delete task?",
     "confirm.deleteTaskMessage": "Delete {title}? You can restore it from the recycle bin.",
+    "confirm.deleteSelectedTitle": "Delete selected tasks?",
+    "confirm.deleteSelectedMessage": "Delete {count} selected tasks? You can restore them from the recycle bin.",
     "confirm.purgeTaskTitle": "Permanently delete task?",
     "confirm.purgeTaskMessage": "Permanently delete {title}? This cannot be restored from the recycle bin.",
     "confirm.purgeSelectedTitle": "Permanently delete selected tasks?",
@@ -922,7 +954,7 @@ const I18N = {
     "sync.discarded": "Local change discarded.",
     "sync.discardNeedsConnection": "This task has a server version. Connect before discarding the local change safely.",
     "sync.noFailedMutation": "No failed queue record was found to retry.",
-    "sync.statusUnavailable": "Sync status is unavailable. Check the server address or try again later.",
+    "sync.statusUnavailable": "Sync status is unavailable. Try again later or contact the administrator if it continues.",
     "connection.offlineAvailable": "Offline available",
     "connection.localMode": "On-device mode",
     "connection.offlineDisconnected": "Offline, server not connected",
@@ -932,9 +964,6 @@ const I18N = {
     "connection.disconnected": "Server disconnected",
     "connection.awaitingLogin": "Waiting for sign-in",
     "connection.pendingSync": "{count} pending",
-    "connection.mobileLoopbackHint": "On a phone, 127.0.0.1 points to the phone itself. Use the LAN IP or domain of the computer/server running the backend.",
-    "connection.remotePageLoopbackHint": "This page was not opened from a local address. 127.0.0.1 only points to the current device; use the backend device IP or domain.",
-    "connection.testing": "Testing connection...",
     "connection.availableExistingLogin": "Connection is available. Sign in with an existing account.",
     "validation.accountRequired": "Enter an account or email.",
     "validation.usernameRequired": "Enter a username.",
@@ -949,38 +978,30 @@ const I18N = {
     "validation.mixedContentApi": "This page uses HTTPS, so the browser blocks an HTTP server. Use an HTTPS server address, a same-origin reverse proxy, or open this page over HTTP.",
     "error.authInvalidCredentials": "The account or password is incorrect. Check it and try again.",
     "error.authForbidden": "This account cannot access the service. Ask the administrator to check permissions or registration settings.",
-    "error.loginServiceNotFound": "The login service was not found. Check the server address.",
+    "error.loginServiceNotFound": "The login service was not found. Ask the administrator to check the deployment.",
     "error.serverUnavailableWithLocalData": "The server is temporarily unavailable. Try again later. Saved local data will not be deleted.",
-    "error.connectionServiceUnavailable": "Cannot connect to the service. Check the network, server address, or whether the service has started.",
-    "error.authFallback": "{message}. Check account, password, server address, or registration settings.",
+    "error.connectionServiceUnavailable": "Cannot connect to the service. Check your network or contact the administrator.",
+    "error.authFallback": "{message}. Check your account and password, or contact the administrator.",
     "error.generic": "Operation failed. Try again later.",
     "error.versionConflict": "This task was changed on another device. Refresh before saving again.",
     "error.unsupportedRepeatRule": "This repeat rule is not supported yet. Use daily, weekly, or monthly.",
     "error.sessionExpired": "Your session has expired. Sign in again.",
     "error.taskNotFound": "This task was not found. It may have been deleted on another device.",
     "error.serverUnavailable": "The server is temporarily unavailable. Try again later.",
-    "error.connectionServerUnavailable": "Cannot connect to the server. Check the network or server address.",
+    "error.connectionServerUnavailable": "Cannot connect to the service. Check your network or contact the administrator.",
     "error.requestFailed": "Request failed",
   },
 };
 
 Object.assign(I18N["zh-CN"], {
-  "auth.firstUseTitle": "已有服务器地址就能登录",
-  "auth.firstUseExistingServer": "把管理员给你的 TaskBridge 服务器地址填到下方，然后直接登录；客户端会自动检查连接。",
-  "auth.firstUseSimpleStart": "还没有服务器地址时，请先联系管理员或部署者获取地址；自己试用或自托管时再打开准备服务说明。",
-  "auth.serverSetupHelp": "没有服务器地址？先确认来源",
-  "auth.serverSetupHelpHint": "先确认这个地址应由谁提供：如果你只是使用别人部署好的 TaskBridge，请联系管理员或部署者索取；只有本机试用或长期自托管时，再按说明准备服务。",
+  "task.saveFailedFor": "无法保存“{title}”：{message}",
   "app.clearLocalDataBlocked": "当前还有待同步、同步失败或冲突的任务。请先在同步详情中处理，或先导出本机备份后再清除此设备数据。",
   "sync.useServer": "保留同步来的版本",
   "sync.overwriteServer": "保留这台设备版本",
 });
 
 Object.assign(I18N["en-US"], {
-  "auth.firstUseTitle": "Sign in with a server address",
-  "auth.firstUseExistingServer": "Enter the TaskBridge server address your administrator gave you, then sign in. The app checks the connection automatically.",
-  "auth.firstUseSimpleStart": "If you do not have a server address yet, ask your administrator or deployer first. Open setup help only for a local trial or self-hosting.",
-  "auth.serverSetupHelp": "No server address? Confirm where it should come from",
-  "auth.serverSetupHelpHint": "Confirm who should provide the address first: if you use someone else's TaskBridge service, ask your administrator or deployer. Prepare the service only for a local trial or long-term self-hosting.",
+  "task.saveFailedFor": 'Could not save "{title}": {message}',
   "app.clearLocalDataBlocked": "This device still has pending, failed, or conflicting tasks. Handle them in sync details, or export a local backup before clearing this device.",
   "sync.useServer": "Keep synced version",
   "sync.overwriteServer": "Keep this device version",
@@ -989,9 +1010,16 @@ Object.assign(I18N["en-US"], {
 const nodes = {};
 let searchTimer = 0;
 let refreshSessionPromise = null;
+let sessionRefreshGeneration = 0;
+let sessionActivationPromise = null;
+let sessionActivationContext = null;
+let sessionChannel = null;
+const sessionCoordinatorId = crypto.randomUUID();
 let offlineDbPromise = null;
 let offlineDbNameInUse = "";
+let localDataClearInProgress = false;
 let offlineQueueFlushPromise = null;
+let offlineQueueFlushContext = null;
 let offlineResumeCheckSequence = 0;
 let installPromptEvent = null;
 let activeConfirm = null;
@@ -1000,7 +1028,14 @@ let notificationScheduleSequence = 0;
 const taskRequestGate = createLatestRequestGate();
 const connectionRequestGate = createLatestRequestGate();
 const registrationRequestGate = createLatestRequestGate();
-let activeConnectionRequestSequence = null;
+let workspaceMobileQuery = null;
+let taskEditorReturnFocus = null;
+let taskDraftFormKey = "";
+let taskCreateRequestId = "";
+let taskDraftSaveError = "";
+let activeTaskMenu = null;
+let taskMenuPositionScheduled = false;
+let settingsSupportReturnFocus = null;
 const notificationTimers = new Map();
 
 class ApiError extends Error {
@@ -1051,6 +1086,7 @@ function boot() {
     state.search = "";
   }
   bindEvents();
+  setupSessionCoordination();
   hydrateInputs();
   updateAuthMode();
   updateConnectionBadge();
@@ -1064,15 +1100,112 @@ function boot() {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
 
-  if (hasSession()) {
+  if (hasSession() && shouldRestorePersistentSession()) {
+    const sessionContext = captureSessionContext();
     void prepareOfflineProfileStorage()
       .catch(() => {})
-      .finally(() => activateSession());
+      .finally(() => activateSessionSingleflight(sessionContext));
   } else {
     clearSession();
     render();
     void refreshOfflineResumeAvailability();
+    if (shouldRestorePersistentSession()) {
+      void restorePersistentSession();
+    }
   }
+}
+
+function setupSessionCoordination() {
+  if (typeof BroadcastChannel !== "function") return;
+  sessionChannel = new BroadcastChannel(SESSION_CHANNEL_NAME);
+  sessionChannel.addEventListener("message", (event) => {
+    void applySharedSessionMessage(event.data);
+  });
+  window.addEventListener("pagehide", () => {
+    sessionChannel?.close();
+    sessionChannel = null;
+  }, { once: true });
+}
+
+async function applySharedSessionMessage(message) {
+  if (
+    !message ||
+    message.source === sessionCoordinatorId ||
+    message.apiBaseUrl !== state.apiBaseUrl ||
+    message.deviceId !== state.deviceId
+  ) {
+    return;
+  }
+
+  if (message.type === "tokens") {
+    const incomingUserId = Number(message.user?.id);
+    const currentUserId = Number(state.user?.id);
+    if (!Number.isFinite(incomingUserId) || incomingUserId <= 0) return;
+    if (Number.isFinite(currentUserId) && currentUserId > 0 && currentUserId !== incomingUserId) return;
+    if (!shouldRestorePersistentSession(incomingUserId)) return;
+    const workspaceWasActive = hasLocalWorkspace();
+    persistTokens(message, { broadcast: false });
+    if (!workspaceWasActive) {
+      const sessionContext = captureSessionContext();
+      await prepareOfflineProfileStorage().catch(() => {});
+      await activateSessionSingleflight(sessionContext);
+    }
+    return;
+  }
+
+  if (message.type === "signed-out") {
+    const currentUserId = Number(state.user?.id);
+    const signedOutUserId = Number(message.userId);
+    if (
+      Number.isFinite(currentUserId) &&
+      currentUserId > 0 &&
+      Number.isFinite(signedOutUserId) &&
+      signedOutUserId > 0 &&
+      currentUserId !== signedOutUserId
+    ) {
+      return;
+    }
+    const nextDeviceId = typeof message.nextDeviceId === "string"
+      ? message.nextDeviceId.trim()
+      : "";
+    if (nextDeviceId && nextDeviceId.length <= 128) {
+      state.deviceId = nextDeviceId;
+      writeStoredString("deviceId", nextDeviceId);
+    }
+    suppressPersistentSession(message.userId);
+    forgetOfflineProfile();
+    clearSession();
+    render();
+    setStatus(nodes.authMessage, t("auth.loggedOut"));
+  }
+}
+
+function broadcastSessionTokens(data) {
+  if (!sessionChannel || !data?.access_token || !data?.refresh_token || !data?.user) return;
+  sessionChannel.postMessage({
+    type: "tokens",
+    source: sessionCoordinatorId,
+    apiBaseUrl: state.apiBaseUrl,
+    deviceId: state.deviceId,
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    user: data.user,
+  });
+}
+
+function broadcastSessionSignedOut({
+  user = state.user,
+  deviceId = state.deviceId,
+  nextDeviceId = null,
+} = {}) {
+  sessionChannel?.postMessage({
+    type: "signed-out",
+    source: sessionCoordinatorId,
+    apiBaseUrl: state.apiBaseUrl,
+    deviceId,
+    nextDeviceId,
+    userId: user?.id ?? null,
+  });
 }
 
 function cacheNodes() {
@@ -1082,24 +1215,20 @@ function cacheNodes() {
     "mainPanel",
     "sidebar",
     "mobileQuickActions",
+    "settingsSupportButton",
+    "settingsSupportBackdrop",
+    "settingsSupportPanel",
+    "settingsSupportCloseButton",
     "languageSelect",
     "authModeSwitch",
     "registrationGateHint",
     "authForm",
-    "serverBaseUrl",
-    "serverLocalhostHint",
-    "showAdvancedConnectionButton",
-    "advancedConnectionSettings",
-    "apiBaseUrl",
-    "deviceId",
-    "regenerateDeviceIdButton",
     "username",
     "email",
     "usernameOrEmail",
     "password",
     "togglePasswordVisibilityButton",
     "authSubmitButton",
-    "testConnectionButton",
     "authMessage",
     "offlineResumePanel",
     "resumeOfflineButton",
@@ -1149,11 +1278,17 @@ function cacheNodes() {
     "syncDetails",
     "viewButtons",
     "moreViewSelect",
+    "projectFilter",
+    "tagFilter",
     "metaCounts",
+    "quickTaskForm",
+    "quickTaskTitle",
+    "quickTaskMessage",
     "openTaskCreateButton",
     "mobileQuickCreateButton",
     "mobileQuickTaskListButton",
     "taskCreateDetails",
+    "taskListStack",
     "taskForm",
     "taskTitle",
     "taskQuickPreview",
@@ -1185,6 +1320,14 @@ function cacheNodes() {
     "taskFilterSummary",
     "taskActiveFilterChips",
     "clearTaskFiltersButton",
+    "taskSelectionToolbar",
+    "enterTaskSelectionButton",
+    "taskSelectionActions",
+    "selectAllVisibleTasksButton",
+    "completeSelectedTasksButton",
+    "deleteSelectedTasksButton",
+    "cancelTaskSelectionButton",
+    "taskSelectionStatus",
     "taskSummary",
     "offlineTaskLimitNotice",
     "offlineTaskLimitText",
@@ -1199,8 +1342,18 @@ function cacheNodes() {
 
 function alignWorkspaceDomOrder() {
   if (!nodes.appScreen || !nodes.mainPanel || !nodes.sidebar || !nodes.mobileQuickActions) return;
-  nodes.appScreen.insertBefore(nodes.mainPanel, nodes.sidebar);
-  nodes.appScreen.insertBefore(nodes.mobileQuickActions, nodes.mainPanel);
+  workspaceMobileQuery = window.matchMedia("(max-width: 960px)");
+  const applyOrder = () => {
+    if (workspaceMobileQuery.matches) {
+      nodes.appScreen.insertBefore(nodes.mainPanel, nodes.sidebar);
+      nodes.appScreen.insertBefore(nodes.mobileQuickActions, nodes.mainPanel);
+      return;
+    }
+    nodes.appScreen.insertBefore(nodes.sidebar, nodes.mainPanel);
+    nodes.appScreen.insertBefore(nodes.mobileQuickActions, nodes.sidebar);
+  };
+  applyOrder();
+  workspaceMobileQuery.addEventListener?.("change", applyOrder);
 }
 
 function bindEvents() {
@@ -1216,18 +1369,23 @@ function bindEvents() {
 
   nodes.authForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    let sessionContext = null;
     try {
       setStatus(nodes.authMessage, t("common.submitting"));
       const payload = readAuthPayload();
-      const connectionReady = await ensureConnectionReadyForAuth();
-      if (!connectionReady) return;
+      invalidateSessionRefreshes();
+      sessionContext = captureSessionContext();
       const data = state.authMode === "login" ? await login(payload) : await register(payload);
+      if (!isSessionContextCurrent(sessionContext)) return;
       persistTokens(data);
+      sessionContext = captureSessionContext();
       clearAuthenticationInputs();
-      await activateSession();
+      const activated = await activateSessionSingleflight(sessionContext);
+      if (!activated || !isSessionContextCurrent(sessionContext)) return;
       setStatus(nodes.authMessage, t("auth.loggedIn"));
       toast(t("auth.loginSuccess"));
     } catch (error) {
+      if (sessionContext && !isSessionContextCurrent(sessionContext)) return;
       if (error instanceof ValidationError) {
         setStatus(nodes.authMessage, validationErrorMessage(error));
       } else {
@@ -1236,22 +1394,26 @@ function bindEvents() {
     }
   });
 
-  nodes.testConnectionButton.addEventListener("click", () => {
-    void testConnection();
-  });
-
   nodes.resumeOfflineButton?.addEventListener("click", () => {
     void resumeOfflineSession();
-  });
-
-  nodes.showAdvancedConnectionButton?.addEventListener("click", () => {
-    showAdvancedConnectionSettings();
   });
 
   nodes.togglePasswordVisibilityButton?.addEventListener("click", togglePasswordVisibility);
 
   nodes.syncStatusButton.addEventListener("click", () => {
     void refreshSyncStatus({ announce: true });
+  });
+
+  nodes.settingsSupportButton?.addEventListener("click", () => {
+    openSettingsSupportPanel();
+  });
+
+  nodes.settingsSupportCloseButton?.addEventListener("click", () => {
+    closeSettingsSupportPanel();
+  });
+
+  nodes.settingsSupportBackdrop?.addEventListener("click", (event) => {
+    if (event.target === nodes.settingsSupportBackdrop) closeSettingsSupportPanel();
   });
 
   nodes.logoutButton.addEventListener("click", () => {
@@ -1327,19 +1489,32 @@ function bindEvents() {
     openTaskCreatePanel({ focusTitle: true });
   });
 
+  nodes.quickTaskTitle?.addEventListener("input", persistQuickTaskDraft);
+  nodes.quickTaskTitle?.addEventListener("change", persistQuickTaskDraft);
+
+  nodes.quickTaskForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitQuickTask();
+  });
+
   nodes.mobileQuickCreateButton?.addEventListener("click", () => {
     openTaskCreatePanel({ focusTitle: true, scroll: true });
   });
 
   nodes.mobileQuickTaskListButton?.addEventListener("click", () => {
-    nodes.taskList?.scrollIntoView({ block: "start" });
+    nodes.taskListStack?.scrollIntoView({ block: "start" });
   });
 
   nodes.taskForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (state.loading) return;
+    const sessionContext = captureSessionContext();
+    let submittedDraft = currentTaskDraft();
     setBusy(true);
     try {
       const payload = readTaskPayload();
+      persistTaskDraft();
+      submittedDraft = currentTaskDraft();
       if (state.editingTaskId !== null) {
         const editingTaskId = state.editingTaskId;
         if (state.editingTaskVersion !== null) {
@@ -1347,64 +1522,44 @@ function bindEvents() {
         }
         if (shouldQueueOfflineMutation()) {
           await updateTaskOffline(editingTaskId, payload);
+          if (!isSessionContextCurrent(sessionContext)) return;
           toast(pendingSyncSavedMessage());
-          resetTaskForm();
+          finishTaskDraftSubmission(submittedDraft);
           render();
           return;
         }
         try {
           await updateTask(editingTaskId, payload);
+          if (!isSessionContextCurrent(sessionContext)) return;
           toast(t("task.saved"));
         } catch (error) {
+          if (!isSessionContextCurrent(sessionContext)) return;
           if (!isConflictError(error) && isOfflineCapableError(error)) {
             await updateTaskOffline(editingTaskId, payload);
+            if (!isSessionContextCurrent(sessionContext)) return;
             toast(pendingSyncSavedMessage());
-            resetTaskForm();
+            finishTaskDraftSubmission(submittedDraft);
             render();
             return;
           }
           throw error;
         }
-        resetTaskForm();
+        finishTaskDraftSubmission(submittedDraft);
       } else {
-        const createPayload = withClientRequestId(
-          payload,
-          () => makeClientRequestId("task-create"),
-        );
-        if (shouldQueueOfflineMutation()) {
-          await createTaskOffline(createPayload);
-          toast(pendingSyncSavedMessage());
-          resetTaskForm();
-          render();
-          return;
-        }
-        try {
-          await createTask(createPayload);
-          toast(t("task.created"));
-        } catch (error) {
-          if (isOfflineCapableError(error)) {
-            await createTaskOffline(createPayload);
-            toast(pendingSyncSavedMessage());
-            resetTaskForm();
-            render();
-            return;
-          }
-          throw error;
-        }
-        resetTaskForm();
+        await createTaskWithOfflineFallback(payload);
+        if (!isSessionContextCurrent(sessionContext)) return;
+        finishTaskDraftSubmission(submittedDraft);
       }
       await Promise.all([refreshTasks(), refreshMeta()]);
-      render();
+      if (isSessionContextCurrent(sessionContext)) render();
     } catch (error) {
+      if (!isSessionContextCurrent(sessionContext)) return;
+      reportTaskDraftSubmissionError(submittedDraft, error);
       if (isConflictError(error)) {
-        setStatus(nodes.taskMessage, formatMessage("task.refreshBeforeSaving", { message: normalizeError(error) }));
-        toast(t("task.updatedElsewhere"));
         await Promise.allSettled([refreshTasks(), refreshMeta()]);
-        return;
       }
-      setStatus(nodes.taskMessage, normalizeError(error));
     } finally {
-      setBusy(false);
+      if (isSessionContextCurrent(sessionContext)) setBusy(false);
     }
   });
 
@@ -1449,7 +1604,49 @@ function bindEvents() {
   });
 
   nodes.cancelEditButton.addEventListener("click", () => {
-    cancelTaskEdit();
+    closeTaskEditor();
+  });
+
+  nodes.taskCreateDetails?.addEventListener("click", (event) => {
+    if (event.target === nodes.taskCreateDetails) closeTaskEditor();
+  });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (activeTaskMenu && !activeTaskMenu.details.contains(event.target)) {
+      closeTaskActionMenu({ restoreFocus: false });
+    }
+  });
+  document.addEventListener("focusin", (event) => {
+    if (activeTaskMenu && !activeTaskMenu.details.contains(event.target)) {
+      closeTaskActionMenu({ restoreFocus: false });
+    }
+  });
+  document.addEventListener("scroll", scheduleTaskMenuPosition, true);
+  window.addEventListener("resize", scheduleTaskMenuPosition);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || handleTaskMenuKeydown(event)) return;
+    const confirmOpen = nodes.confirmDialog && !nodes.confirmDialog.hidden;
+    if (!confirmOpen && !nodes.settingsSupportPanel?.hidden) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSettingsSupportPanel();
+        return;
+      }
+      if (event.key === "Tab") {
+        trapSettingsSupportFocus(event);
+      }
+      return;
+    }
+    if (!state.editorOpen || confirmOpen) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeTaskEditor();
+      return;
+    }
+    if (event.key === "Tab") {
+      trapTaskEditorFocus(event);
+    }
   });
 
   nodes.clearSearchButton.addEventListener("click", () => {
@@ -1463,6 +1660,30 @@ function bindEvents() {
 
   nodes.clearTaskFiltersButton.addEventListener("click", () => {
     resetTaskListFilters();
+  });
+
+  nodes.enterTaskSelectionButton?.addEventListener("click", () => {
+    if (state.taskSelectionMode) {
+      exitTaskSelectionMode();
+    } else {
+      enterTaskSelectionMode();
+    }
+  });
+
+  nodes.selectAllVisibleTasksButton?.addEventListener("click", () => {
+    selectAllVisibleTasks();
+  });
+
+  nodes.completeSelectedTasksButton?.addEventListener("click", () => {
+    void completeSelectedTasks();
+  });
+
+  nodes.deleteSelectedTasksButton?.addEventListener("click", () => {
+    void deleteSelectedTasks();
+  });
+
+  nodes.cancelTaskSelectionButton?.addEventListener("click", () => {
+    cancelTaskSelection();
   });
 
   nodes.offlineTaskLimitLoadMoreButton?.addEventListener("click", () => {
@@ -1508,6 +1729,26 @@ function bindEvents() {
     void refreshTasks();
   });
 
+  nodes.projectFilter?.addEventListener("change", () => {
+    state.projectFilter = nodes.projectFilter.value;
+    persistTaskListPreferences();
+    renderActiveTaskFilters();
+    void refreshTasks();
+  });
+
+  nodes.tagFilter?.addEventListener("change", () => {
+    state.tagFilter = nodes.tagFilter.value;
+    persistTaskListPreferences();
+    renderActiveTaskFilters();
+    void refreshTasks();
+  });
+
+  nodes.taskList.addEventListener("change", (event) => {
+    const selection = event.target.closest("input[data-task-selection-id]");
+    if (!selection) return;
+    setTaskSelected(selection.dataset.taskSelectionId, selection.checked);
+  });
+
   nodes.taskList.addEventListener("click", async (event) => {
     const bulkButton = event.target.closest("button[data-trash-bulk-action]");
     if (bulkButton) {
@@ -1531,6 +1772,8 @@ function bindEvents() {
     const id = Number(button.dataset.taskId);
     if (!Number.isFinite(id)) return;
     const action = button.dataset.taskAction;
+    closeTaskActionMenu();
+    if (action === "view-details") return;
     if (action === "edit") {
       const task = findTaskById(id);
       if (task) {
@@ -1554,6 +1797,10 @@ function bindEvents() {
       }
       if (action === "instantiate-template") {
         await instantiateTemplateTask(task);
+        return;
+      }
+      if (["plan-today", "plan-tomorrow", "snooze-later"].includes(action)) {
+        await applyTaskScheduleAction(task, action);
         return;
       }
       if (action === "retry-sync") {
@@ -1585,35 +1832,6 @@ function bindEvents() {
     setTrashTaskSelected(checkbox.dataset.trashSelectionId, checkbox.checked);
   });
 
-  nodes.serverBaseUrl.addEventListener("change", () => {
-    try {
-      applyServerBaseUrlToApi();
-      savePreferenceInputs();
-      updateServerLocalhostHint();
-      updateAdvancedConnectionVisibility();
-      if (canAutoCheckRegistrationStatus()) {
-        void loadRegistrationStatus();
-      }
-    } catch (error) {
-      setStatus(nodes.authMessage, normalizeAuthError(error));
-    }
-  });
-  nodes.authForm.addEventListener("click", (event) => {
-    if (event.target.closest("#regenerateDeviceIdButton")) {
-      void regenerateDeviceId();
-    }
-  });
-  nodes.serverBaseUrl.addEventListener("input", updateServerLocalhostHint);
-  nodes.apiBaseUrl.addEventListener("change", () => {
-    state.advancedConnectionManuallyRequested = true;
-    syncServerBaseUrlFromApi();
-    savePreferenceInputs();
-    updateServerLocalhostHint();
-    updateAdvancedConnectionVisibility();
-    if (canAutoCheckRegistrationStatus()) {
-      void loadRegistrationStatus();
-    }
-  });
   nodes.installAppButton.addEventListener("click", installApp);
   nodes.installHelpCloseButton.addEventListener("click", () => {
     nodes.installHelpPanel.hidden = true;
@@ -1738,10 +1956,9 @@ function translateShell() {
 function hydrateInputs() {
   nodes.languageSelect.value = state.language;
   translateShell();
-  nodes.serverBaseUrl.value = state.serverBaseUrl;
-  nodes.apiBaseUrl.value = state.apiBaseUrl;
-  nodes.deviceId.value = state.deviceId;
   nodes.taskSearch.value = state.search;
+  if (nodes.projectFilter) nodes.projectFilter.value = state.projectFilter;
+  if (nodes.tagFilter) nodes.tagFilter.value = state.tagFilter;
   if (nodes.clientErrorReportingToggle) {
     nodes.clientErrorReportingToggle.checked = state.clientErrorReportingEnabled;
   }
@@ -1749,51 +1966,9 @@ function hydrateInputs() {
   nodes.taskListType.value = "inbox";
   nodes.taskRepeatRule.value = "";
   applyTaskCreatePresetForCurrentView();
-  updateServerLocalhostHint();
-  updateAdvancedConnectionVisibility();
   renderViews();
   renderTaskEditorState();
   renderTaskChecklistItems();
-}
-
-function updateAdvancedConnectionVisibility() {
-  if (!nodes.advancedConnectionSettings) return;
-  const showAdvancedConnectionEntry =
-    state.advancedConnectionManuallyRequested ||
-    nodes.advancedConnectionSettings.open ||
-    isAdvancedConnectionCustomized();
-  nodes.advancedConnectionSettings.hidden = !showAdvancedConnectionEntry;
-  if (nodes.showAdvancedConnectionButton) {
-    nodes.showAdvancedConnectionButton.hidden = showAdvancedConnectionEntry;
-  }
-}
-
-function showAdvancedConnectionSettings() {
-  state.advancedConnectionManuallyRequested = true;
-  updateAdvancedConnectionVisibility();
-  nodes.advancedConnectionSettings.open = true;
-}
-
-function isAdvancedConnectionCustomized() {
-  if (!nodes.apiBaseUrl || !nodes.serverBaseUrl) return false;
-  if (!String(nodes.serverBaseUrl.value || "").trim()) return false;
-  const apiBaseUrl = String(nodes.apiBaseUrl.value || "").trim();
-  if (!apiBaseUrl) return false;
-  try {
-    return normalizeApiBaseUrl(apiBaseUrl) !== deriveApiBaseUrlFromServer(nodes.serverBaseUrl.value);
-  } catch {
-    return true;
-  }
-}
-
-function revealAdvancedConnectionSettings() {
-  if (!nodes.advancedConnectionSettings) return;
-  state.advancedConnectionManuallyRequested = true;
-  nodes.advancedConnectionSettings.hidden = false;
-  nodes.advancedConnectionSettings.open = true;
-  if (nodes.showAdvancedConnectionButton) {
-    nodes.showAdvancedConnectionButton.hidden = true;
-  }
 }
 
 async function selectAuthMode(mode) {
@@ -1811,7 +1986,7 @@ async function ensureRegistrationModeAvailable() {
     return true;
   }
   if (!state.registrationStatusKnown) {
-    await testConnection();
+    await loadRegistrationStatus();
     if (isRegistrationModeAvailable()) {
       return true;
     }
@@ -1820,7 +1995,7 @@ async function ensureRegistrationModeAvailable() {
     nodes.authMessage,
     state.registrationStatusKnown && !state.registrationEnabled
       ? registrationDisabledHelp()
-      : registrationStatusPendingHelp(),
+      : t("auth.registrationCheckFailed"),
   );
   return false;
 }
@@ -1855,7 +2030,6 @@ function updateAuthMode() {
   nodes.password.minLength = state.authMode === "register" ? 8 : 1;
   nodes.authSubmitButton.textContent = state.authMode === "login" ? t("auth.login") : t("auth.register");
   renderPasswordVisibility();
-  updateAuthActionPriority();
   const pendingHelp = registrationStatusPendingHelp();
   const gateMessage = registerAvailable
     ? t("auth.registrationEnabled")
@@ -2403,10 +2577,19 @@ async function logoutWithConfirmation() {
     return;
   }
   persistTaskDraft();
+  const revocationConfirmed = await attemptSessionRevocation(
+    () => apiRequest("/auth/session", { method: "DELETE" }),
+  );
+  suppressPersistentSession();
+  broadcastSessionSignedOut();
   forgetOfflineProfile();
   clearSession();
   render();
-  toast(t("auth.loggedOut"));
+  const message = revocationConfirmed
+    ? t("auth.loggedOut")
+    : t("auth.loggedOutRevocationUnconfirmed");
+  setStatus(nodes.authMessage, message);
+  toast(message);
 }
 
 async function resumeOfflineSession() {
@@ -2604,24 +2787,42 @@ async function clearLocalDeviceData() {
   if (!confirmed) return;
 
   setBusy(true);
+  localDataClearInProgress = true;
   try {
-    closeOfflineDb();
+    const signedOutUser = state.user;
+    const previousDeviceId = state.deviceId;
+    const onlineSession = hasSession() && !state.offlineMode;
+    await closeOfflineDb();
     await deleteDatabase(dbName);
+    const revocationConfirmed = onlineSession
+      ? await attemptSessionRevocation(() => apiRequest("/auth/session", { method: "DELETE" }))
+      : true;
     removeStoredString("deviceId");
     state.deviceId = `web-${crypto.randomUUID()}`;
     writeStoredString("deviceId", state.deviceId);
+    suppressPersistentSession();
+    broadcastSessionSignedOut({
+      user: signedOutUser,
+      deviceId: previousDeviceId,
+      nextDeviceId: state.deviceId,
+    });
     lastImportedBackupTaskIds = [];
     clearLastImportedBackupTaskIds();
     clearTaskDraft();
     forgetOfflineProfile();
     clearSession({ discardTaskDraft: true });
     render();
-    toast(t("app.localDataCleared"));
+    const message = revocationConfirmed
+      ? t("app.localDataCleared")
+      : t("app.localDataClearedRevocationUnconfirmed");
+    setLocalDataStatus(message);
+    toast(message);
   } catch (error) {
     const message = localOperationErrorMessage(error);
     setLocalDataStatus(message);
     toast(message);
   } finally {
+    localDataClearInProgress = false;
     setBusy(false);
   }
 }
@@ -2898,11 +3099,8 @@ function downloadJsonFile(filename, payload) {
 }
 
 function deleteDatabase(dbName) {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.deleteDatabase(dbName);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error || new Error("Failed to delete offline database"));
-    request.onblocked = () => reject(new Error("Offline database is open in another tab"));
+  return deleteIndexedDatabase(indexedDB, dbName, {
+    onBlocked: () => setLocalDataStatus(t("app.localDataClearWaiting")),
   });
 }
 
@@ -2930,20 +3128,6 @@ function localOperationErrorMessage(error) {
   return normalizeError(error);
 }
 
-async function regenerateDeviceId() {
-  const confirmed = await confirmUserAction({
-    title: t("app.regenerateDeviceTitle"),
-    message: t("app.regenerateDeviceMessage"),
-    confirmText: t("app.regenerateDeviceConfirm"),
-  });
-  if (!confirmed) return;
-  state.deviceId = `web-${crypto.randomUUID()}`;
-  nodes.deviceId.value = state.deviceId;
-  writeStoredString("deviceId", state.deviceId);
-  render();
-  toast(t("app.regeneratedDevice"));
-}
-
 function renderViews() {
   nodes.viewButtons.replaceChildren();
   const fragment = document.createDocumentFragment();
@@ -2958,6 +3142,7 @@ function renderViews() {
   }
   nodes.viewButtons.appendChild(fragment);
   renderMoreViewSelect();
+  renderTaskMetaFilters();
 }
 
 function renderMoreViewSelect() {
@@ -2975,6 +3160,33 @@ function renderMoreViewSelect() {
     nodes.moreViewSelect.appendChild(option);
   }
   nodes.moreViewSelect.value = MORE_VIEW_OPTIONS.some((view) => view.value === state.view) ? state.view : "";
+}
+
+function renderTaskMetaFilters() {
+  if (!state.meta) return;
+  const renderFilter = (node, values, allLabelKey, selectedValue) => {
+    if (!node) return "";
+    node.replaceChildren();
+    const all = document.createElement("option");
+    all.value = "";
+    all.textContent = t(allLabelKey);
+    node.appendChild(all);
+    for (const value of Array.from(new Set([...(values || []), selectedValue].filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b)))) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      node.appendChild(option);
+    }
+    node.value = selectedValue || "";
+    return node.value;
+  };
+  const project = renderFilter(nodes.projectFilter, state.meta?.projects, "view.allProjects", state.projectFilter);
+  const tag = renderFilter(nodes.tagFilter, state.meta?.tags, "view.allTags", state.tagFilter);
+  if (project !== state.projectFilter || tag !== state.tagFilter) {
+    state.projectFilter = project;
+    state.tagFilter = tag;
+    persistTaskListPreferences();
+  }
 }
 
 function getViewLabel(value) {
@@ -3262,7 +3474,12 @@ function formatSyncLimitKey(key) {
 }
 
 function renderTasks() {
+  const menuTaskId = activeTaskMenu?.taskId;
+  const menuHadFocus = activeTaskMenu?.details.contains(document.activeElement);
+  closeTaskActionMenu({ restoreFocus: false });
+  reconcileTaskSelection();
   reconcileSelectedTrashTaskIds();
+  renderTaskSelectionToolbar();
   nodes.taskList.replaceChildren();
   if (!state.tasks.length) {
     nodes.taskList.appendChild(renderEmptyTaskState());
@@ -3277,7 +3494,76 @@ function renderTasks() {
     fragment.appendChild(renderTaskItem(task));
   }
   nodes.taskList.appendChild(fragment);
+  if (menuHadFocus) {
+    const trigger = document.getElementById(`task-menu-trigger-${menuTaskId}`);
+    (trigger || nodes.openTaskCreateButton)?.focus();
+  }
   focusLinkedTask();
+}
+
+function reconcileTaskSelection() {
+  if (!state.taskSelectionMode || state.view === "trash") {
+    state.selectedTaskIds.clear();
+    if (state.view === "trash") state.taskSelectionMode = false;
+    return;
+  }
+  state.selectedTaskIds = reconcileSelectedTaskIds(state.selectedTaskIds, state.tasks);
+}
+
+function renderTaskSelectionToolbar() {
+  if (!nodes.taskSelectionToolbar) return;
+  const selectableIds = getSelectableTaskIds(state.tasks);
+  const selectionAvailable = state.view !== "trash";
+  const selectedCount = state.selectedTaskIds.size;
+
+  nodes.enterTaskSelectionButton.hidden = !selectionAvailable;
+  nodes.enterTaskSelectionButton.disabled = state.loading || selectableIds.length === 0;
+  nodes.enterTaskSelectionButton.setAttribute("aria-pressed", String(state.taskSelectionMode));
+  nodes.taskSelectionToolbar.hidden = !state.taskSelectionMode || !selectionAvailable;
+  nodes.taskSelectionStatus.textContent = formatMessage("task.selectedCount", { count: selectedCount });
+  nodes.selectAllVisibleTasksButton.disabled = state.loading || selectableIds.length === 0;
+  nodes.completeSelectedTasksButton.disabled = state.loading || selectedCount === 0;
+  nodes.deleteSelectedTasksButton.disabled = state.loading || selectedCount === 0;
+  nodes.cancelTaskSelectionButton.disabled = state.loading;
+}
+
+function enterTaskSelectionMode() {
+  if (state.view === "trash" || getSelectableTaskIds(state.tasks).length === 0) return;
+  state.taskSelectionMode = true;
+  reconcileTaskSelection();
+  renderTasks();
+}
+
+function exitTaskSelectionMode() {
+  state.taskSelectionMode = false;
+  state.selectedTaskIds.clear();
+  renderTasks();
+}
+
+function cancelTaskSelection() {
+  exitTaskSelectionMode();
+}
+
+function selectAllVisibleTasks() {
+  for (const taskId of getSelectableTaskIds(state.tasks)) {
+    state.selectedTaskIds.add(taskId);
+  }
+  renderTasks();
+}
+
+function setTaskSelected(taskId, selected) {
+  const normalizedId = String(taskId || "");
+  if (!normalizedId || !getSelectableTaskIds(state.tasks).includes(normalizedId)) return;
+  if (selected) {
+    state.selectedTaskIds.add(normalizedId);
+  } else {
+    state.selectedTaskIds.delete(normalizedId);
+  }
+  renderTasks();
+}
+
+function selectedTasks() {
+  return state.tasks.filter((task) => state.selectedTaskIds.has(String(task.id)));
 }
 
 function renderTrashBulkActions() {
@@ -3416,6 +3702,7 @@ function getEmptyTaskStateAction(activeSearch) {
 }
 
 function renderTaskItem(task) {
+  const completed = isCompletedTask(task);
   const item = document.createElement("li");
   item.className = "task-item";
   item.dataset.taskId = String(task.id);
@@ -3432,6 +3719,22 @@ function renderTaskItem(task) {
 
   const titleRow = document.createElement("div");
   titleRow.className = "task-item__title";
+
+  if (state.taskSelectionMode && getSelectableTaskIds([task]).length > 0) {
+    const selectionLabel = document.createElement("label");
+    selectionLabel.className = "task-selection";
+    const selection = document.createElement("input");
+    selection.type = "checkbox";
+    const data = selection.dataset;
+    data.taskSelectionId = String(task.id);
+    selection.checked = state.selectedTaskIds.has(String(task.id));
+    selection.setAttribute("aria-label", formatMessage("task.selectTaskFor", {
+      title: task.title || t("task.untitled"),
+    }));
+    selectionLabel.appendChild(selection);
+    titleRow.appendChild(selectionLabel);
+    if (selection.checked) item.classList.add("is-selected");
+  }
 
   if (task.is_deleted) {
     const selectionLabel = document.createElement("label");
@@ -3451,22 +3754,35 @@ function renderTaskItem(task) {
 
   const status = document.createElement("span");
   status.className = `badge ${
-    task.offline_status ? "badge-warning" : task.status === "completed" ? "badge-success" : task.is_deleted ? "badge-warning" : "badge-neutral"
+    task.offline_status ? "badge-warning" : completed ? "badge-success" : task.is_deleted ? "badge-warning" : "badge-neutral"
   }`;
   status.textContent = getLocalizedTaskStatusLabel(task);
-  titleRow.appendChild(status);
-
   item.appendChild(titleRow);
 
   if (task.content) {
     const content = document.createElement("p");
     content.className = "task-item__content";
     content.textContent = task.content;
-    item.appendChild(content);
+    content.id = `${item.id}-content`;
+    const expand = document.createElement("button");
+    expand.type = "button";
+    expand.className = "text-button task-note-toggle";
+    expand.dataset.taskAction = "view-details";
+    expand.dataset.taskId = String(task.id);
+    expand.textContent = t("task.expandNote");
+    expand.setAttribute("aria-expanded", "false");
+    expand.setAttribute("aria-controls", content.id);
+    expand.addEventListener("click", () => {
+      const expanded = content.classList.toggle("is-expanded");
+      expand.textContent = t(expanded ? "task.collapseNote" : "task.expandNote");
+      expand.setAttribute("aria-expanded", String(expanded));
+    });
+    item.append(content, expand);
   }
 
   const meta = document.createElement("div");
   meta.className = "task-meta";
+  meta.appendChild(status);
   for (const chip of buildTaskMeta(task)) {
     meta.appendChild(chip);
   }
@@ -3479,63 +3795,15 @@ function renderTaskItem(task) {
   }
 
   const actions = document.createElement("div");
-  actions.className = "task-actions";
-
-  if (!task.is_deleted) {
-    const toggleComplete = document.createElement("button");
-    toggleComplete.type = "button";
-    toggleComplete.dataset.taskAction = task.status === "completed" ? "undo-complete" : "complete";
-    toggleComplete.dataset.taskId = String(task.id);
-    toggleComplete.textContent = task.status === "completed" ? t("task.undoComplete") : t("task.complete");
-    actions.appendChild(toggleComplete);
-
-    const secondaryActions = document.createElement("div");
-    secondaryActions.className = "task-action-menu__items";
-
-    const editButton = document.createElement("button");
-    editButton.type = "button";
-    editButton.dataset.taskAction = "edit";
-    editButton.dataset.taskId = String(task.id);
-    editButton.textContent = t("task.edit");
-    secondaryActions.appendChild(editButton);
-
-    const deleteButton = document.createElement("button");
-    deleteButton.type = "button";
-    deleteButton.dataset.taskAction = "delete";
-    deleteButton.dataset.taskId = String(task.id);
-    deleteButton.textContent = t("task.delete");
-    secondaryActions.appendChild(deleteButton);
-
-    if (task.is_template) {
-      const instantiateButton = document.createElement("button");
-      instantiateButton.type = "button";
-      instantiateButton.dataset.taskAction = "instantiate-template";
-      instantiateButton.dataset.taskId = String(task.id);
-      instantiateButton.textContent = t("task.useTemplate");
-      secondaryActions.appendChild(instantiateButton);
-    }
-
-    actions.appendChild(renderTaskActionMenu(secondaryActions));
-  } else {
-    const restoreButton = document.createElement("button");
-    restoreButton.type = "button";
-    restoreButton.dataset.taskAction = "restore";
-    restoreButton.dataset.taskId = String(task.id);
-    restoreButton.textContent = t("task.restore");
-    actions.appendChild(restoreButton);
-
-    const secondaryActions = document.createElement("div");
-    secondaryActions.className = "task-action-menu__items";
-    const purgeButton = document.createElement("button");
-    purgeButton.type = "button";
-    purgeButton.dataset.taskAction = "purge";
-    purgeButton.dataset.taskId = String(task.id);
-    purgeButton.textContent = t("task.purge");
-    secondaryActions.appendChild(purgeButton);
-    actions.appendChild(renderTaskActionMenu(secondaryActions));
-  }
-
-  item.appendChild(actions);
+  actions.className = "task-actions task-actions--primary";
+  const primary = document.createElement("button");
+  primary.type = "button";
+  primary.dataset.taskId = String(task.id);
+  primary.dataset.taskAction = task.is_deleted ? "restore" : completed ? "undo-complete" : "complete";
+  primary.textContent = t(task.is_deleted ? "task.restore" : completed ? "task.undoComplete" : "task.complete");
+  primary.setAttribute("aria-label", `${primary.textContent}: ${task.title || t("task.untitled")}`);
+  actions.append(primary, renderTaskActionMenu(task));
+  titleRow.appendChild(actions);
   return item;
 }
 
@@ -3573,13 +3841,142 @@ function renderFailedSyncRecovery(task) {
   return panel;
 }
 
-function renderTaskActionMenu(content) {
+function renderTaskActionMenu(task) {
   const details = document.createElement("details");
   details.className = "task-action-menu";
   const summary = document.createElement("summary");
+  summary.id = `task-menu-trigger-${task.id}`;
   summary.textContent = t("task.moreActions");
-  details.append(summary, content);
+  summary.setAttribute("aria-label", formatMessage("task.moreActionsFor", { title: task.title || t("task.untitled") }));
+  summary.setAttribute("aria-haspopup", "menu");
+  summary.setAttribute("aria-expanded", "false");
+  summary.setAttribute("aria-controls", `task-menu-${task.id}`);
+  details.appendChild(summary);
+  const open = () => {
+    if (activeTaskMenu?.details === details) return;
+    closeTaskActionMenu({ restoreFocus: false });
+    details.open = true;
+    const content = renderTaskMenuItems(task);
+    details.appendChild(content);
+    summary.setAttribute("aria-expanded", "true");
+    activeTaskMenu = { details, summary, content, taskId: task.id };
+    positionTaskActionMenu();
+  };
+  summary.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (activeTaskMenu?.details === details) closeTaskActionMenu();
+    else open();
+  });
+  summary.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+    event.preventDefault();
+    open();
+    const items = taskMenuItems();
+    (event.key === "ArrowUp" ? items.at(-1) : items[0])?.focus();
+  });
+  details.addEventListener("toggle", () => {
+    if (details.open) open();
+    else if (activeTaskMenu?.details === details) closeTaskActionMenu();
+  });
   return details;
+}
+
+function renderTaskMenuItems(task) {
+  const content = document.createElement("div");
+  content.id = `task-menu-${task.id}`;
+  content.className = "task-action-menu__items";
+  content.setAttribute("role", "menu");
+  content.setAttribute("aria-labelledby", `task-menu-trigger-${task.id}`);
+  const actions = task.is_deleted ? [["purge", "task.purge"]] : [
+    ["edit", "task.edit"],
+    ...(!isCompletedTask(task) ? [
+      ["plan-today", "task.planToday"],
+      ["plan-tomorrow", "task.planTomorrow"],
+      ["snooze-later", "task.snoozeLater"],
+    ] : []),
+    ...(task.is_template ? [["instantiate-template", "task.useTemplate"]] : []),
+    ["delete", "task.delete"],
+  ];
+  for (const [action, labelKey] of actions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.taskAction = action;
+    button.dataset.taskId = String(task.id);
+    button.setAttribute("role", "menuitem");
+    button.tabIndex = -1;
+    button.textContent = t(labelKey);
+    content.appendChild(button);
+  }
+  return content;
+}
+
+function closeTaskActionMenu({ restoreFocus = true } = {}) {
+  if (!activeTaskMenu) return;
+  const { details, summary, content } = activeTaskMenu;
+  activeTaskMenu = null;
+  details.open = false;
+  summary.setAttribute("aria-expanded", "false");
+  content.remove();
+  if (restoreFocus && summary.isConnected) summary.focus();
+}
+
+function taskMenuItems() {
+  return activeTaskMenu ? [...activeTaskMenu.content.querySelectorAll("button:not([disabled])")] : [];
+}
+
+function handleTaskMenuKeydown(event) {
+  if (!activeTaskMenu) return false;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeTaskActionMenu();
+    return true;
+  }
+  if (event.key === "Tab") {
+    closeTaskActionMenu();
+    return false;
+  }
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return false;
+  event.preventDefault();
+  const items = taskMenuItems();
+  const index = items.indexOf(document.activeElement);
+  const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+    : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+  items[next]?.focus();
+  return true;
+}
+
+function scheduleTaskMenuPosition() {
+  if (!activeTaskMenu || taskMenuPositionScheduled) return;
+  taskMenuPositionScheduled = true;
+  window.requestAnimationFrame(() => {
+    taskMenuPositionScheduled = false;
+    positionTaskActionMenu();
+  });
+}
+
+function positionTaskActionMenu() {
+  if (!activeTaskMenu) return;
+  const { summary, content } = activeTaskMenu;
+  const anchor = summary.getBoundingClientRect();
+  const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = window.innerHeight;
+  const margin = 8;
+  const gap = 6;
+  if (anchor.bottom <= 0 || anchor.top >= viewportHeight || !summary.isConnected) {
+    closeTaskActionMenu({ restoreFocus: false });
+    return;
+  }
+  content.style.maxHeight = "";
+  const rect = content.getBoundingClientRect();
+  const below = Math.max(0, viewportHeight - anchor.bottom - margin - gap);
+  const above = Math.max(0, anchor.top - margin - gap);
+  const flip = rect.height > below && above > below;
+  const available = flip ? above : below;
+  const top = flip ? anchor.top - Math.min(rect.height, available) - gap : anchor.bottom + gap;
+  content.dataset.placement = flip ? "top" : "bottom";
+  content.style.maxHeight = `${available}px`;
+  content.style.left = `${Math.max(margin, Math.min(anchor.right - rect.width, viewportWidth - rect.width - margin))}px`;
+  content.style.top = `${Math.max(margin, top)}px`;
 }
 
 function makeConflictDecisionNote(label, text) {
@@ -3903,7 +4300,7 @@ function getLocalizedTaskStatusLabel(task) {
   if (task.offline_error) return t("task.statusSyncFailed");
   if (task.offline_status || hasOfflineQueueId(task.offline_queue_id)) return t("task.statusPendingSync");
   if (task.is_deleted) return t("task.statusDeleted");
-  if (task.status === "completed" || task.status === "done") return t("task.statusCompleted");
+  if (isCompletedTask(task)) return t("task.statusCompleted");
   return t("task.statusInProgress");
 }
 
@@ -3942,7 +4339,7 @@ function confirmUserAction(options = {}) {
   nodes.confirmDialogCancelButton.textContent = cancelText;
   nodes.confirmDialogConfirmButton.classList.toggle("danger-button", Boolean(danger));
   nodes.confirmDialog.hidden = false;
-  nodes.confirmDialogConfirmButton.focus();
+  (danger ? nodes.confirmDialogCancelButton : nodes.confirmDialogConfirmButton).focus();
 
   return new Promise((resolve) => {
     const cleanup = (result) => {
@@ -4046,6 +4443,8 @@ function getActiveTaskFilterLabels() {
   if (state.search) {
     labels.push(formatMessage("task.searchFilter", { query: state.search }));
   }
+  if (state.projectFilter) labels.push(`${t("view.project")}: ${state.projectFilter}`);
+  if (state.tagFilter) labels.push(`${t("view.tag")}: ${state.tagFilter}`);
   return labels;
 }
 
@@ -4066,6 +4465,10 @@ function resetTaskListFilters() {
   nodes.taskSearch.value = "";
   state.search = "";
   state.view = "";
+  state.projectFilter = "";
+  state.tagFilter = "";
+  if (nodes.projectFilter) nodes.projectFilter.value = "";
+  if (nodes.tagFilter) nodes.tagFilter.value = "";
   resetOfflineTaskRenderLimit();
   if (nodes.moreViewSelect) nodes.moreViewSelect.value = "";
   persistTaskListPreferences();
@@ -4074,63 +4477,117 @@ function resetTaskListFilters() {
   void refreshTasks();
 }
 
-async function activateSession() {
+function captureSessionContext() {
+  return {
+    generation: sessionRefreshGeneration,
+    apiBaseUrl: state.apiBaseUrl,
+    deviceId: state.deviceId,
+    userId: getCurrentUserId(),
+  };
+}
+
+function isSessionContextCurrent(context) {
+  return Boolean(context) &&
+    context.generation === sessionRefreshGeneration &&
+    context.apiBaseUrl === state.apiBaseUrl &&
+    context.deviceId === state.deviceId &&
+    (context.userId === null || context.userId === getCurrentUserId());
+}
+
+async function activateSession(sessionContext) {
+  if (!isSessionContextCurrent(sessionContext) || !hasSession()) return false;
   try {
-    state.user = await apiRequest("/auth/me");
+    const user = await apiRequest("/auth/me");
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    if (sessionContext.userId !== null && Number(user?.id) !== sessionContext.userId) return false;
+    state.user = user;
+    sessionContext.userId = getCurrentUserId();
     persistOfflineProfile(state.user);
-    await refreshAll();
+    await refreshAll(sessionContext);
+    if (!isSessionContextCurrent(sessionContext)) return false;
     if (!restoreTaskDraft()) {
       applyTaskCreatePresetForCurrentView();
     }
   } catch (error) {
+    if (!isSessionContextCurrent(sessionContext)) return false;
     if (error instanceof ApiError && isTerminalRefreshStatus(error.status) && !hasSession()) {
       setStatus(nodes.authMessage, t("error.sessionExpired"));
       render();
-      return;
+      return false;
     }
     if (isOfflineCapableError(error) && state.user) {
-      await hydrateCachedTasks();
+      await hydrateCachedTasks({ sessionContext });
+      if (!isSessionContextCurrent(sessionContext)) return false;
       state.meta = buildLocalMeta(state.tasks, new Date(), { timeZone: DISPLAY_TIME_ZONE });
       setStatus(nodes.taskMessage, t("task.offlineCachedSyncLater"));
       if (!restoreTaskDraft()) {
         applyTaskCreatePresetForCurrentView();
       }
       render();
-      return;
+      return true;
     }
     clearSession();
-    state.user = null;
-    state.tasks = [];
-    state.meta = null;
-    state.syncStatus = null;
     setStatus(nodes.authMessage, normalizeAuthError(error));
+    render();
+    return false;
   }
   render();
+  return true;
 }
 
-async function refreshAll() {
+async function activateSessionSingleflight(sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext) || !hasSession()) return false;
+  if (!sessionActivationPromise || !isSessionContextCurrent(sessionActivationContext)) {
+    sessionActivationContext = sessionContext;
+    const request = activateSession(sessionContext).finally(() => {
+      if (sessionActivationPromise === request) {
+        sessionActivationPromise = null;
+        sessionActivationContext = null;
+      }
+    });
+    sessionActivationPromise = request;
+  }
+  return sessionActivationPromise;
+}
+
+async function refreshAll(sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext)) return false;
   setBusy(true);
   try {
     if (state.offlineMode) {
-      await hydrateCachedTasks();
+      await hydrateCachedTasks({ sessionContext });
+      if (!isSessionContextCurrent(sessionContext)) return false;
       setStatus(nodes.taskMessage, t("auth.offlineModeActive"));
       render();
-      return;
+      return true;
     }
-    await flushOfflineQueue();
-    await Promise.all([refreshProfile(), refreshMeta(), refreshTasks(), refreshSyncStatus()]);
+    await flushOfflineQueue(sessionContext);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    await Promise.all([
+      refreshProfile(sessionContext),
+      refreshMeta(sessionContext),
+      refreshTasks(sessionContext),
+      refreshSyncStatus({ sessionContext }),
+    ]);
+    if (!isSessionContextCurrent(sessionContext)) return false;
     render();
+    return true;
   } finally {
-    setBusy(false);
+    if (isSessionContextCurrent(sessionContext)) setBusy(false);
   }
 }
 
-async function refreshProfile() {
+async function refreshProfile(sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext)) return false;
   try {
-    state.user = await apiRequest("/auth/me");
+    const user = await apiRequest("/auth/me");
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    if (sessionContext.userId !== null && Number(user?.id) !== sessionContext.userId) return false;
+    state.user = user;
     writeSessionJson("user", state.user);
     persistOfflineProfile(state.user);
   } catch (error) {
+    if (!isSessionContextCurrent(sessionContext)) return false;
     if (isOfflineCapableError(error) && state.user) {
       return;
     }
@@ -4138,26 +4595,28 @@ async function refreshProfile() {
   }
 }
 
-async function refreshMeta() {
+async function refreshMeta(sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext)) return false;
   if (state.offlineMode) {
-    state.meta = buildLocalMeta(await listCachedTasks(), new Date(), { timeZone: DISPLAY_TIME_ZONE });
+    const tasks = await listCachedTasks();
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    state.meta = buildLocalMeta(tasks, new Date(), { timeZone: DISPLAY_TIME_ZONE });
     renderMeta();
     return;
   }
   try {
     const params = new URLSearchParams({ timezone: DISPLAY_TIME_ZONE });
-    state.meta = await apiRequest(`/tasks/meta?${params.toString()}`);
+    let meta = await apiRequest(`/tasks/meta?${params.toString()}`);
+    if (!isSessionContextCurrent(sessionContext)) return false;
     if (supportsIndexedDb() && getCurrentUserId()) {
       try {
-        const localMeta = buildLocalMeta(
-          await listCachedTasks(),
-          new Date(),
-          { timeZone: DISPLAY_TIME_ZONE },
-        );
-        state.meta = {
-          ...state.meta,
+        const tasks = await listCachedTasks();
+        if (!isSessionContextCurrent(sessionContext)) return false;
+        const localMeta = buildLocalMeta(tasks, new Date(), { timeZone: DISPLAY_TIME_ZONE });
+        meta = {
+          ...meta,
           counts: {
-            ...(state.meta?.counts || {}),
+            ...(meta?.counts || {}),
             pending: localMeta.counts.pending,
             conflict: localMeta.counts.conflict,
           },
@@ -4166,10 +4625,16 @@ async function refreshMeta() {
         // Remote metadata remains useful if the browser cache is temporarily unavailable.
       }
     }
-    await writeOfflineMeta("tasks_meta", state.meta);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    await writeOfflineMeta("tasks_meta", meta, sessionContext);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    state.meta = meta;
   } catch (error) {
+    if (!isSessionContextCurrent(sessionContext)) return false;
     if (isOfflineCapableError(error)) {
-      state.meta = (await readOfflineMeta("tasks_meta")) || buildLocalMeta(
+      const cachedMeta = await readOfflineMeta("tasks_meta");
+      if (!isSessionContextCurrent(sessionContext)) return false;
+      state.meta = cachedMeta || buildLocalMeta(
         state.tasks,
         new Date(),
         { timeZone: DISPLAY_TIME_ZONE },
@@ -4181,17 +4646,21 @@ async function refreshMeta() {
   }
 }
 
-async function refreshTasks() {
+async function refreshTasks(sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext)) return false;
   const requestSequence = taskRequestGate.begin();
+  const isCurrent = () => isSessionContextCurrent(sessionContext) && taskRequestGate.isCurrent(requestSequence);
   const viewContext = {
     view: state.view,
     search: state.search,
+    project: state.projectFilter,
+    tag: state.tagFilter,
     now: new Date(),
     timeZone: DISPLAY_TIME_ZONE,
   };
   const serverView = mapTaskViewForServer(viewContext.view);
   if (state.offlineMode || serverView === null) {
-    const applied = await hydrateCachedTasks({ viewContext, requestSequence });
+    const applied = await hydrateCachedTasks({ viewContext, requestSequence, sessionContext });
     if (applied && state.offlineMode) {
       setStatus(nodes.taskMessage, t("auth.offlineModeActive"));
     }
@@ -4201,6 +4670,8 @@ async function refreshTasks() {
   params.set("limit", String(TASK_LIMIT));
   params.set("timezone", DISPLAY_TIME_ZONE);
   if (viewContext.search) params.set("q", viewContext.search);
+  if (viewContext.project) params.set("project", viewContext.project);
+  if (viewContext.tag) params.set("tag", viewContext.tag);
   if (serverView && serverView !== "trash") {
     params.set("view", serverView);
   }
@@ -4208,12 +4679,12 @@ async function refreshTasks() {
     const remoteTasks =
       viewContext.view === "trash"
         ? await apiRequest(`/tasks/trash?${params.toString()}`)
-        : await fetchTaskListPages(params);
-    if (!taskRequestGate.isCurrent(requestSequence)) return;
+        : await fetchTaskListPages(params, sessionContext);
+    if (!isCurrent()) return;
     const reconciledTasks = await cacheTasksForOffline(remoteTasks, viewContext, {
-      isCurrent: () => taskRequestGate.isCurrent(requestSequence),
+      isCurrent,
     });
-    if (!reconciledTasks || !taskRequestGate.isCurrent(requestSequence)) return;
+    if (!reconciledTasks || !isCurrent()) return;
     state.tasks = reconciledTasks
       .filter((task) => matchesTaskView(task, viewContext))
       .sort((left, right) => compareCachedTasks(left, right, viewContext));
@@ -4223,9 +4694,10 @@ async function refreshTasks() {
     resetOfflineTaskRenderLimit();
     scheduleTaskNotifications();
   } catch (error) {
-    if (!taskRequestGate.isCurrent(requestSequence)) return;
+    if (!isCurrent()) return;
     if (isOfflineCapableError(error)) {
-      await hydrateCachedTasks({ viewContext, requestSequence });
+      await hydrateCachedTasks({ viewContext, requestSequence, sessionContext });
+      if (!isCurrent()) return;
       setStatus(nodes.taskMessage, t("task.offlineCached"));
       return;
     }
@@ -4234,12 +4706,13 @@ async function refreshTasks() {
   render();
 }
 
-async function fetchTaskListPages(baseParams) {
+async function fetchTaskListPages(baseParams, sessionContext = captureSessionContext()) {
   const tasks = [];
   let cursorId = null;
   let cursorUpdatedAt = "";
 
   for (let page = 0; page < MAX_TASK_PAGES; page += 1) {
+    if (!isSessionContextCurrent(sessionContext)) return [];
     const params = new URLSearchParams(baseParams);
     if (cursorId !== null && cursorUpdatedAt) {
       params.set("cursor_id", String(cursorId));
@@ -4247,6 +4720,7 @@ async function fetchTaskListPages(baseParams) {
     }
 
     const pageTasks = await apiRequest(`/tasks?${params.toString()}`);
+    if (!isSessionContextCurrent(sessionContext)) return [];
     tasks.push(...pageTasks);
     if (pageTasks.length < TASK_LIMIT) {
       return tasks;
@@ -4264,6 +4738,8 @@ async function fetchTaskListPages(baseParams) {
 }
 
 async function refreshSyncStatus(options = {}) {
+  const sessionContext = options.sessionContext || captureSessionContext();
+  if (!isSessionContextCurrent(sessionContext)) return false;
   const requestSequence = connectionRequestGate.begin();
   if (state.offlineMode) {
     state.syncStatus = null;
@@ -4277,10 +4753,10 @@ async function refreshSyncStatus(options = {}) {
   }
   try {
     const syncStatus = await apiRequest("/sync/status", { auth: false });
-    if (!connectionRequestGate.isCurrent(requestSequence)) return false;
+    if (!isSessionContextCurrent(sessionContext) || !connectionRequestGate.isCurrent(requestSequence)) return false;
     state.syncStatus = syncStatus;
   } catch (error) {
-    if (!connectionRequestGate.isCurrent(requestSequence)) return false;
+    if (!isSessionContextCurrent(sessionContext) || !connectionRequestGate.isCurrent(requestSequence)) return false;
     if (isOfflineCapableError(error)) {
       state.syncStatus = null;
       renderSyncStatus();
@@ -4312,6 +4788,51 @@ async function register(payload) {
 
 async function createTask(payload) {
   return apiRequest("/tasks", { method: "POST", body: payload });
+}
+
+async function createTaskWithOfflineFallback(payload) {
+  const sessionContext = captureSessionContext();
+  const createPayload = withClientRequestId(payload, () => makeClientRequestId("task-create"));
+  if (shouldQueueOfflineMutation()) {
+    await createTaskOffline(createPayload);
+    if (isSessionContextCurrent(sessionContext)) toast(pendingSyncSavedMessage());
+    return;
+  }
+  try {
+    await createTask(createPayload);
+    if (isSessionContextCurrent(sessionContext)) toast(t("task.created"));
+  } catch (error) {
+    if (!isSessionContextCurrent(sessionContext)) return;
+    if (!isOfflineCapableError(error)) throw error;
+    await createTaskOffline(createPayload);
+    if (isSessionContextCurrent(sessionContext)) toast(pendingSyncSavedMessage());
+  }
+}
+
+async function submitQuickTask() {
+  if (state.loading) return;
+  const sessionContext = captureSessionContext();
+  let submittedDraft = null;
+  setStatus(nodes.quickTaskMessage, "");
+  setBusy(true);
+  try {
+    persistQuickTaskDraft();
+    selectTaskCreateDraft();
+    const payload = readQuickTaskPayload();
+    persistTaskDraft();
+    submittedDraft = currentTaskDraft();
+    await createTaskWithOfflineFallback(payload);
+    if (!isSessionContextCurrent(sessionContext)) return;
+    finishTaskDraftSubmission(submittedDraft);
+    await Promise.all([refreshTasks(), refreshMeta()]);
+    if (isSessionContextCurrent(sessionContext)) render();
+  } catch (error) {
+    if (!isSessionContextCurrent(sessionContext)) return;
+    if (submittedDraft) reportTaskDraftSubmissionError(submittedDraft, error, { quick: true });
+    else setStatus(nodes.quickTaskMessage, normalizeError(error));
+  } finally {
+    if (isSessionContextCurrent(sessionContext)) setBusy(false);
+  }
 }
 
 async function updateTask(taskId, payload) {
@@ -4349,7 +4870,7 @@ async function applyTaskAction(task, action, options = {}) {
       toast(pendingSyncSavedMessage());
     }
     if (state.editingTaskId === id && (action === "delete" || action === "restore")) {
-      resetTaskForm();
+      resetAndCloseTaskEditor();
     }
     render();
     return true;
@@ -4363,7 +4884,7 @@ async function applyTaskAction(task, action, options = {}) {
         toast(pendingSyncSavedMessage());
       }
       if (state.editingTaskId === id && (action === "delete" || action === "restore")) {
-        resetTaskForm();
+        resetAndCloseTaskEditor();
       }
       render();
       return true;
@@ -4374,13 +4895,38 @@ async function applyTaskAction(task, action, options = {}) {
     toast(action === "restore" ? t("task.restored") : t("task.updated"));
   }
   if (state.editingTaskId === id && (action === "delete" || action === "restore")) {
-    resetTaskForm();
+    resetAndCloseTaskEditor();
   }
   if (refresh) {
     await refreshTasks();
     await refreshMeta();
   }
   return true;
+}
+
+async function applyTaskScheduleAction(task, action) {
+  const patch = {
+    ...buildTaskSchedulePatch(action, new Date(), { timeZone: DISPLAY_TIME_ZONE }),
+    expected_version: task.version,
+  };
+  if (shouldQueueOfflineMutation()) {
+    await updateTaskOffline(task.id, patch);
+    toast(pendingSyncSavedMessage());
+    render();
+    return;
+  }
+  try {
+    await updateTask(task.id, patch);
+    toast(t("task.updated"));
+  } catch (error) {
+    if (!isOfflineCapableError(error)) throw error;
+    await updateTaskOffline(task.id, patch);
+    toast(pendingSyncSavedMessage());
+    render();
+    return;
+  }
+  await Promise.all([refreshTasks(), refreshMeta()]);
+  render();
 }
 
 async function instantiateTemplateTask(task) {
@@ -4621,7 +5167,7 @@ async function purgeTaskAfterConfirmation(task) {
   await deleteOfflineMutationsForTask(taskId);
   await deleteCachedTask(taskId);
   if (state.editingTaskId === taskId) {
-    resetTaskForm();
+    resetAndCloseTaskEditor();
   }
 }
 
@@ -4670,6 +5216,51 @@ async function purgeSelectedTrashTasks() {
   }
 }
 
+async function completeSelectedTasks() {
+  const selected = selectedTasks();
+  if (!selected.length) return;
+
+  setBusy(true);
+  try {
+    for (const task of selected) {
+      await applyTaskAction(task, "complete", { confirm: false, showToast: false, refresh: false });
+    }
+    exitTaskSelectionMode();
+    toast(t("task.selectedCompleted"));
+    await Promise.allSettled([refreshTasks(), refreshMeta()]);
+  } catch (error) {
+    toast(normalizeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function deleteSelectedTasks() {
+  const selected = selectedTasks();
+  if (!selected.length) return;
+  const confirmed = await confirmUserAction({
+    title: t("confirm.deleteSelectedTitle"),
+    message: formatMessage("confirm.deleteSelectedMessage", { count: selected.length }),
+    confirmText: t("task.deleteSelected"),
+    danger: true,
+  });
+  if (!confirmed) return;
+
+  setBusy(true);
+  try {
+    for (const task of selected) {
+      await applyTaskAction(task, "delete", { confirm: false, showToast: false, refresh: false });
+    }
+    exitTaskSelectionMode();
+    toast(t("task.selectedDeleted"));
+    await Promise.allSettled([refreshTasks(), refreshMeta()]);
+  } catch (error) {
+    toast(normalizeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
 function isLocalOnlyTask(task) {
   const taskId = Number(task?.id);
   return !Number.isFinite(taskId) || taskId <= 0 || task?.offline_status === "pending:create";
@@ -4680,6 +5271,7 @@ async function purgeTaskFromServer(taskId) {
 }
 
 async function apiRequest(path, options = {}) {
+  const sessionContext = captureSessionContext();
   const {
     method = "GET",
     body,
@@ -4701,17 +5293,21 @@ async function apiRequest(path, options = {}) {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: getApiRequestCredentialsMode(state.apiBaseUrl, location.origin),
   });
   const payload = await readPayload(response);
-  if (response.status === 401 && auth && retryAuth && !path.startsWith("/auth/refresh")) {
+  if (response.status === 401 && auth && retryAuth && !path.startsWith("/auth/refresh") && isSessionContextCurrent(sessionContext)) {
     if (state.refreshToken && !authRefreshAttempted) {
       try {
         await refreshSessionSingleflight();
       } catch (error) {
-        if (error instanceof ApiError && isTerminalRefreshStatus(error.status)) {
+        if (isSessionContextCurrent(sessionContext) && error instanceof ApiError && isTerminalRefreshStatus(error.status)) {
           enterReauthenticationState();
         }
         throw error;
+      }
+      if (!isSessionContextCurrent(sessionContext)) {
+        throw new ApiError("Session changed while refreshing authentication", 401);
       }
       return apiRequest(path, {
         method,
@@ -4729,25 +5325,168 @@ async function apiRequest(path, options = {}) {
   return unwrapPayload(payload);
 }
 
-async function refreshSession() {
+async function refreshSession(expectedRefreshToken, expectedGeneration) {
+  const expectedUserId = state.user?.id ?? null;
+  const credentialsMode = getApiRequestCredentialsMode(state.apiBaseUrl, location.origin);
+  const body = buildRefreshRequestBody(
+    credentialsMode,
+    expectedRefreshToken,
+    state.deviceId,
+  );
   const data = await apiRequest("/auth/refresh", {
     method: "POST",
     auth: false,
-    body: {
-      refresh_token: state.refreshToken,
-      device_id: state.deviceId,
-    },
+    body,
   });
+  if (!canApplySessionRefreshResult({
+    expectedGeneration,
+    currentGeneration: sessionRefreshGeneration,
+    expectedRefreshToken,
+    currentRefreshToken: state.refreshToken,
+    sessionAllowed: shouldRestorePersistentSession(),
+    expectedUserId,
+    currentUserId: state.user?.id ?? null,
+    resultUserId: data.user?.id ?? null,
+  })) {
+    return false;
+  }
   persistTokens(data);
+  return true;
+}
+
+async function restorePersistentSession() {
+  const sessionContext = captureSessionContext();
+  const expectedRefreshToken = state.refreshToken;
+  const expectedGeneration = sessionRefreshGeneration;
+  const expectedUserId = state.user?.id ?? null;
+  try {
+    await coordinateSessionRefresh(expectedRefreshToken, async () => {
+      if (hasSession()) return;
+      const credentialsMode = getApiRequestCredentialsMode(state.apiBaseUrl, location.origin);
+      if (credentialsMode === "omit" && !expectedRefreshToken) return false;
+      const data = await apiRequest("/auth/refresh", {
+        method: "POST",
+        auth: false,
+        retryAuth: false,
+        body: buildRefreshRequestBody(credentialsMode, expectedRefreshToken, state.deviceId),
+      });
+      if (!canApplySessionRefreshResult({
+        expectedGeneration,
+        currentGeneration: sessionRefreshGeneration,
+        expectedRefreshToken,
+        currentRefreshToken: state.refreshToken,
+        sessionAllowed: shouldRestorePersistentSession(),
+        expectedUserId,
+        currentUserId: state.user?.id ?? null,
+        resultUserId: data.user?.id ?? null,
+      })) {
+        return false;
+      }
+      persistTokens(data);
+      return true;
+    }, expectedGeneration);
+    if (!isSessionContextCurrent(sessionContext) || !hasSession()) return;
+    await prepareOfflineProfileStorage().catch(() => {});
+    await activateSessionSingleflight(sessionContext);
+  } catch (error) {
+    if (!isSessionContextCurrent(sessionContext)) return;
+    if (error instanceof ApiError && isTerminalRefreshStatus(error.status)) {
+      suppressPersistentSession(expectedUserId);
+    }
+  }
 }
 
 async function refreshSessionSingleflight() {
   if (!refreshSessionPromise) {
-    refreshSessionPromise = refreshSession().finally(() => {
-      refreshSessionPromise = null;
-    });
+    const expectedRefreshToken = state.refreshToken;
+    const expectedGeneration = sessionRefreshGeneration;
+    const request = coordinateSessionRefresh(
+      expectedRefreshToken,
+      () => refreshSession(expectedRefreshToken, expectedGeneration),
+      expectedGeneration,
+    );
+    refreshSessionPromise = request;
+    void request.then(
+      () => clearCompletedSessionRefresh(request),
+      () => clearCompletedSessionRefresh(request),
+    );
   }
   return refreshSessionPromise;
+}
+
+function clearCompletedSessionRefresh(request) {
+  if (refreshSessionPromise === request) {
+    refreshSessionPromise = null;
+  }
+}
+
+function invalidateSessionRefreshes() {
+  sessionRefreshGeneration += 1;
+  refreshSessionPromise = null;
+  sessionActivationPromise = null;
+  sessionActivationContext = null;
+  offlineQueueFlushPromise = null;
+  offlineQueueFlushContext = null;
+  if (state.loading) setBusy(false);
+}
+
+async function coordinateSessionRefresh(
+  expectedRefreshToken,
+  refreshAction,
+  expectedGeneration = sessionRefreshGeneration,
+) {
+  const withLock = navigator.locks && typeof navigator.locks.request === "function"
+    ? (callback) => navigator.locks.request(sessionRefreshLockName(), callback)
+    : (callback) => withSessionRefreshLease(callback);
+  return coordinateRefreshSession({
+    expectedRefreshToken,
+    getCurrentRefreshToken: () => state.refreshToken,
+    refresh: () => (
+      sessionRefreshGeneration === expectedGeneration
+        ? refreshAction()
+        : false
+    ),
+    withLock,
+    yieldTurn: () => new Promise((resolve) => window.setTimeout(resolve, 0)),
+  });
+}
+
+function withSessionRefreshLease(callback) {
+  const lockName = sessionRefreshLockName();
+  const owner = `${sessionCoordinatorId}.${crypto.randomUUID()}`;
+  return withRefreshLease({
+    lockName,
+    owner,
+    readLease: readSessionRefreshLease,
+    writeLease: writeSessionRefreshLease,
+    clearLease: clearSessionRefreshLease,
+    callback,
+    wait: (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds)),
+  });
+}
+
+function readSessionRefreshLease() {
+  const raw = readStoredString(SESSION_REFRESH_LEASE_STORAGE_KEY, "");
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    removeStoredString(SESSION_REFRESH_LEASE_STORAGE_KEY);
+    return null;
+  }
+}
+
+function writeSessionRefreshLease(lease) {
+  writeStoredString(SESSION_REFRESH_LEASE_STORAGE_KEY, JSON.stringify(lease));
+}
+
+function clearSessionRefreshLease() {
+  removeStoredString(SESSION_REFRESH_LEASE_STORAGE_KEY);
+}
+
+function sessionRefreshLockName() {
+  return `${SESSION_REFRESH_LOCK_NAME}.${encodeURIComponent(state.apiBaseUrl)}.${state.deviceId}`;
 }
 
 async function reportClientError(errorLike) {
@@ -4818,8 +5557,7 @@ function sanitizeClientErrorStack(stack) {
 }
 
 function readAuthPayload() {
-  applyServerBaseUrlToApi();
-  savePreferenceInputs();
+  writeStoredString("deviceId", state.deviceId);
   if (state.authMode === "login") {
     const payload = {
       username_or_email: nodes.usernameOrEmail.value.trim(),
@@ -4858,7 +5596,8 @@ function validateAuthPayload(payload) {
 }
 
 function readTaskPayload() {
-  const quickTask = parseWebQuickTask(nodes.taskTitle.value);
+  const editing = state.editingTaskId !== null;
+  const quickTask = editing ? null : parseWebQuickTask(nodes.taskTitle.value);
   const explicitProject = normalizeNullable(nodes.taskProject.value);
   const explicitTag = normalizeNullable(nodes.taskTag.value);
   const explicitPriority = Number(nodes.taskPriority.value || 0);
@@ -4868,14 +5607,17 @@ function readTaskPayload() {
   const explicitRepeatRule = nodes.taskRepeatRule.value || null;
   const existingChecklist = state.checklistDraftItems.length ? state.checklistDraftItems : getEditingTask()?.checklist || [];
   const payload = {
-    title: quickTask.title,
+    title: editing ? nodes.taskTitle.value.trim() : quickTask.title,
     content: normalizeNullable(nodes.taskContent.value),
-    project: explicitProject ?? quickTask.project,
-    tag: explicitTag ?? quickTask.tag,
-    priority: explicitPriority || quickTask.priority,
-    list_type: nodes.taskListType.value,
-    planned_date: explicitPlannedDate ?? quickTask.planned_date,
-    due_time: explicitDueTime ?? quickTask.due_time,
+    project: editing ? explicitProject : (explicitProject ?? quickTask.project),
+    tag: editing ? explicitTag : (explicitTag ?? quickTask.tag),
+    priority: editing ? explicitPriority : (explicitPriority || quickTask.priority),
+    list_type: !editing && quickTask.planned_date && explicitPlannedDate === getTaskCreatePresetForCurrentView().plannedDate
+      ? "inbox" : nodes.taskListType.value,
+    planned_date: editing ? explicitPlannedDate
+      : (quickTask.planned_date && explicitPlannedDate === getTaskCreatePresetForCurrentView().plannedDate
+        ? quickTask.planned_date : (explicitPlannedDate ?? quickTask.planned_date)),
+    due_time: editing ? explicitDueTime : (explicitDueTime ?? quickTask.due_time),
     remind_time: explicitRemindTime,
     repeat_rule: explicitRepeatRule,
     checklist: parseChecklistInput(nodes.taskChecklist.value, existingChecklist),
@@ -4885,7 +5627,15 @@ function readTaskPayload() {
   if (!payload.title) {
     throw new ValidationError("validation.taskTitleRequired");
   }
+  if (!editing) {
+    taskCreateRequestId ||= makeClientRequestId("task-create");
+    payload.client_request_id = taskCreateRequestId;
+  }
   return payload;
+}
+
+function readQuickTaskPayload() {
+  return readTaskPayload();
 }
 
 function parseChecklistInput(value, existingChecklist = []) {
@@ -5062,6 +5812,11 @@ function parseWebQuickDate(value) {
 
 function renderTaskQuickPreview() {
   if (!nodes.taskQuickPreview) return;
+  if (state.editingTaskId !== null) {
+    nodes.taskQuickPreview.replaceChildren();
+    nodes.taskQuickPreview.hidden = true;
+    return;
+  }
   const quickTask = parseWebQuickTask(nodes.taskTitle.value);
   const labels = [];
   if (quickTask.project) labels.push(formatMessage("task.projectPreview", { value: quickTask.project }));
@@ -5125,44 +5880,179 @@ function readTaskPayloadLegacy() {
   };
 }
 
+function openSettingsSupportPanel() {
+  if (!nodes.settingsSupportBackdrop || !nodes.settingsSupportPanel) return;
+  if (nodes.settingsSupportPanel.hidden) {
+    settingsSupportReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  nodes.settingsSupportBackdrop.hidden = false;
+  nodes.settingsSupportPanel.hidden = false;
+  nodes.settingsSupportButton?.setAttribute("aria-expanded", "true");
+  window.requestAnimationFrame(() => nodes.settingsSupportPanel?.focus());
+}
+
+function closeSettingsSupportPanel({ restoreFocus = true } = {}) {
+  if (!nodes.settingsSupportBackdrop || !nodes.settingsSupportPanel || nodes.settingsSupportPanel.hidden) return;
+  nodes.settingsSupportPanel.hidden = true;
+  nodes.settingsSupportBackdrop.hidden = true;
+  nodes.settingsSupportButton?.setAttribute("aria-expanded", "false");
+  const returnFocus = settingsSupportReturnFocus;
+  settingsSupportReturnFocus = null;
+  if (!restoreFocus) return;
+  window.requestAnimationFrame(() => {
+    if (returnFocus?.isConnected) {
+      returnFocus.focus();
+    } else {
+      nodes.settingsSupportButton?.focus();
+    }
+  });
+}
+
+function trapSettingsSupportFocus(event) {
+  const focusable = [...nodes.settingsSupportPanel.querySelectorAll(
+    'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+  )].filter((element) => (
+    element.getClientRects().length > 0 && !element.closest("details:not([open]) > :not(summary)")
+  ));
+  if (!focusable.length) {
+    event.preventDefault();
+    nodes.settingsSupportPanel.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (document.activeElement === nodes.settingsSupportPanel || !nodes.settingsSupportPanel.contains(document.activeElement)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function openSyncSupportPanel() {
+  openSettingsSupportPanel();
   if (nodes.supportDataTools) {
     nodes.supportDataTools.open = true;
     nodes.supportDataTools.classList.add("is-focused");
     window.setTimeout(() => {
       nodes.supportDataTools?.classList.remove("is-focused");
     }, 1600);
-    nodes.supportDataTools.scrollIntoView({ block: "start" });
+    nodes.supportDataTools.scrollIntoView({ block: "nearest" });
   }
   if (nodes.syncAdvancedDiagnostics) {
-    nodes.syncAdvancedDiagnostics.scrollIntoView({ block: "start" });
+    nodes.syncAdvancedDiagnostics.scrollIntoView({ block: "nearest" });
   }
 }
 
 function openTaskCreatePanel({ focusTitle = false, scroll = false } = {}) {
-  if (scroll) {
-    nodes.taskCreateDetails.scrollIntoView({ block: "start" });
+  selectTaskCreateDraft();
+  showTaskEditor({ focusTitle });
+}
+
+function selectTaskCreateDraft() {
+  persistTaskDraft();
+  const draft = readTaskDraft(null);
+  resetAccountScopedTaskForm();
+  if (draft) applyTaskDraftToForm(draft);
+  persistTaskDraft();
+}
+
+function showTaskEditor({ focusTitle = false } = {}) {
+  if (!state.editorOpen) {
+    taskEditorReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   }
+  state.editorOpen = true;
+  renderTaskEditorState();
   if (focusTitle) {
-    nodes.taskTitle.focus();
+    window.requestAnimationFrame(() => nodes.taskTitle.focus());
   }
 }
 
 function beginTaskEdit(task) {
+  persistTaskDraft();
+  const draft = readTaskDraft(task.id);
   state.editingTaskId = task.id;
   state.editingTaskVersion = task.version;
-  populateTaskForm(task);
+  taskDraftFormKey = taskDraftSessionKey();
+  taskDraftSaveError = "";
+  if (draft) applyTaskDraftToForm(draft);
+  else populateTaskForm(task);
   persistTaskDraft();
-  renderTaskEditorState();
-  openTaskCreatePanel({ focusTitle: true, scroll: true });
+  showTaskEditor({ focusTitle: true });
+}
+
+function taskDraftInputSignature(draft) {
+  if (!draft) return "";
+  return JSON.stringify(Object.keys(draft)
+    .filter((key) => key !== "client_request_id" && key !== "save_error")
+    .sort()
+    .map((key) => [key, draft[key]]));
+}
+
+function matchesTaskDraftSubmission(draft, submittedDraft) {
+  return Boolean(draft && submittedDraft) &&
+    taskDraftInputSignature(draft) === taskDraftInputSignature(submittedDraft) &&
+    (draft.client_request_id || "") === (submittedDraft.client_request_id || "");
+}
+
+function finishTaskDraftSubmission(submittedDraft) {
+  const taskId = submittedDraft.editingTaskId;
+  if (!matchesTaskDraftSubmission(readTaskDraft(taskId), submittedDraft)) return;
+  if (state.editingTaskId === taskId) {
+    if (matchesTaskDraftSubmission(currentTaskDraft(), submittedDraft)) resetAndCloseTaskEditor();
+    return;
+  }
+  clearTaskDraft({ taskId });
+  if (taskId === null && nodes.quickTaskTitle.value === submittedDraft.title) {
+    nodes.quickTaskTitle.value = "";
+    setStatus(nodes.quickTaskMessage, "");
+  }
+}
+
+function reportTaskDraftSubmissionError(submittedDraft, error, { quick = false } = {}) {
+  const taskId = submittedDraft.editingTaskId;
+  const message = isConflictError(error)
+    ? formatMessage("task.refreshBeforeSaving", { message: normalizeError(error) })
+    : normalizeError(error);
+  const draft = readTaskDraft(taskId);
+  if (matchesTaskDraftSubmission(draft, submittedDraft)) {
+    saveTaskDraft({ ...draft, save_error: message }, { activate: false });
+  }
+  const currentTarget = state.editingTaskId === taskId &&
+    matchesTaskDraftSubmission(currentTaskDraft(), submittedDraft);
+  if (currentTarget) {
+    taskDraftSaveError = message;
+    setStatus(nodes.taskMessage, message);
+  }
+  if (quick && nodes.quickTaskTitle.value === submittedDraft.title) {
+    setStatus(nodes.quickTaskMessage, message);
+  }
+  if (!currentTarget || !state.editorOpen) {
+    toast(formatMessage("task.saveFailedFor", { title: submittedDraft.title || t("task.untitled"), message }));
+  }
 }
 
 function resetTaskForm() {
-  resetAccountScopedTaskForm();
   clearTaskDraft();
+  const createDraft = readTaskDraft(null);
+  resetAccountScopedTaskForm();
+  if (createDraft) applyTaskDraftToForm(createDraft);
+}
+
+function resetAndCloseTaskEditor() {
+  resetTaskForm();
+  closeTaskEditor({ persistDraft: false });
 }
 
 function resetAccountScopedTaskForm() {
+  taskDraftFormKey = taskDraftSessionKey();
+  taskCreateRequestId = "";
+  taskDraftSaveError = "";
+  if (nodes.quickTaskTitle) nodes.quickTaskTitle.value = "";
   state.editingTaskId = null;
   state.editingTaskVersion = null;
   nodes.taskForm.reset();
@@ -5236,8 +6126,47 @@ function cancelTaskEdit() {
   if (state.editingTaskId === null) {
     return;
   }
-  resetTaskForm();
+  resetAndCloseTaskEditor();
   toast(t("task.canceledEdit"));
+}
+
+function closeTaskEditor({ persistDraft = true } = {}) {
+  if (!state.editorOpen) return;
+  if (persistDraft) persistTaskDraft();
+  state.editorOpen = false;
+  renderTaskEditorState();
+  const returnFocus = taskEditorReturnFocus;
+  taskEditorReturnFocus = null;
+  window.requestAnimationFrame(() => {
+    if (returnFocus?.isConnected) {
+      returnFocus.focus();
+    } else {
+      nodes.openTaskCreateButton?.focus();
+    }
+  });
+}
+
+function trapTaskEditorFocus(event) {
+  const focusable = [...nodes.taskCreateDetails.querySelectorAll(
+    'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+  )].filter((element) => element.getClientRects().length > 0);
+  if (focusable.length === 0) {
+    event.preventDefault();
+    nodes.taskCreateDetails.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (!nodes.taskCreateDetails.contains(document.activeElement)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function populateTaskForm(task) {
@@ -5305,12 +6234,14 @@ function hasTaskMetadataValues() {
 function renderTaskEditorState() {
   const task = getEditingTask();
   const editing = state.editingTaskId !== null;
+  nodes.taskCreateDetails.hidden = !state.editorOpen;
   nodes.taskSubmitButton.textContent = editing ? t("task.saveChanges") : t("task.create");
-  nodes.cancelEditButton.hidden = !editing;
+  nodes.cancelEditButton.hidden = false;
+  nodes.cancelEditButton.textContent = t("task.closeEditor");
   nodes.resetTaskFormButton.textContent = editing ? t("task.resetCurrent") : t("task.reset");
   setStatus(
     nodes.taskMessage,
-    editing ? formatMessage("task.editing", { title: task?.title || `#${state.editingTaskId}` }) : "",
+    taskDraftSaveError || (editing ? formatMessage("task.editing", { title: task?.title || `#${state.editingTaskId}` }) : ""),
   );
 }
 
@@ -5325,142 +6256,22 @@ function findTaskById(taskId) {
   return state.tasks.find((task) => task.id === taskId) || null;
 }
 
-function savePreferenceInputs() {
-  const nextServerBaseUrl = normalizeServerBaseUrl(nodes.serverBaseUrl.value);
-  const nextApiBaseUrl = resolveApiBaseUrlForInput(nodes.apiBaseUrl.value, nextServerBaseUrl);
-  resetConnectionStateForEndpointChange(nextServerBaseUrl, nextApiBaseUrl);
-  state.apiBaseUrl = nextApiBaseUrl;
-  state.serverBaseUrl = nextServerBaseUrl;
-  state.deviceId = normalizeDeviceId(nodes.deviceId.value);
-  nodes.serverBaseUrl.value = state.serverBaseUrl;
-  nodes.apiBaseUrl.value = state.apiBaseUrl;
-  nodes.deviceId.value = state.deviceId;
-  writeStoredString("serverBaseUrl", state.serverBaseUrl);
-  writeStoredString("apiBaseUrl", state.apiBaseUrl);
-  writeStoredString("deviceId", state.deviceId);
-  void refreshOfflineResumeAvailability();
-}
-
-function applyServerBaseUrlToApi() {
-  const apiBaseUrl = deriveApiBaseUrlFromServer(nodes.serverBaseUrl.value);
-  const serverBaseUrl = normalizeServerBaseUrl(nodes.serverBaseUrl.value);
-  resetConnectionStateForEndpointChange(serverBaseUrl, apiBaseUrl);
-  state.serverBaseUrl = serverBaseUrl;
-  state.apiBaseUrl = apiBaseUrl;
-  nodes.serverBaseUrl.value = state.serverBaseUrl;
-  nodes.apiBaseUrl.value = state.apiBaseUrl;
-}
-
-function syncServerBaseUrlFromApi() {
-  if (!String(nodes.apiBaseUrl.value || "").trim()) {
-    applyServerBaseUrlToApi();
-    return;
-  }
-  const apiBaseUrl = normalizeApiBaseUrl(nodes.apiBaseUrl.value);
-  const serverBaseUrl = deriveServerBaseUrlFromApi(apiBaseUrl);
-  resetConnectionStateForEndpointChange(serverBaseUrl, apiBaseUrl);
-  state.apiBaseUrl = apiBaseUrl;
-  state.serverBaseUrl = serverBaseUrl;
-  nodes.apiBaseUrl.value = state.apiBaseUrl;
-  nodes.serverBaseUrl.value = state.serverBaseUrl;
-}
-
-function resetConnectionStateForEndpointChange(nextServerBaseUrl, nextApiBaseUrl) {
-  const connectionStateChanged = resetEndpointScopedConnectionState(
-    state,
-    nextServerBaseUrl,
-    nextApiBaseUrl,
-  );
-  if (!connectionStateChanged) return;
-  connectionRequestGate.begin();
-  registrationRequestGate.begin();
-  updateAuthMode();
-  renderSyncStatus();
-  renderTaskSyncHealthBar();
-  updateConnectionBadge();
-  setStatus(nodes.authMessage, "");
-}
-
-function updateServerLocalhostHint() {
-  if (!nodes.serverLocalhostHint) return;
-  const message = getServerLocalhostHint(nodes.serverBaseUrl.value);
-  nodes.serverLocalhostHint.textContent = message;
-  nodes.serverLocalhostHint.hidden = !message;
-}
-
-function getServerLocalhostHint(value) {
-  let serverHost = "";
-  try {
-    serverHost = new URL(normalizeServerBaseUrl(value)).hostname.toLowerCase();
-  } catch {
-    return "";
-  }
-  const pageHost = location.hostname.toLowerCase();
-  if (!isLoopbackHost(serverHost)) {
-    return "";
-  }
-  if (/android|iphone|ipad|mobile/i.test(navigator.userAgent)) {
-    return t("connection.mobileLoopbackHint");
-  }
-  if (pageHost && !isLoopbackHost(pageHost)) {
-    return t("connection.remotePageLoopbackHint");
-  }
-  return "";
-}
-
 function isLoopbackHost(hostname) {
   const normalized = hostname.replace(/^\[|\]$/g, "");
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
 }
 
-async function testConnection() {
-  let requestSequence = null;
-  try {
-    applyServerBaseUrlToApi();
-    savePreferenceInputs();
-    requestSequence = connectionRequestGate.begin();
-    registrationRequestGate.begin();
-    activeConnectionRequestSequence = requestSequence;
-    setBusy(true);
-    setStatus(nodes.authMessage, t("connection.testing"));
-    const syncStatus = await apiRequest("/sync/status", { auth: false });
-    if (!connectionRequestGate.isCurrent(requestSequence)) return false;
-    state.syncStatus = syncStatus;
-    await loadRegistrationStatus();
-    if (!connectionRequestGate.isCurrent(requestSequence)) return false;
-    renderSyncStatus();
-    renderTaskSyncHealthBar();
-    updateConnectionBadge();
-    if (!hasSession() && state.registrationStatusKnown && !state.registrationEnabled) {
-      setStatus(nodes.authMessage, registrationDisabledHelp());
-      toast(t("connection.availableExistingLogin"));
-    } else {
-      showSyncStatusFeedback();
-    }
-    return isConnectionReadyForAuth();
-  } catch (error) {
-    if (requestSequence === null) {
-      requestSequence = connectionRequestGate.begin();
-      registrationRequestGate.begin();
-      activeConnectionRequestSequence = requestSequence;
-    }
-    if (!connectionRequestGate.isCurrent(requestSequence)) return false;
-    state.syncStatus = null;
-    renderSyncStatus();
-    renderTaskSyncHealthBar();
-    updateConnectionBadge();
-    revealAdvancedConnectionSettings();
-    showSyncStatusFeedback(error);
-    return false;
-  } finally {
-    if (requestSequence !== null && requestSequence === activeConnectionRequestSequence) {
-      activeConnectionRequestSequence = null;
-      setBusy(false);
-    }
+function persistTokens(data, { broadcast = true } = {}) {
+  if (data.user && state.user && Number(data.user.id) !== Number(state.user.id)) {
+    persistTaskDraft();
+    resetAccountScopedTaskForm();
+    state.editorOpen = false;
+    taskEditorReturnFocus = null;
+    taskDraftFormKey = "";
   }
-}
-
-function persistTokens(data) {
+  preserveLegacyOfflineProfileOwner();
+  writeStoredString("apiBaseUrl", state.apiBaseUrl);
+  writeStoredString("deviceId", state.deviceId);
   state.offlineMode = false;
   state.accessToken = data.access_token;
   state.refreshToken = data.refresh_token;
@@ -5471,8 +6282,11 @@ function persistTokens(data) {
   }
   writeSessionString("accessToken", state.accessToken);
   writeSessionString("refreshToken", state.refreshToken);
+  writeSessionString("apiBaseUrl", state.apiBaseUrl);
   removeStoredString("accessToken");
   removeStoredString("refreshToken");
+  removeStoredString(PERSISTENT_SESSION_SUPPRESSED_KEY);
+  if (broadcast) broadcastSessionTokens(data);
 }
 
 function clearAuthenticationInputs() {
@@ -5490,16 +6304,26 @@ function clearAuthenticationInputs() {
 }
 
 function clearSession({ discardTaskDraft = false } = {}) {
-  if (discardTaskDraft) clearTaskDraft();
+  invalidateSessionRefreshes();
+  if (discardTaskDraft) clearTaskDraft({ all: true });
+  else persistTaskDraft();
+  closeSettingsSupportPanel({ restoreFocus: false });
+  closeTaskActionMenu({ restoreFocus: false });
   clearTaskNotificationTimers();
   clearAuthenticationInputs();
+  state.editorOpen = false;
+  taskEditorReturnFocus = null;
   resetAccountScopedTaskForm();
+  taskDraftFormKey = "";
   closeOfflineDb();
   state.offlineMode = false;
   state.accessToken = "";
   state.refreshToken = "";
   state.user = null;
   state.tasks = [];
+  state.selectedTaskIds.clear();
+  state.selectedTrashTaskIds.clear();
+  state.taskSelectionMode = false;
   state.meta = null;
   state.syncStatus = null;
   state.sessions = [];
@@ -5511,8 +6335,8 @@ function clearSession({ discardTaskDraft = false } = {}) {
   state.authMode = "login";
   removeSessionString("accessToken");
   removeSessionString("refreshToken");
+  removeSessionString("apiBaseUrl");
   removeSessionString("user");
-  refreshSessionPromise = null;
   removeStoredString("accessToken");
   removeStoredString("refreshToken");
   updateAuthMode();
@@ -5539,6 +6363,24 @@ function hasSession() {
   return Boolean(state.accessToken && state.refreshToken);
 }
 
+function shouldRestorePersistentSession(userId = state.user?.id ?? null) {
+  return !isPersistentSessionSuppressed(
+    readStoredString(PERSISTENT_SESSION_SUPPRESSED_KEY, ""),
+    {
+      apiBaseUrl: state.apiBaseUrl,
+      deviceId: state.deviceId,
+      userId,
+    },
+  );
+}
+
+function suppressPersistentSession(userId = state.user?.id ?? null) {
+  writeStoredString(
+    PERSISTENT_SESSION_SUPPRESSED_KEY,
+    buildPersistentSessionSuppressionMarker(state.apiBaseUrl, state.deviceId, userId),
+  );
+}
+
 function updateConnectionBadge() {
   const badge = getConnectionBadgeState();
   const label = badge.label;
@@ -5548,21 +6390,6 @@ function updateConnectionBadge() {
     state.offlineQueueCount > 0
       ? `${label} · ${formatMessage("connection.pendingSync", { count: state.offlineQueueCount })}`
       : label;
-  updateAuthActionPriority();
-}
-
-function isConnectionReadyForAuth() {
-  return isAuthHealthUsable(state.syncStatus);
-}
-
-async function ensureConnectionReadyForAuth() {
-  return testConnection();
-}
-
-function updateAuthActionPriority() {
-  if (!nodes.authSubmitButton || !nodes.testConnectionButton) return;
-  nodes.authSubmitButton.className = "primary-button";
-  nodes.testConnectionButton.className = "secondary-button";
 }
 
 function getConnectionBadgeState() {
@@ -5617,16 +6444,27 @@ function setBusy(isBusy) {
   state.loading = isBusy;
   nodes.refreshAllButton.disabled = isBusy;
   nodes.authSubmitButton.disabled = isBusy;
-  nodes.testConnectionButton.disabled = isBusy;
   nodes.taskSubmitButton.disabled = isBusy;
   nodes.resetTaskFormButton.disabled = isBusy;
   nodes.cancelEditButton.disabled = isBusy;
+  nodes.taskForm?.querySelectorAll("input, textarea, select").forEach((field) => {
+    field.disabled = isBusy;
+  });
+  setQuickTaskBusy(isBusy);
   if (nodes.exportLocalBackupButton) nodes.exportLocalBackupButton.disabled = isBusy;
   if (nodes.importLocalBackupInput) nodes.importLocalBackupInput.disabled = isBusy;
   renderLocalDataTools();
   renderOfflineResumePanel();
   renderAccountSecurity();
   renderNotificationSettings();
+  renderTaskSelectionToolbar();
+}
+
+function setQuickTaskBusy(isBusy) {
+  if (nodes.quickTaskTitle) nodes.quickTaskTitle.disabled = isBusy;
+  nodes.quickTaskForm?.querySelectorAll("button").forEach((button) => {
+    button.disabled = isBusy;
+  });
 }
 
 function displayUser(user) {
@@ -5666,6 +6504,8 @@ function getViewCount(view) {
       return counts.today || 0;
     case "inbox":
       return counts.inbox || 0;
+    case "week":
+      return 0;
     case "overdue":
       return counts.overdue || 0;
     case "high":
@@ -5676,15 +6516,13 @@ function getViewCount(view) {
       return counts.conflict || 0;
     case "completed":
       return counts.completed || 0;
+    case "templates":
+      return counts.templates || 0;
     case "trash":
       return counts.trash || 0;
     default:
       return 0;
   }
-}
-
-function updateAuthMessage(message) {
-  setStatus(nodes.authMessage, message);
 }
 
 function setStatus(node, message) {
@@ -5868,26 +6706,8 @@ function normalizeApiBaseUrl(value) {
   return `${trimmed}/api/v1`;
 }
 
-function resolveApiBaseUrlForInput(value, serverBaseUrl) {
-  const trimmed = String(value || "").trim();
-  return trimmed ? normalizeApiBaseUrl(trimmed) : deriveApiBaseUrlFromServer(serverBaseUrl);
-}
-
 function deriveApiBaseUrlFromServer(value) {
   return `${normalizeServerBaseUrl(value)}/api/v1`;
-}
-
-function deriveServerBaseUrlFromApi(value) {
-  const normalizedApi = normalizeApiBaseUrl(value);
-  try {
-    const url = new URL(normalizedApi);
-    url.search = "";
-    url.hash = "";
-    url.pathname = url.pathname.replace(/\/api\/v1\/?$/, "") || "/";
-    return url.toString().replace(/\/+$/, "");
-  } catch {
-    return DEFAULT_SERVER_BASE_URL;
-  }
 }
 
 function normalizeServerBaseUrl(value) {
@@ -5914,6 +6734,8 @@ function normalizeServerBaseUrl(value) {
 function restoreTaskListPreferences() {
   state.search = readStoredString("taskSearch", "");
   state.view = normalizeViewValue(readStoredString("taskView", "today"));
+  state.projectFilter = readStoredString("taskProjectFilter", "");
+  state.tagFilter = readStoredString("taskTagFilter", "");
 }
 
 function persistTaskListPreferences() {
@@ -5923,6 +6745,10 @@ function persistTaskListPreferences() {
     removeStoredString("taskSearch");
   }
   writeStoredString("taskView", state.view || "all");
+  if (state.projectFilter) writeStoredString("taskProjectFilter", state.projectFilter);
+  else removeStoredString("taskProjectFilter");
+  if (state.tagFilter) writeStoredString("taskTagFilter", state.tagFilter);
+  else removeStoredString("taskTagFilter");
 }
 
 function normalizeViewValue(value) {
@@ -5950,16 +6776,28 @@ function legacyTaskDraftSessionKeys() {
   ].filter(Boolean);
 }
 
+function taskDraftTarget(taskId) {
+  return taskId !== null && taskId !== undefined && Number.isFinite(Number(taskId))
+    ? `task:${Number(taskId)}` : "new";
+}
+
 function restoreTaskDraft() {
   const draft = readTaskDraft();
-  if (!draft) {
-    return false;
-  }
-  if (!hasTaskDraftContent(draft)) {
-    clearTaskDraft();
-    return false;
-  }
+  const createDraft = readTaskDraft(null);
+  resetAccountScopedTaskForm();
+  if (createDraft && nodes.quickTaskTitle) nodes.quickTaskTitle.value = createDraft.title || "";
+  if (!draft || !hasTaskDraftContent(draft)) return false;
+  applyTaskDraftToForm(draft);
+  showTaskEditor();
+  return true;
+}
 
+function applyTaskDraftToForm(draft) {
+  state.editingTaskId = taskDraftTarget(draft.editingTaskId) === "new" ? null : Number(draft.editingTaskId);
+  state.editingTaskVersion = draft.editingTaskVersion ?? null;
+  taskDraftFormKey = taskDraftSessionKey();
+  taskCreateRequestId = state.editingTaskId === null ? draft.client_request_id || "" : "";
+  taskDraftSaveError = draft.save_error || "";
   nodes.taskTitle.value = draft.title ?? "";
   nodes.taskContent.value = draft.content ?? "";
   nodes.taskProject.value = draft.project ?? "";
@@ -5974,37 +6812,20 @@ function restoreTaskDraft() {
   nodes.taskChecklist.value = formatChecklistInput(state.checklistDraftItems);
   nodes.taskIsTemplate.checked = Boolean(draft.is_template);
   nodes.taskTemplateName.value = draft.template_name ?? "";
+  if (state.editingTaskId === null && nodes.quickTaskTitle) nodes.quickTaskTitle.value = nodes.taskTitle.value;
   updateTaskTemplateNameVisibility();
   renderTaskQuickPreview();
   renderTaskChecklistItems();
-
-  const draftTaskId = Number(draft.editingTaskId);
-  const draftTask = Number.isFinite(draftTaskId) ? findTaskById(draftTaskId) : null;
-  if (draftTask) {
-    state.editingTaskId = draftTask.id;
-    const draftVersion = Number(draft.editingTaskVersion);
-    state.editingTaskVersion = Number.isFinite(draftVersion) ? draftVersion : draftTask.version;
-  } else {
-    state.editingTaskId = null;
-    state.editingTaskVersion = null;
-  }
-
   renderTaskEditorState();
-  renderTaskChecklistItems();
   expandTaskAdvancedFieldsIfNeeded();
-  openTaskCreatePanel();
-  return true;
 }
 
-function persistTaskDraft() {
-  const key = taskDraftSessionKey();
-  if (!key) {
-    return;
-  }
-
-  const draft = {
+function currentTaskDraft() {
+  return {
     editingTaskId: state.editingTaskId,
     editingTaskVersion: state.editingTaskVersion,
+    client_request_id: state.editingTaskId === null ? taskCreateRequestId : undefined,
+    save_error: taskDraftSaveError || undefined,
     title: nodes.taskTitle.value,
     content: nodes.taskContent.value,
     project: nodes.taskProject.value,
@@ -6020,62 +6841,127 @@ function persistTaskDraft() {
     is_template: nodes.taskIsTemplate.checked,
     template_name: nodes.taskTemplateName.value,
   };
+}
 
-  if (!hasTaskDraftContent(draft)) {
-    sessionStorage.removeItem(key);
-    localStorage.removeItem(key);
-    for (const legacyKey of legacyTaskDraftSessionKeys()) {
-      sessionStorage.removeItem(legacyKey);
-      localStorage.removeItem(legacyKey);
+function persistTaskDraft() {
+  if (!taskDraftFormKey || taskDraftFormKey !== taskDraftSessionKey()) return;
+  const draft = currentTaskDraft();
+  const previous = readTaskDraft(state.editingTaskId);
+  if (previous && taskDraftInputSignature(previous) !== taskDraftInputSignature(draft)) {
+    const hadError = Boolean(taskDraftSaveError);
+    taskDraftSaveError = "";
+    draft.save_error = undefined;
+    if (state.editingTaskId === null) {
+      taskCreateRequestId = "";
+      draft.client_request_id = "";
     }
-    return;
+    if (hadError) renderTaskEditorState();
   }
+  saveTaskDraft(draft);
+  if (state.editingTaskId === null && nodes.quickTaskTitle) nodes.quickTaskTitle.value = draft.title;
+}
 
-  sessionStorage.setItem(key, JSON.stringify(draft));
-  for (const legacyKey of legacyTaskDraftSessionKeys()) {
-    sessionStorage.removeItem(legacyKey);
+function persistQuickTaskDraft() {
+  if (!taskDraftSessionKey()) return;
+  const preset = getTaskCreatePresetForCurrentView();
+  const draft = readTaskDraft(null) || {
+    editingTaskId: null,
+    editingTaskVersion: null,
+    list_type: preset.listType,
+    planned_date: preset.plannedDate,
+  };
+  if (draft.title !== nodes.quickTaskTitle.value) {
+    draft.client_request_id = "";
+    draft.save_error = undefined;
+  }
+  draft.title = nodes.quickTaskTitle.value;
+  saveTaskDraft(draft);
+  if (state.editingTaskId === null) applyTaskDraftToForm(draft);
+}
+
+function saveTaskDraft(draft, { activate = true } = {}) {
+  const drafts = readTaskDraftStore();
+  const target = taskDraftTarget(draft.editingTaskId);
+  if (hasTaskDraftContent(draft)) drafts.entries[target] = draft;
+  else delete drafts.entries[target];
+  if (activate) drafts.activeTarget = target;
+  writeTaskDraftStore(drafts);
+}
+
+function migrateTaskDraft(localTaskId, serverTaskId, serverVersion) {
+  if (state.editingTaskId === localTaskId) persistTaskDraft();
+  const drafts = readTaskDraftStore();
+  const localTarget = taskDraftTarget(localTaskId);
+  const serverTarget = taskDraftTarget(serverTaskId);
+  const draft = drafts.entries[localTarget];
+  if (!draft) return;
+  drafts.entries[serverTarget] = { ...draft, editingTaskId: serverTaskId, editingTaskVersion: serverVersion };
+  delete drafts.entries[localTarget];
+  if (drafts.activeTarget === localTarget) drafts.activeTarget = serverTarget;
+  writeTaskDraftStore(drafts);
+  if (state.editingTaskId === localTaskId) {
+    state.editingTaskId = serverTaskId;
+    state.editingTaskVersion = serverVersion;
+    renderTaskEditorState();
   }
 }
 
-function clearTaskDraft() {
+function clearTaskDraft({ all = false, taskId = state.editingTaskId } = {}) {
+  const drafts = readTaskDraftStore();
+  const target = taskDraftTarget(taskId);
+  if (all) drafts.entries = {};
+  else delete drafts.entries[target];
+  if (all || drafts.activeTarget === target) drafts.activeTarget = "new";
+  writeTaskDraftStore(drafts);
+}
+
+function readTaskDraft(taskId = undefined) {
+  const drafts = readTaskDraftStore();
+  const target = taskId === undefined ? drafts.activeTarget : taskDraftTarget(taskId);
+  return drafts.entries[target] || null;
+}
+
+function readTaskDraftStore() {
+  const empty = () => ({ version: 2, activeTarget: "new", entries: {} });
   const key = taskDraftSessionKey();
-  if (!key) {
-    return;
+  if (!key) return empty();
+  const parse = (raw) => {
+    if (!raw) return null;
+    try {
+      const value = JSON.parse(raw);
+      if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+      if (value.version === 2 && value.entries && typeof value.entries === "object") return value;
+      const target = taskDraftTarget(value.editingTaskId);
+      return { version: 2, activeTarget: target, entries: { [target]: value } };
+    } catch {
+      return null;
+    }
+  };
+  const raw = sessionStorage.getItem(key);
+  const drafts = parse(raw) || empty();
+  let migrated = Boolean(raw && !raw.includes('"entries"'));
+  for (const legacyKey of legacyTaskDraftSessionKeys()) {
+    const legacy = parse(sessionStorage.getItem(legacyKey));
+    if (!legacy) continue;
+    if (!Object.keys(drafts.entries).length) drafts.activeTarget = legacy.activeTarget;
+    for (const [target, draft] of Object.entries(legacy.entries)) {
+      if (!drafts.entries[target]) drafts.entries[target] = draft;
+    }
+    migrated = true;
   }
-  sessionStorage.removeItem(key);
+  if (migrated) writeTaskDraftStore(drafts);
+  return drafts;
+}
+
+function writeTaskDraftStore(draft) {
+  const key = taskDraftSessionKey();
+  if (!key) return;
+  if (Object.keys(draft.entries).length) sessionStorage.setItem(key, JSON.stringify(draft));
+  else sessionStorage.removeItem(key);
   localStorage.removeItem(key);
   for (const legacyKey of legacyTaskDraftSessionKeys()) {
     sessionStorage.removeItem(legacyKey);
     localStorage.removeItem(legacyKey);
-  }
-}
-
-function readTaskDraft() {
-  const key = taskDraftSessionKey();
-  if (!key) {
-    return null;
-  }
-
-  let raw = sessionStorage.getItem(key);
-  for (const legacyKey of legacyTaskDraftSessionKeys()) {
-    if (raw) break;
-    raw = sessionStorage.getItem(legacyKey);
-    if (raw) {
-      sessionStorage.setItem(key, raw);
-      sessionStorage.removeItem(legacyKey);
-    }
-  }
-  if (!raw) {
-    localStorage.removeItem(key);
-    return null;
-  }
-
-  try {
-    return JSON.parse(raw);
-  } catch {
-    sessionStorage.removeItem(key);
-    localStorage.removeItem(key);
-    return null;
   }
 }
 
@@ -6084,7 +6970,7 @@ function hasTaskDraftContent(draft) {
     return false;
   }
 
-  if (Number.isFinite(Number(draft.editingTaskId))) {
+  if (draft.editingTaskId !== null && Number.isFinite(Number(draft.editingTaskId))) {
     return true;
   }
 
@@ -6200,6 +7086,7 @@ async function cacheTasksForOffline(tasks, viewContext, options = {}) {
   const reconciledTasks = reconcileCachedTaskSnapshot(cachedTasks, tasks, viewContext);
   if (!isCurrent()) return null;
   const db = await openOfflineDb();
+  if (!isCurrent()) return null;
   const tx = db.transaction([OFFLINE_TASK_STORE, OFFLINE_META_STORE], "readwrite");
   const done = transactionDone(tx);
   const store = tx.objectStore(OFFLINE_TASK_STORE);
@@ -6219,8 +7106,8 @@ async function cacheTasksForOffline(tasks, viewContext, options = {}) {
   return reconciledTasks;
 }
 
-async function hydrateCachedTasks({ viewContext = null, requestSequence = null } = {}) {
-  const isCurrent = () => requestSequence === null || taskRequestGate.isCurrent(requestSequence);
+async function hydrateCachedTasks({ viewContext = null, requestSequence = null, sessionContext = captureSessionContext() } = {}) {
+  const isCurrent = () => isSessionContextCurrent(sessionContext) && (requestSequence === null || taskRequestGate.isCurrent(requestSequence));
   if (!isCurrent()) return false;
   if (!getCurrentUserId()) {
     state.tasks = [];
@@ -6234,6 +7121,7 @@ async function hydrateCachedTasks({ viewContext = null, requestSequence = null }
     return true;
   }
   const tasks = await listCachedTasks();
+  if (!isCurrent()) return false;
   const [cacheReady, queueCount] = await Promise.all([
     readOfflineMeta(OFFLINE_CACHE_READY_META_KEY),
     countOfflineQueue(),
@@ -6242,6 +7130,8 @@ async function hydrateCachedTasks({ viewContext = null, requestSequence = null }
   const activeViewContext = viewContext || {
     view: state.view,
     search: state.search,
+    project: state.projectFilter,
+    tag: state.tagFilter,
     now: new Date(),
     timeZone: DISPLAY_TIME_ZONE,
   };
@@ -6295,49 +7185,70 @@ async function queueOfflineMutation(mutation) {
   return stored;
 }
 
-async function flushOfflineQueue() {
+async function flushOfflineQueue(sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext)) return false;
   if (!supportsIndexedDb() || !hasSession() || !getCurrentUserId() || !navigator.onLine) {
-    await refreshOfflineQueueCount();
+    await refreshOfflineQueueCount(sessionContext);
     return;
   }
-  if (!offlineQueueFlushPromise) {
-    offlineQueueFlushPromise = flushOfflineQueueInternal().finally(() => {
-      offlineQueueFlushPromise = null;
+  if (!offlineQueueFlushPromise || !isSessionContextCurrent(offlineQueueFlushContext)) {
+    offlineQueueFlushContext = sessionContext;
+    const request = flushOfflineQueueInternal(sessionContext).finally(() => {
+      if (offlineQueueFlushPromise === request) {
+        offlineQueueFlushPromise = null;
+        offlineQueueFlushContext = null;
+      }
     });
+    offlineQueueFlushPromise = request;
   }
   return offlineQueueFlushPromise;
 }
 
-async function flushOfflineQueueInternal() {
+async function flushOfflineQueueInternal(sessionContext) {
   const queue = await listOfflineQueue();
+  if (!isSessionContextCurrent(sessionContext)) return false;
   if (!queue.length) {
-    await refreshOfflineQueueCount();
+    await refreshOfflineQueueCount(sessionContext);
     return;
   }
 
   await processIndependentMutationQueue({
-    listRecords: listOfflineQueue,
-    processRecord: processOfflineMutationRecord,
+    listRecords: async () => {
+      if (!isSessionContextCurrent(sessionContext)) return [];
+      const records = await listOfflineQueue();
+      return isSessionContextCurrent(sessionContext) ? records : [];
+    },
+    processRecord: (record) => processOfflineMutationRecord(record, sessionContext),
     markFailed: async (record, error) => {
+      if (!isSessionContextCurrent(sessionContext)) return;
       if (isTransientOfflineMutationError(error)) throw error;
-      await markOfflineMutationFailure(record, error);
+      await markOfflineMutationFailure(record, error, sessionContext);
     },
   });
 
-  await refreshOfflineQueueCount();
+  if (!isSessionContextCurrent(sessionContext)) return false;
+  await refreshOfflineQueueCount(sessionContext);
+  if (!isSessionContextCurrent(sessionContext)) return false;
   state.offlineLastSyncedAt = new Date().toISOString();
 }
 
-async function processOfflineMutationRecord(record) {
+async function processOfflineMutationRecord(record, sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext)) return false;
   if (record.action === "create") {
     const created = await createTask(withClientRequestId(
       record.payload,
       () => makeClientRequestId("task-create"),
     ));
-    await deleteCachedTask(record.task_id);
-    await putCachedTask(normalizeRemoteTaskForOffline(created));
-    await deleteOfflineMutation(record.offline_queue_id);
-    await replaceQueuedTaskId(record.task_id, created.id, created.version);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    await deleteCachedTask(record.task_id, sessionContext);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    await putCachedTask(normalizeRemoteTaskForOffline(created), sessionContext);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    await deleteOfflineMutation(record.offline_queue_id, sessionContext);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    await replaceQueuedTaskId(record.task_id, created.id, created.version, sessionContext);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    migrateTaskDraft(record.task_id, created.id, created.version);
     return;
   }
   if (record.action === "update") {
@@ -6346,18 +7257,22 @@ async function processOfflineMutationRecord(record) {
       expected_version: record.expected_version ?? record.payload?.expected_version,
     };
     const updated = await updateTask(record.task_id, payload);
-    await putCachedTask(normalizeRemoteTaskForOffline(updated));
-    await deleteOfflineMutation(record.offline_queue_id);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    await putCachedTask(normalizeRemoteTaskForOffline(updated), sessionContext);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    await deleteOfflineMutation(record.offline_queue_id, sessionContext);
     return;
   }
   if (record.action === "mutate") {
     const updated = await mutateTask(record.task_id, record.task_action, record.expected_version);
+    if (!isSessionContextCurrent(sessionContext)) return false;
     if (updated && typeof updated === "object" && Number.isFinite(Number(updated.id))) {
-      await putCachedTask(normalizeRemoteTaskForOffline(updated));
+      await putCachedTask(normalizeRemoteTaskForOffline(updated), sessionContext);
     } else {
-      await clearCachedTaskOfflineState(record.task_id);
+      await clearCachedTaskOfflineState(record.task_id, sessionContext);
     }
-    await deleteOfflineMutation(record.offline_queue_id);
+    if (!isSessionContextCurrent(sessionContext)) return false;
+    await deleteOfflineMutation(record.offline_queue_id, sessionContext);
   }
 }
 
@@ -6373,11 +7288,13 @@ function isTransientOfflineMutationError(error) {
   );
 }
 
-async function replaceQueuedTaskId(localTaskId, serverTaskId, serverVersion) {
+async function replaceQueuedTaskId(localTaskId, serverTaskId, serverVersion, sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext)) return;
   const queue = (await listOfflineQueue()).filter((record) => record.task_id === localTaskId);
-  if (!queue.length) return;
+  if (!isSessionContextCurrent(sessionContext) || !queue.length) return;
   let expectedVersion = Number.isFinite(Number(serverVersion)) ? Number(serverVersion) : null;
   const db = await openOfflineDb();
+  if (!isSessionContextCurrent(sessionContext)) return;
   const tx = db.transaction(OFFLINE_QUEUE_STORE, "readwrite");
   const done = transactionDone(tx);
   const store = tx.objectStore(OFFLINE_QUEUE_STORE);
@@ -6395,14 +7312,16 @@ async function replaceQueuedTaskId(localTaskId, serverTaskId, serverVersion) {
   await done;
 }
 
-async function markOfflineMutationFailure(record, error) {
+async function markOfflineMutationFailure(record, error, sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext)) return;
   const isConflict = isConflictSyncError(error);
   await updateOfflineMutation(record, {
     offline_status: isConflict ? "conflict" : "sync_failed",
     offline_error: normalizeError(error),
-  });
+  }, sessionContext);
+  if (!isSessionContextCurrent(sessionContext)) return;
   const task = await getCachedTask(record.task_id);
-  if (!task) return;
+  if (!isSessionContextCurrent(sessionContext) || !task) return;
   const conflictLocalJson = isConflict ? stringifyConflictSnapshot(task) : null;
   const conflictServerJson = isConflict ? stringifyConflictSnapshot(extractConflictServerTask(error)) : null;
   await putCachedTask({
@@ -6416,8 +7335,9 @@ async function markOfflineMutationFailure(record, error) {
     conflict_server_json: conflictServerJson,
     offline_conflict_local_json: conflictLocalJson,
     offline_conflict_server_json: conflictServerJson,
-  });
-  await hydrateCachedTasks();
+  }, sessionContext);
+  if (!isSessionContextCurrent(sessionContext)) return;
+  await hydrateCachedTasks({ sessionContext });
 }
 
 function isConflictSyncError(error) {
@@ -6441,9 +7361,10 @@ function stringifyConflictSnapshot(value) {
   }
 }
 
-async function clearCachedTaskOfflineState(taskId) {
+async function clearCachedTaskOfflineState(taskId, sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext)) return;
   const task = await getCachedTask(taskId);
-  if (!task) return;
+  if (!isSessionContextCurrent(sessionContext) || !task) return;
   await putCachedTask({
     ...task,
     offline_status: null,
@@ -6455,11 +7376,14 @@ async function clearCachedTaskOfflineState(taskId) {
     conflict_server_json: null,
     offline_conflict_local_json: null,
     offline_conflict_server_json: null,
-  });
+  }, sessionContext);
 }
 
-async function refreshOfflineQueueCount() {
-  state.offlineQueueCount = await countOfflineQueue();
+async function refreshOfflineQueueCount(sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext)) return;
+  const count = await countOfflineQueue();
+  if (!isSessionContextCurrent(sessionContext)) return;
+  state.offlineQueueCount = count;
   if (nodes.connectionBadge) {
     updateConnectionBadge();
   }
@@ -6484,18 +7408,20 @@ async function listOfflineQueue() {
   return records.sort((left, right) => left.offline_queue_id - right.offline_queue_id);
 }
 
-async function deleteOfflineMutation(offlineQueueId) {
-  if (!getCurrentUserId()) return;
+async function deleteOfflineMutation(offlineQueueId, sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext) || !getCurrentUserId()) return;
   const db = await openOfflineDb();
+  if (!isSessionContextCurrent(sessionContext)) return;
   const tx = db.transaction(OFFLINE_QUEUE_STORE, "readwrite");
   const done = transactionDone(tx);
   tx.objectStore(OFFLINE_QUEUE_STORE).delete(offlineQueueId);
   await done;
 }
 
-async function updateOfflineMutation(record, updates) {
-  if (!getCurrentUserId() || !record) return;
+async function updateOfflineMutation(record, updates, sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext) || !getCurrentUserId() || !record) return;
   const db = await openOfflineDb();
+  if (!isSessionContextCurrent(sessionContext)) return;
   const tx = db.transaction(OFFLINE_QUEUE_STORE, "readwrite");
   const done = transactionDone(tx);
   tx.objectStore(OFFLINE_QUEUE_STORE).put({ ...record, ...updates });
@@ -6510,9 +7436,10 @@ async function deleteOfflineMutationsForTask(taskId) {
   await refreshOfflineQueueCount();
 }
 
-async function putCachedTask(task) {
-  if (!supportsIndexedDb() || !getCurrentUserId()) return;
+async function putCachedTask(task, sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext) || !supportsIndexedDb() || !getCurrentUserId()) return;
   const db = await openOfflineDb();
+  if (!isSessionContextCurrent(sessionContext)) return;
   const tx = db.transaction([OFFLINE_TASK_STORE, OFFLINE_META_STORE], "readwrite");
   const done = transactionDone(tx);
   tx.objectStore(OFFLINE_TASK_STORE).put(task);
@@ -6522,12 +7449,13 @@ async function putCachedTask(task) {
     updated_at: new Date().toISOString(),
   });
   await done;
-  state.offlineCacheReady = true;
+  if (isSessionContextCurrent(sessionContext)) state.offlineCacheReady = true;
 }
 
-async function deleteCachedTask(taskId) {
-  if (!getCurrentUserId()) return;
+async function deleteCachedTask(taskId, sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext) || !getCurrentUserId()) return;
   const db = await openOfflineDb();
+  if (!isSessionContextCurrent(sessionContext)) return;
   const tx = db.transaction(OFFLINE_TASK_STORE, "readwrite");
   const done = transactionDone(tx);
   tx.objectStore(OFFLINE_TASK_STORE).delete(taskId);
@@ -6548,9 +7476,10 @@ async function listCachedTasks() {
   return requestToPromise(tx.objectStore(OFFLINE_TASK_STORE).getAll());
 }
 
-async function writeOfflineMeta(key, value) {
-  if (!supportsIndexedDb() || !getCurrentUserId()) return;
+async function writeOfflineMeta(key, value, sessionContext = captureSessionContext()) {
+  if (!isSessionContextCurrent(sessionContext) || !supportsIndexedDb() || !getCurrentUserId()) return;
   const db = await openOfflineDb();
+  if (!isSessionContextCurrent(sessionContext)) return;
   const tx = db.transaction(OFFLINE_META_STORE, "readwrite");
   const done = transactionDone(tx);
   tx.objectStore(OFFLINE_META_STORE).put({
@@ -6610,14 +7539,17 @@ function currentOfflineWorkspaceKey() {
 }
 
 function closeOfflineDb() {
-  if (offlineDbPromise) {
-    offlineDbPromise.then((db) => db.close()).catch(() => {});
-  }
+  const pendingDb = offlineDbPromise;
   offlineDbPromise = null;
   offlineDbNameInUse = "";
+  if (!pendingDb) return Promise.resolve();
+  return pendingDb.then((db) => db.close()).catch(() => {});
 }
 
 function openOfflineDb() {
+  if (localDataClearInProgress) {
+    return Promise.reject(new Error("Local data clear is in progress"));
+  }
   const dbName = offlineDbName();
   if (offlineDbPromise && offlineDbNameInUse === dbName) {
     return offlineDbPromise;
@@ -6629,6 +7561,9 @@ function openOfflineDb() {
 }
 
 function openOfflineDatabase(dbName) {
+  if (localDataClearInProgress) {
+    return Promise.reject(new Error("Local data clear is in progress"));
+  }
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(dbName, WEB_OFFLINE_DB_VERSION);
     request.onerror = () => reject(request.error || new Error("Failed to open offline database"));
@@ -6660,12 +7595,18 @@ function openOfflineDatabase(dbName) {
 }
 
 async function prepareOfflineProfileStorage() {
+  const sessionContext = captureSessionContext();
   const profile = state.offlineProfile;
-  if (!profile || !supportsIndexedDb() || !isOfflineProfileForApi(profile, state.apiBaseUrl)) {
-    return;
+  preserveLegacyOfflineProfileOwner();
+  const rawOwner = readStoredString(LEGACY_OFFLINE_PROFILE_STORAGE_KEY, "");
+  if (!rawOwner || !supportsIndexedDb()) return;
+  const owner = normalizeOfflineProfile(JSON.parse(rawOwner));
+  if (!owner) return;
+  await migrateLegacyOfflineDatabase(owner);
+  if (readStoredString(LEGACY_OFFLINE_PROFILE_STORAGE_KEY, "") === rawOwner) {
+    removeStoredString(LEGACY_OFFLINE_PROFILE_STORAGE_KEY);
   }
-  if (offlineProfileLegacyMigrationPending) {
-    await migrateLegacyOfflineDatabase(profile);
+  if (isSessionContextCurrent(sessionContext) && profile && isOfflineProfileForApi(profile, state.apiBaseUrl)) {
     persistOfflineProfile(profile);
   }
 }
@@ -6797,11 +7738,6 @@ function supportsIndexedDb() {
   return "indexedDB" in window;
 }
 
-function normalizeDeviceId(value) {
-  const trimmed = String(value || "").trim();
-  return trimmed || `web-${crypto.randomUUID()}`;
-}
-
 function loadLastImportedBackupTaskIds() {
   const userId = getCurrentUserId();
   if (!userId) {
@@ -6868,7 +7804,7 @@ function readOfflineProfile() {
   try {
     const parsed = JSON.parse(raw);
     offlineProfileLegacyMigrationPending = !parsed.api_base_url && !parsed.apiBaseUrl;
-    const profile = normalizeOfflineProfile(parsed, INITIAL_API_BASE_URL);
+    const profile = normalizeOfflineProfile(parsed, STORED_API_BASE_URL);
     if (!profile) {
       offlineProfileLegacyMigrationPending = false;
       removeStoredString(OFFLINE_PROFILE_STORAGE_KEY);
@@ -6881,7 +7817,16 @@ function readOfflineProfile() {
   }
 }
 
+function preserveLegacyOfflineProfileOwner() {
+  if (!offlineProfileLegacyMigrationPending || !state.offlineProfile) return;
+  if (!readStoredString(LEGACY_OFFLINE_PROFILE_STORAGE_KEY, "")) {
+    writeStoredString(LEGACY_OFFLINE_PROFILE_STORAGE_KEY, JSON.stringify(state.offlineProfile));
+  }
+  offlineProfileLegacyMigrationPending = false;
+}
+
 function persistOfflineProfile(value) {
+  preserveLegacyOfflineProfileOwner();
   const profile = normalizeOfflineProfile(value, state.apiBaseUrl);
   if (!profile) return null;
   const previousWorkspace = offlineWorkspaceKeyForProfile(state.offlineProfile);

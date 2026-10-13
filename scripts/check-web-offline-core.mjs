@@ -120,6 +120,7 @@ assert.deepEqual(meta.counts, {
   pending: 2,
   conflict: 1,
   completed: 0,
+  templates: 0,
   trash: 1,
 });
 

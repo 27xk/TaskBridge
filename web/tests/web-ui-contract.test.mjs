@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { createAppHarness } from "./helpers/app-harness.mjs";
 
 const [appSource, html, styles] = await Promise.all([
   readFile(new URL("../app.js", import.meta.url), "utf8"),
@@ -25,11 +26,16 @@ test("account security UI exposes password and session controls", () => {
   assert.match(appSource, /\/auth\/password/);
   assert.match(appSource, /\/auth\/sessions/);
   assert.match(appSource, /revoke-other-devices/);
-  assert.match(
-    appSource,
-    /function setBusy\(isBusy\) \{[^}]*renderAccountSecurity\(\);[^}]*\}/,
-    "leaving a busy account action must re-enable security controls",
-  );
+  const harness = createAppHarness();
+  Object.assign(harness.state, { user: { id: 1 }, accessToken: "access", refreshToken: "refresh" });
+  const fields = [harness.nodes.currentPassword, harness.nodes.newPassword, harness.nodes.confirmNewPassword];
+  harness.nodes.passwordChangeForm.elements = fields;
+  harness.run("setBusy(true)");
+  assert.ok(fields.every((field) => field.disabled));
+  assert.equal(harness.nodes.refreshSessionsButton.disabled, true);
+  harness.run("setBusy(false)");
+  assert.ok(fields.every((field) => !field.disabled), "leaving a busy account action must re-enable security controls");
+  assert.equal(harness.nodes.refreshSessionsButton.disabled, false);
 });
 
 test("task requests carry the browser IANA time zone and map server views", () => {
@@ -39,9 +45,8 @@ test("task requests carry the browser IANA time zone and map server views", () =
   assert.match(appSource, /mapTaskViewForServer\(/);
 });
 
-test("same-origin defaults, degraded auth, mixed-content errors, and terminal refresh are integrated", () => {
+test("same-origin deployment, mixed-content errors, and terminal refresh are integrated", () => {
   assert.match(appSource, /location\.origin/);
-  assert.match(appSource, /isAuthHealthUsable\(/);
   assert.match(appSource, /isMixedContentApiUrl\(/);
   assert.match(appSource, /validation\.mixedContentApi/);
   assert.match(appSource, /isTerminalRefreshStatus\(/);
@@ -56,22 +61,9 @@ test("signed-out header hides the non-actionable connection badge until a check 
   );
 });
 
-test("changing a server endpoint invalidates its previous connection result", () => {
-  assert.match(appSource, /resetEndpointScopedConnectionState\(/);
+test("registration and sync status ignore stale concurrent responses", () => {
   assert.match(appSource, /const connectionRequestGate = createLatestRequestGate\(\)/);
   assert.match(appSource, /const registrationRequestGate = createLatestRequestGate\(\)/);
-  assert.match(
-    appSource,
-    /function resetConnectionStateForEndpointChange\([\s\S]{0,500}updateConnectionBadge\(\)/,
-  );
-  assert.match(
-    appSource,
-    /function resetConnectionStateForEndpointChange\([\s\S]{0,500}setStatus\(nodes\.authMessage, ""\)/,
-  );
-  assert.match(
-    appSource,
-    /const syncStatus = await apiRequest\("\/sync\/status", \{ auth: false[^}]*\}\);[\s\S]{0,240}!connectionRequestGate\.isCurrent\(requestSequence\)[\s\S]{0,160}state\.syncStatus = syncStatus/,
-  );
   assert.match(
     appSource,
     /async function loadRegistrationStatus\(\)[\s\S]{0,240}registrationRequestGate\.begin\(\)[\s\S]{0,360}registrationRequestGate\.isCurrent\(requestSequence\)/,
@@ -80,8 +72,6 @@ test("changing a server endpoint invalidates its previous connection result", ()
     appSource,
     /async function refreshSyncStatus\([\s\S]{0,420}connectionRequestGate\.begin\(\)[\s\S]{0,900}connectionRequestGate\.isCurrent\(requestSequence\)/,
   );
-  assert.match(appSource, /let activeConnectionRequestSequence = null/);
-  assert.match(appSource, /requestSequence === activeConnectionRequestSequence/);
 });
 
 test("mobile workspace keeps quick actions and tasks before secondary sidebar tools", () => {
@@ -153,7 +143,7 @@ test("mobile workspace uses matching runtime DOM, visual, and focus order", () =
   assert.doesNotMatch(styles, /\.main-panel\s*\{[^}]*order:/);
   assert.doesNotMatch(styles, /\.sidebar\s*\{[^}]*order:/);
   assert.match(styles, /\.auth-panel\s*\{[^}]*width:\s*min\(100%,\s*760px\)/);
-  assert.match(styles, /@media\s*\(max-width:\s*760px\)[\s\S]*?\.password-field\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(styles, /\.password-field\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
 });
 
 test("offline recovery precedes credentials and registration-only help stays out of login", () => {

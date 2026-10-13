@@ -1,5 +1,6 @@
 const WEB_VERSION = "0.1.8";
-const CACHE_NAME = `taskbridge-web-shell-v${WEB_VERSION}`;
+const SHELL_REVISION = "20261010-drafts-menus";
+const CACHE_NAME = `taskbridge-web-shell-v${WEB_VERSION}-${SHELL_REVISION}`;
 const SHELL_ASSETS = [
   "./",
   "./index.html",
@@ -19,7 +20,9 @@ const SHELL_ASSETS = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)),
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(
+      SHELL_ASSETS.map((asset) => new Request(new URL(asset, self.registration.scope), { cache: "reload" })),
+    )),
   );
   self.skipWaiting();
 });
@@ -32,9 +35,8 @@ self.addEventListener("activate", (event) => {
           .filter((key) => key.startsWith("taskbridge-web-shell-") && key !== CACHE_NAME)
           .map((key) => caches.delete(key)),
       ),
-    ),
+    ).then(() => self.clients.claim()),
   );
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
@@ -50,7 +52,7 @@ self.addEventListener("fetch", (event) => {
     );
     return;
   }
-  if (isVersionedShellAssetRequest(request)) {
+  if (url.pathname.endsWith("/styles.css") || isVersionedShellAssetRequest(request)) {
     event.respondWith(
       fetchFreshAndCache(request).catch(() => caches.match(cacheKeyForRequest(request))),
     );
@@ -118,7 +120,8 @@ function cacheKeyForRequest(request) {
 }
 
 async function fetchFreshAndCache(request) {
-  const response = await fetch(request);
+  const response = await fetch(request, { cache: "no-cache" });
+  if (response.ok === false) throw new Error(`Shell asset request failed: ${response.status}`);
   const cache = await caches.open(CACHE_NAME);
   await cache.put(cacheKeyForRequest(request), response.clone());
   return response;

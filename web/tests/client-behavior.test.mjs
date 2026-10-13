@@ -223,6 +223,315 @@ test("mixed content detection distinguishes blocked HTTPS to HTTP requests", () 
   assert.equal(isMixedContentApiUrl("https:", "https://tasks.example.com/api/v1"), false);
 });
 
+test("cross-origin web requests omit cookies so wildcard CORS remains usable", () => {
+  const getApiRequestCredentialsMode = requireCoreFunction("getApiRequestCredentialsMode");
+
+  assert.equal(
+    getApiRequestCredentialsMode("http://127.0.0.1:8080/api/v1", "http://127.0.0.1:8080"),
+    "include",
+  );
+  assert.equal(
+    getApiRequestCredentialsMode("http://127.0.0.1:8000/api/v1", "http://127.0.0.1:5500"),
+    "omit",
+  );
+  assert.equal(getApiRequestCredentialsMode("not a URL", "http://127.0.0.1:5500"), "omit");
+});
+
+test("refresh requests use the cookie only for same-origin APIs", () => {
+  const buildRefreshRequestBody = requireCoreFunction("buildRefreshRequestBody");
+
+  assert.deepEqual(
+    buildRefreshRequestBody("include", "refresh-secret", "web-device"),
+    { refresh_token: "refresh-secret", device_id: "web-device" },
+  );
+  assert.deepEqual(
+    buildRefreshRequestBody("include", "", "web-device"),
+    { device_id: "web-device" },
+  );
+  assert.deepEqual(
+    buildRefreshRequestBody("omit", "refresh-secret", "web-device"),
+    { refresh_token: "refresh-secret", device_id: "web-device" },
+  );
+});
+
+test("cross-tab refresh coordination reuses the first rotated token pair", async () => {
+  const coordinateRefreshSession = requireCoreFunction("coordinateRefreshSession");
+  let currentRefreshToken = "refresh-old";
+  let refreshCalls = 0;
+  let lockTail = Promise.resolve();
+  const withLock = (callback) => {
+    const next = lockTail.then(callback);
+    lockTail = next.catch(() => undefined);
+    return next;
+  };
+  const refresh = async () => {
+    refreshCalls += 1;
+    currentRefreshToken = "refresh-new";
+  };
+
+  const results = await Promise.all([
+    coordinateRefreshSession({
+      expectedRefreshToken: "refresh-old",
+      getCurrentRefreshToken: () => currentRefreshToken,
+      refresh,
+      withLock,
+    }),
+    coordinateRefreshSession({
+      expectedRefreshToken: "refresh-old",
+      getCurrentRefreshToken: () => currentRefreshToken,
+      refresh,
+      withLock,
+    }),
+  ]);
+
+  assert.equal(refreshCalls, 1);
+  assert.deepEqual(results, [true, false]);
+});
+
+test("refresh lease serializes tabs when Web Locks is unavailable", async () => {
+  const withRefreshLease = requireCoreFunction("withRefreshLease");
+  let sharedLease = null;
+  let activeCallbacks = 0;
+  let maximumActiveCallbacks = 0;
+  const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, Math.min(milliseconds, 3)));
+  const run = (owner) => withRefreshLease({
+    lockName: "taskbridge.refresh.server.device",
+    owner,
+    readLease: () => sharedLease,
+    writeLease: (lease) => {
+      sharedLease = lease;
+    },
+    clearLease: () => {
+      sharedLease = null;
+    },
+    callback: async () => {
+      activeCallbacks += 1;
+      maximumActiveCallbacks = Math.max(maximumActiveCallbacks, activeCallbacks);
+      await wait(12);
+      activeCallbacks -= 1;
+      return owner;
+    },
+    wait,
+    leaseDurationMs: 1_000,
+    retryDelayMs: 2,
+    settleDelayMs: 2,
+    timeoutMs: 500,
+  });
+
+  const results = await Promise.all([run("tab-a"), run("tab-b")]);
+
+  assert.equal(maximumActiveCallbacks, 1);
+  assert.deepEqual(new Set(results), new Set(["tab-a", "tab-b"]));
+  assert.equal(sharedLease, null);
+});
+
+test("refresh lease recovers after a crashed owner expires", async () => {
+  const withRefreshLease = requireCoreFunction("withRefreshLease");
+  let sharedLease = {
+    lockName: "taskbridge.refresh.server.device",
+    owner: "closed-tab",
+    expiresAt: 10,
+  };
+
+  const result = await withRefreshLease({
+    lockName: "taskbridge.refresh.server.device",
+    owner: "new-tab",
+    readLease: () => sharedLease,
+    writeLease: (lease) => {
+      sharedLease = lease;
+    },
+    clearLease: () => {
+      sharedLease = null;
+    },
+    callback: async () => "refreshed",
+    wait: async () => {},
+    now: () => 20,
+    leaseDurationMs: 1_000,
+    retryDelayMs: 1,
+    settleDelayMs: 0,
+    timeoutMs: 100,
+  });
+
+  assert.equal(result, "refreshed");
+  assert.equal(sharedLease, null);
+});
+
+test("refresh leases for another server or device do not block the current session", async () => {
+  const withRefreshLease = requireCoreFunction("withRefreshLease");
+  let now = 20;
+  let sharedLease = {
+    lockName: "taskbridge.refresh.other-server.other-device",
+    owner: "other-tab",
+    expiresAt: 10_000,
+  };
+
+  const result = await withRefreshLease({
+    lockName: "taskbridge.refresh.current-server.current-device",
+    owner: "current-tab",
+    readLease: () => sharedLease,
+    writeLease: (lease) => {
+      sharedLease = lease;
+    },
+    clearLease: () => {
+      sharedLease = null;
+    },
+    callback: async () => "refreshed",
+    wait: async (milliseconds) => {
+      now += milliseconds;
+    },
+    now: () => now,
+    settleDelayMs: 0,
+    retryDelayMs: 1,
+    timeoutMs: 10,
+  });
+
+  assert.equal(result, "refreshed");
+  assert.equal(sharedLease, null);
+});
+
+test("blocked IndexedDB deletion waits for the other tab to release its connection", async () => {
+  const deleteIndexedDatabase = requireCoreFunction("deleteIndexedDatabase");
+  const request = {};
+  const blockedEvents = [];
+  const indexedDb = {
+    deleteDatabase: (name) => {
+      assert.equal(name, "taskbridge.offline.user.42");
+      return request;
+    },
+  };
+
+  let settled = false;
+  const deletion = deleteIndexedDatabase(indexedDb, "taskbridge.offline.user.42", {
+    onBlocked: () => blockedEvents.push("blocked"),
+  }).then(() => {
+    settled = true;
+  });
+
+  request.onblocked();
+  await Promise.resolve();
+  assert.deepEqual(blockedEvents, ["blocked"]);
+  assert.equal(settled, false);
+
+  request.onsuccess();
+  await deletion;
+  assert.equal(settled, true);
+});
+
+test("session revocation reports a server failure without preventing local sign-out", async () => {
+  const attemptSessionRevocation = requireCoreFunction("attemptSessionRevocation");
+
+  assert.equal(await attemptSessionRevocation(async () => {}), true);
+  assert.equal(await attemptSessionRevocation(async () => {
+    throw new Error("network unavailable");
+  }), false);
+});
+
+test("refresh coordination does not restart a session cleared while waiting for the lock", async () => {
+  const coordinateRefreshSession = requireCoreFunction("coordinateRefreshSession");
+  let refreshCalls = 0;
+
+  const refreshed = await coordinateRefreshSession({
+    expectedRefreshToken: "refresh-old",
+    getCurrentRefreshToken: () => "",
+    refresh: async () => {
+      refreshCalls += 1;
+    },
+  });
+
+  assert.equal(refreshed, false);
+  assert.equal(refreshCalls, 0);
+});
+
+test("stale refresh results are rejected after logout or token rotation", () => {
+  const canApplySessionRefreshResult = requireCoreFunction("canApplySessionRefreshResult");
+  const request = {
+    expectedGeneration: 4,
+    expectedRefreshToken: "refresh-old",
+  };
+
+  assert.equal(canApplySessionRefreshResult({
+    ...request,
+    currentGeneration: 4,
+    currentRefreshToken: "refresh-old",
+  }), true);
+  assert.equal(canApplySessionRefreshResult({
+    ...request,
+    currentGeneration: 5,
+    currentRefreshToken: "",
+  }), false);
+  assert.equal(canApplySessionRefreshResult({
+    ...request,
+    currentGeneration: 4,
+    currentRefreshToken: "refresh-new",
+  }), false);
+  assert.equal(canApplySessionRefreshResult({
+    ...request,
+    currentGeneration: 4,
+    currentRefreshToken: "refresh-old",
+    sessionAllowed: false,
+  }), false);
+  assert.equal(canApplySessionRefreshResult({
+    ...request,
+    currentGeneration: 4,
+    currentRefreshToken: "refresh-old",
+    sessionAllowed: true,
+    expectedUserId: 42,
+    currentUserId: 42,
+    resultUserId: 42,
+  }), true);
+  assert.equal(canApplySessionRefreshResult({
+    ...request,
+    currentGeneration: 4,
+    currentRefreshToken: "refresh-old",
+    sessionAllowed: true,
+    expectedUserId: 42,
+    currentUserId: 42,
+    resultUserId: 43,
+  }), false);
+});
+
+test("persistent sign-out suppression is scoped by server, device, and active user", () => {
+  const buildMarker = requireCoreFunction("buildPersistentSessionSuppressionMarker");
+  const isSuppressed = requireCoreFunction("isPersistentSessionSuppressed");
+  const marker = buildMarker("https://tasks.example.com/api/v1", "web-device", 42);
+
+  assert.equal(isSuppressed(marker, {
+    apiBaseUrl: "https://tasks.example.com/api/v1",
+    deviceId: "web-device",
+    userId: 42,
+  }), true);
+  assert.equal(isSuppressed(marker, {
+    apiBaseUrl: "https://tasks.example.com/api/v1",
+    deviceId: "web-device",
+    userId: null,
+  }), true);
+  assert.equal(isSuppressed(marker, {
+    apiBaseUrl: "https://tasks.example.com/api/v1",
+    deviceId: "web-device",
+    userId: 43,
+  }), false);
+  assert.equal(isSuppressed(marker, {
+    apiBaseUrl: "https://other.example.com/api/v1",
+    deviceId: "web-device",
+    userId: 42,
+  }), false);
+  assert.equal(isSuppressed(marker, {
+    apiBaseUrl: "https://tasks.example.com/api/v1",
+    deviceId: "other-device",
+    userId: 42,
+  }), false);
+  assert.equal(isSuppressed("true", {
+    apiBaseUrl: "https://tasks.example.com/api/v1",
+    deviceId: "web-device",
+    userId: 43,
+  }), false);
+  assert.equal(isSuppressed("true", {
+    apiBaseUrl: "https://tasks.example.com/api/v1",
+    deviceId: "web-device",
+    userId: null,
+  }), true);
+});
+
 test("degraded health remains usable for authentication", () => {
   const isAuthHealthUsable = requireCoreFunction("isAuthHealthUsable");
 
@@ -238,6 +547,24 @@ test("only terminal refresh statuses force reauthentication", () => {
   assert.equal(isTerminalRefreshStatus(403), true);
   assert.equal(isTerminalRefreshStatus(429), false);
   assert.equal(isTerminalRefreshStatus(500), false);
+});
+
+test("quick task scheduling builds deterministic today, tomorrow, and later patches", () => {
+  const now = new Date("2026-07-18T02:00:00.000Z");
+
+  assert.deepEqual(core.buildTaskSchedulePatch("plan-today", now, { timeZone: "Asia/Shanghai" }), {
+    list_type: "today",
+    planned_date: "2026-07-18",
+    snoozed_until: null,
+  });
+  assert.deepEqual(core.buildTaskSchedulePatch("plan-tomorrow", now, { timeZone: "Asia/Shanghai" }), {
+    list_type: "inbox",
+    planned_date: "2026-07-19",
+    snoozed_until: null,
+  });
+  assert.deepEqual(core.buildTaskSchedulePatch("snooze-later", now, { timeZone: "Asia/Shanghai" }), {
+    snoozed_until: "2026-07-18T03:00:00.000Z",
+  });
 });
 
 test("reminder scheduling prefers reminder_at and falls back to due_at", () => {
