@@ -42,7 +42,6 @@
     "!**/node_modules/**/examples/**",
     "!**/node_modules/**/benchmark/**",
     "!**/node_modules/**/benchmarks/**",
-    "!**/node_modules/**/src/**",
     "!**/node_modules/**/test/**",
     "!**/node_modules/**/tests/**",
     "!**/node_modules/**/coverage/**",

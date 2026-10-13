@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
+import { assertPackagedRuntimeFiles } from "./package-runtime-files.mjs";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const packageLock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
@@ -62,7 +63,6 @@ for (const pattern of [
   "!**/node_modules/**/docs/**",
   "!**/node_modules/**/example/**",
   "!**/node_modules/**/coverage/**",
-  "!**/node_modules/**/src/**",
   "!**/node_modules/**/test/**",
   "!**/node_modules/**/tests/**",
   "!**/node_modules/**/.github/**",
@@ -102,4 +102,5 @@ for (const pattern of [
   assert.ok(files.includes(pattern), `desktop package should exclude ${pattern}`);
 }
 
-console.log("desktop package size config ok");
+const runtimeFiles = assertPackagedRuntimeFiles(config);
+console.log(`desktop package size config ok (${runtimeFiles.length} runtime files preserved)`);
