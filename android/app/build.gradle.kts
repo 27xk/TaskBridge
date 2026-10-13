@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.net.URI
 
 plugins {
     alias(libs.plugins.android.application)
@@ -22,10 +23,18 @@ android {
             ?: localProperties.getProperty(name)
             ?: defaultValue
 
-    val taskBridgeBaseUrl = taskBridgeProperty("TASKBRIDGE_BASE_URL", "https://taskbridge.example.invalid/api/v1/")
-    val taskBridgeWebSocketUrl = taskBridgeProperty("TASKBRIDGE_WS_URL", "wss://taskbridge.example.invalid/ws/sync")
-    val releaseEndpointLooksPlaceholder =
-        taskBridgeBaseUrl.contains("example.invalid") || taskBridgeWebSocketUrl.contains("example.invalid")
+    val taskBridgeBaseUrl = taskBridgeProperty("TASKBRIDGE_BASE_URL", "https://taskbridge.example.invalid/api/v1/").trim()
+    val taskBridgeWebSocketUrl = taskBridgeProperty("TASKBRIDGE_WS_URL", "wss://taskbridge.example.invalid/ws/sync").trim()
+    fun validReleaseEndpoint(value: String, schemes: Set<String>, suffix: String): Boolean = runCatching {
+        val uri = URI(value)
+        value.isNotBlank() && uri.scheme?.lowercase() in schemes && !uri.host.isNullOrBlank() &&
+            !uri.host.lowercase().endsWith(".invalid") && uri.userInfo == null &&
+            uri.query == null && uri.fragment == null && (uri.port == -1 || uri.port in 1..65535) &&
+            uri.path.orEmpty().trimEnd('/').endsWith(suffix)
+    }.getOrDefault(false)
+    val releaseEndpointsValid =
+        validReleaseEndpoint(taskBridgeBaseUrl, setOf("http", "https"), "/api/v1") &&
+            validReleaseEndpoint(taskBridgeWebSocketUrl, setOf("ws", "wss"), "/ws/sync")
     val releaseKeystorePath = taskBridgeProperty("ANDROID_KEYSTORE_PATH", System.getenv("ANDROID_KEYSTORE_PATH") ?: "")
     val releaseKeystorePassword = taskBridgeProperty("ANDROID_KEYSTORE_PASSWORD", System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "")
     val releaseKeyAlias = taskBridgeProperty("ANDROID_KEY_ALIAS", System.getenv("ANDROID_KEY_ALIAS") ?: "")
@@ -39,7 +48,7 @@ android {
 
     defaultConfig {
         applicationId = "com.taskbridge.app"
-        minSdk = 26
+        minSdk = 33
         targetSdk = 35
         versionCode = 5
         versionName = "0.1.8"
@@ -63,6 +72,10 @@ android {
     buildFeatures {
         buildConfig = true
         compose = true
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
     }
 
     dependenciesInfo {
@@ -118,9 +131,9 @@ android {
                 it.name == "bundleRelease" ||
                 it.name == "packageRelease"
         }
-        if (requiresSignedRelease && releaseEndpointLooksPlaceholder) {
+        if (requiresSignedRelease && !releaseEndpointsValid) {
             throw org.gradle.api.GradleException(
-                "Release endpoints must be configured with TASKBRIDGE_BASE_URL and TASKBRIDGE_WS_URL.",
+                "Release endpoints must be valid non-placeholder TASKBRIDGE_BASE_URL (HTTP(S), /api/v1/) and TASKBRIDGE_WS_URL (WS(S), /ws/sync) URLs.",
             )
         }
     }
@@ -148,8 +161,13 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.work.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }
