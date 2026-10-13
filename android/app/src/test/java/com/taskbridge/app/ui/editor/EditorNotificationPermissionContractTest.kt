@@ -15,11 +15,15 @@ class EditorNotificationPermissionContractTest {
     }
 
     @Test
-    fun reminderPickerAndScheduledSaveKeepContextualPermissionRequests() {
+    fun reminderPickerDefersPermissionUntilTheUserChoosesATime() {
         val source = androidSource("src/main/java/com/taskbridge/app/ui/editor/EditorScreen.kt")
         val reminderPicker = source.substringAfter("fun pickReminder()").substringBefore("fun requestCancel()")
         val saveAction = source.substringAfter("onSave = {").substringBefore("viewModel.save(onSaved)")
 
+        val beforePicker = reminderPicker.substringBefore("showDateTimePicker(")
+        assertFalse(beforePicker.contains("onRequestNotificationPermission()"))
+        assertTrue(reminderPicker.contains("onPicked = { value ->"))
+        assertTrue(reminderPicker.contains("viewModel.updateRemindTime(value)"))
         assertTrue(reminderPicker.contains("onRequestNotificationPermission()"))
         assertTrue(saveAction.contains("shouldRequestReminderPermission(state.remindTime, state.dueTime)"))
         assertTrue(saveAction.contains("onRequestNotificationPermission()"))

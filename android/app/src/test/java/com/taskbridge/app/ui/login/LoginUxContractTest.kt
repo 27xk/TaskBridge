@@ -31,6 +31,19 @@ class LoginUxContractTest {
     }
 
     @Test
+    fun connectionTestLivesInsideAdvancedTroubleshooting() {
+        val source = sourceFile("ui/login/LoginScreen.kt")
+        val connectionPanel = source
+            .substringAfter("            if (BuildConfig.DEBUG) AppPanel {")
+            .substringBefore("            if (BuildConfig.DEBUG) FirstUseGuide(strings = strings)")
+        val ordinaryConnectionActions = connectionPanel.substringBefore("                if (advancedConnectionOpen) {")
+        val advancedConnectionActions = connectionPanel.substringAfter("                if (advancedConnectionOpen) {")
+
+        assertFalse(ordinaryConnectionActions.contains("viewModel.testConnection()"))
+        assertTrue(advancedConnectionActions.contains("viewModel.testConnection()"))
+    }
+
+    @Test
     fun registrationUnknownAfterSubmitUsesAfterCheckExplanation() {
         val source = sourceFile("ui/login/RegisterScreen.kt")
         val localizer = source.blockStartingAt("private fun localizeRegisterError(")
@@ -40,6 +53,28 @@ class LoginUxContractTest {
                 "registrationStatusUnknownMessageKey -> registrationStatusUnknownAfterCheckHelp(isEnglish)",
             ),
         )
+    }
+
+    @Test
+    fun loginExplainsTheAdministratorAssistedPasswordRecoveryPath() {
+        val source = sourceFile("ui/login/LoginScreen.kt")
+
+        assertTrue(source.contains("Forgot your password? Ask the server administrator to reset it."))
+        assertTrue(source.contains("忘记密码？请联系服务器管理员重置。"))
+    }
+
+    @Test
+    fun releaseUsesBundledConnectionAndHidesEndpointEditors() {
+        val dataStore = sourceFile("data/datastore/TokenDataStore.kt")
+        val login = sourceFile("ui/login/LoginScreen.kt")
+        val register = sourceFile("ui/login/RegisterScreen.kt")
+        val settings = sourceFile("ui/settings/SettingsScreen.kt")
+
+        assertTrue(dataStore.contains("if (BuildConfig.DEBUG) preferences[API_BASE_URL] else BuildConfig.TASKBRIDGE_BASE_URL"))
+        assertTrue(dataStore.contains("check(BuildConfig.DEBUG) { \"connection_locked\" }"))
+        assertTrue(login.contains("if (BuildConfig.DEBUG) AppPanel {"))
+        assertTrue(register.contains("if (BuildConfig.DEBUG) AppPanel {"))
+        assertTrue(settings.contains("if (!BuildConfig.DEBUG) {"))
     }
 
     private fun sourceFile(relativePath: String): String {

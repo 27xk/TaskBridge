@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.taskbridge.app.BuildConfig
 import com.taskbridge.app.ui.components.AppDropdownField
 import com.taskbridge.app.ui.components.AppDynamicStatusText
 import com.taskbridge.app.ui.components.AppHeader
@@ -95,7 +96,7 @@ fun RegisterScreen(
                 onSelect = onLanguageChange,
             )
 
-            FirstUseGuide(strings = strings)
+            if (BuildConfig.DEBUG) FirstUseGuide(strings = strings)
 
             AppPanel {
                 Text(
@@ -165,7 +166,7 @@ fun RegisterScreen(
                 }
             }
 
-            AppPanel {
+            if (BuildConfig.DEBUG) AppPanel {
                 Text(
                     text = strings.connectionSettings,
                     style = MaterialTheme.typography.titleMedium,
@@ -257,8 +258,10 @@ private fun RegistrationConnectionFeedbackNearSubmit(
         text = localizeConnectionMessage(connectionMessage, isEnglish),
         isError = true,
     )
-    TextButton(onClick = onChangeServerAddress, modifier = Modifier.fillMaxWidth()) {
-        Text(strings.changeServerAddress)
+    if (BuildConfig.DEBUG) {
+        TextButton(onClick = onChangeServerAddress, modifier = Modifier.fillMaxWidth()) {
+            Text(strings.changeServerAddress)
+        }
     }
 }
 

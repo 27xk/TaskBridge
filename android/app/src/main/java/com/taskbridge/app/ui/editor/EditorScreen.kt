@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -40,6 +42,8 @@ import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
 import com.taskbridge.app.ui.components.AppUiOption
 import com.taskbridge.app.ui.components.repeatRuleOptions
+import com.taskbridge.app.ui.components.glass.GlassStyle
+import com.taskbridge.app.ui.components.glass.LiquidGlassSurface
 import com.taskbridge.app.ui.i18n.AppLanguage
 import com.taskbridge.app.ui.i18n.LocalAppLanguage
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
@@ -121,12 +125,16 @@ fun EditorScreen(
         )
     }
     fun pickReminder() {
-        onRequestNotificationPermission()
         showDateTimePicker(
             context = context,
             currentValue = state.remindTime,
             timeZoneId = displayTimeZone,
-            onPicked = viewModel::updateRemindTime,
+            onPicked = { value ->
+                viewModel.updateRemindTime(value)
+                if (shouldRequestReminderPermission(value, state.dueTime)) {
+                    onRequestNotificationPermission()
+                }
+            },
         )
     }
     fun requestCancel() {
@@ -176,8 +184,10 @@ fun EditorScreen(
 
     AppPage(modifier = Modifier.fillMaxSize()) {
         Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = MaterialTheme.colorScheme.background,
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding(),
+            containerColor = Color.Transparent,
             bottomBar = {
                 EditorBottomActions(
                     strings = strings,
@@ -302,14 +312,17 @@ private fun EditorBottomActions(
     onSave: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp,
+    LiquidGlassSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        cornerRadius = 28.dp,
+        style = GlassStyle.Elevated,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -625,6 +638,13 @@ private fun showDateTimePicker(
 private fun localizeEditorError(error: String, strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings): String {
     return when (error) {
         "Title is required." -> strings.titleRequired
+        "Title is too long." -> if (strings.chinese == "中文") "标题最多 255 个字符。" else "Title must be 255 characters or fewer."
+        "Content is too long." -> if (strings.chinese == "中文") "备注最多 10000 个字符。" else "Notes must be 10,000 characters or fewer."
+        "Tag is too long." -> if (strings.chinese == "中文") "标签最多 64 个字符。" else "Tag must be 64 characters or fewer."
+        "Project is too long." -> if (strings.chinese == "中文") "项目最多 128 个字符。" else "Project must be 128 characters or fewer."
+        "Template name is too long." -> if (strings.chinese == "中文") "模板名称最多 128 个字符。" else "Template name must be 128 characters or fewer."
+        "A checklist item is too long." -> if (strings.chinese == "中文") "每个清单项最多 255 个字符。" else "Each checklist item must be 255 characters or fewer."
+        "Checklist has too many items." -> if (strings.chinese == "中文") "一个任务最多包含 100 个清单项。" else "A task can contain at most 100 checklist items."
         "Invalid planned date." -> if (strings.chinese == "中文") "计划日期请选择有效日期。" else "Choose a valid plan date."
         "Invalid time." -> strings.invalidTime
         else -> error

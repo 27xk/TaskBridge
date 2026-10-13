@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.taskbridge.app.BuildConfig
 import com.taskbridge.app.ui.components.AppDropdownField
 import com.taskbridge.app.ui.components.AppDynamicStatusText
 import com.taskbridge.app.ui.components.AppHeader
@@ -140,7 +141,7 @@ fun LoginScreen(
                 },
             )
 
-            AppPanel {
+            if (BuildConfig.DEBUG) AppPanel {
                 Text(
                     text = strings.connectionSettings,
                     style = MaterialTheme.typography.titleMedium,
@@ -152,21 +153,6 @@ fun LoginScreen(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                OutlinedButton(
-                    onClick = { viewModel.testConnection() },
-                    enabled = !state.isTestingConnection,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        if (state.isTestingConnection) strings.testingConnection else strings.saveAndTestConnection,
-                    )
-                }
-                state.connectionMessage?.let {
-                    AppDynamicStatusText(
-                        text = localizeConnectionMessage(it, isEnglish),
-                        isError = state.connectionMessageIsError,
-                    )
-                }
                 TextButton(onClick = { advancedConnectionOpen = !advancedConnectionOpen }) {
                     Text(strings.advancedConnectionSettings)
                 }
@@ -176,6 +162,21 @@ fun LoginScreen(
                     style = MaterialTheme.typography.bodySmall,
                 )
                 if (advancedConnectionOpen) {
+                    OutlinedButton(
+                        onClick = { viewModel.testConnection() },
+                        enabled = !state.isTestingConnection,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (state.isTestingConnection) strings.testingConnection else strings.saveAndTestConnection,
+                        )
+                    }
+                    state.connectionMessage?.takeUnless { state.connectionMessageIsError }?.let {
+                        AppDynamicStatusText(
+                            text = localizeConnectionMessage(it, isEnglish),
+                            isError = false,
+                        )
+                    }
                     OutlinedTextField(
                         value = state.apiBaseUrl,
                         onValueChange = viewModel::updateApiBaseUrl,
@@ -203,7 +204,7 @@ fun LoginScreen(
                 )
             }
 
-            FirstUseGuide(strings = strings)
+            if (BuildConfig.DEBUG) FirstUseGuide(strings = strings)
         }
     }
 }
@@ -228,19 +229,31 @@ private fun SignInPanel(
             text = strings.signIn,
             style = MaterialTheme.typography.titleMedium,
         )
-        OutlinedTextField(
-            value = state.serverBaseUrl,
-            onValueChange = onServerBaseUrlChange,
-            label = { Text(strings.serverUrl) },
-            isError = state.connectionMessageIsError,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            text = strings.serverUrlHint,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-        )
+        if (BuildConfig.DEBUG) {
+            OutlinedTextField(
+                value = state.serverBaseUrl,
+                onValueChange = onServerBaseUrlChange,
+                label = { Text(strings.serverUrl) },
+                isError = state.connectionMessageIsError,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (state.connectionMessageIsError) {
+            state.connectionMessage?.let { message ->
+                AppDynamicStatusText(
+                    text = localizeConnectionMessage(message, isEnglish),
+                    isError = true,
+                )
+            }
+        }
+        if (BuildConfig.DEBUG) {
+            Text(
+                text = strings.serverUrlHint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         if (canContinueOffline) {
             Text(
                 text = strings.localWorkspaceAvailableTitle,
@@ -273,6 +286,11 @@ private fun SignInPanel(
             strings = strings,
             isError = state.error != null,
             modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = passwordRecoveryHelp(isEnglish),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
         )
         state.error?.let {
             AppDynamicStatusText(
@@ -392,6 +410,14 @@ private fun localizeLoginError(error: String, strings: com.taskbridge.app.ui.i18
 
 private fun localizeConnectionMessage(message: String, isEnglish: Boolean): String {
     return userFacingConnectionMessage(message, isEnglish)
+}
+
+private fun passwordRecoveryHelp(isEnglish: Boolean): String {
+    return if (isEnglish) {
+        "Forgot your password? Ask the server administrator to reset it."
+    } else {
+        "忘记密码？请联系服务器管理员重置。"
+    }
 }
 
 private fun localhostWarningText(serverBaseUrl: String, isEnglish: Boolean): String? {

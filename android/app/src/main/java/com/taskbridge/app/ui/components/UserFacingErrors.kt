@@ -56,9 +56,9 @@ fun userFacingConnectionErrorMessage(error: Throwable?, isEnglish: Boolean): Str
             "服务器暂时不可用，请稍后重试。"
         }
         isNetworkConnectionError(normalized) -> if (isEnglish) {
-            "Cannot connect to the server. Check the server address, network, or whether the service is running."
+            "Cannot connect to the service. Check your network, then contact the administrator if it continues."
         } else {
-            "无法连接服务器，请检查服务器地址、网络或服务是否已启动。"
+            "无法连接服务，请检查网络；若持续失败，请联系管理员。"
         }
         else -> genericConnectionFailure(isEnglish)
     }
@@ -77,9 +77,9 @@ fun userFacingAuthErrorKey(error: Throwable?, fallbackKey: String): String {
 fun userFacingAuthErrorMessage(errorKey: String, isEnglish: Boolean, fallback: String): String {
     return when (errorKey) {
         authNetworkErrorKey -> if (isEnglish) {
-            "Cannot connect to the server. Check the server address or network."
+            "Cannot connect to the service. Check your network or contact the administrator."
         } else {
-            "无法连接服务器，请检查服务器地址或网络。"
+            "无法连接服务，请检查网络或联系管理员。"
         }
         authServerErrorKey -> if (isEnglish) {
             "The server is temporarily unavailable. Try again later."
@@ -92,9 +92,9 @@ fun userFacingAuthErrorMessage(errorKey: String, isEnglish: Boolean, fallback: S
 
 private fun genericConnectionFailure(isEnglish: Boolean): String {
     return if (isEnglish) {
-        "Connection check failed. Check the server address or contact the server administrator."
+        "Connection check failed. Check your network or contact the administrator."
     } else {
-        "连接检查失败，请检查服务器地址，或联系服务器管理员。"
+        "连接检查失败，请检查网络或联系管理员。"
     }
 }
 
