@@ -1,0 +1,493 @@
+/* Daily workspace: clear hierarchy, quiet surfaces, and consistent controls. */
+:root {
+  --primary-strong: color-mix(in srgb, var(--primary) 65%, var(--text));
+}
+
+html[data-theme="harbor"] {
+  --primary-text: #140c07;
+}
+
+.focus-workspace {
+  --workspace-sidebar: color-mix(in srgb, var(--surface-muted) 94%, var(--primary));
+  --control-radius: 10px;
+  --task-row-padding: 16px;
+  --task-row-height: 76px;
+  --task-title-size: 15px;
+}
+
+.focus-workspace .sidebar {
+  gap: 24px;
+  border-right-color: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.focus-workspace .brand {
+  gap: 10px;
+  padding-bottom: 10px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.focus-workspace .brand-mark {
+  border: 0;
+  border-radius: 10px;
+  color: var(--primary-text);
+  background: var(--workspace-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.focus-workspace .nav-list {
+  gap: 6px;
+}
+
+.focus-workspace .nav-list button {
+  min-height: 42px;
+  border-radius: var(--control-radius);
+  font-weight: 500;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.focus-workspace .nav-list button.active {
+  border-color: transparent;
+  color: var(--primary-strong);
+  background: color-mix(in srgb, var(--workspace-accent) 10%, var(--surface));
+  font-weight: 650;
+}
+
+.focus-workspace .nav-list svg {
+  stroke-width: 1.7;
+}
+
+.focus-workspace .account-menu-trigger {
+  border-radius: var(--control-radius);
+}
+
+.focus-workspace .account-avatar {
+  border-color: transparent;
+  color: var(--primary-strong);
+  background: color-mix(in srgb, var(--workspace-accent) 9%, var(--surface));
+}
+
+.focus-workspace .view-shell {
+  gap: 24px;
+  padding-top: 40px;
+  padding-bottom: 56px;
+}
+
+.focus-workspace .view-header h1 {
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+}
+
+.focus-workspace .today-view .view-header {
+  gap: 24px;
+  padding-bottom: 4px;
+}
+
+.focus-workspace .today-view .view-header h1 {
+  font-size: 32px;
+}
+
+.focus-workspace .today-date-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 10px;
+  color: var(--workspace-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.focus-workspace .today-date-line .view-count {
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.focus-workspace .today-date-divider {
+  color: var(--muted);
+}
+
+.focus-workspace .today-create-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 15px;
+}
+
+.focus-workspace .primary-button,
+.focus-workspace .secondary-button,
+.focus-workspace .ghost-button,
+.focus-workspace .icon-button,
+.focus-workspace .text-button {
+  border-radius: var(--control-radius);
+  font-weight: 550;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.focus-workspace .text-button,
+.focus-workspace .text-button:hover {
+  color: var(--primary-strong);
+}
+
+.focus-workspace input,
+.focus-workspace select,
+.focus-workspace textarea {
+  border-radius: var(--control-radius);
+  caret-color: var(--workspace-accent);
+}
+
+.focus-workspace .workspace-quick-add {
+  grid-template-columns: minmax(0, 1fr) 36px 36px;
+  gap: 4px;
+  max-width: none;
+  min-height: 52px;
+  padding: 5px;
+  border-color: color-mix(in srgb, var(--border) 85%, var(--surface));
+  border-radius: 12px;
+  background: var(--surface-muted);
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.focus-workspace .workspace-quick-add:focus-within {
+  border-color: var(--workspace-accent);
+  background: var(--surface);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--workspace-accent) 8%, transparent);
+}
+
+.focus-workspace .workspace-quick-add input {
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 14px;
+}
+
+.focus-workspace .workspace-quick-add button {
+  border: 0;
+  border-radius: 8px;
+  color: var(--workspace-muted);
+}
+
+.focus-workspace .workspace-quick-add button[type="submit"] {
+  color: var(--primary-strong);
+  background: color-mix(in srgb, var(--workspace-accent) 10%, var(--surface));
+}
+
+.focus-workspace .workspace-quick-add button[type="submit"]:hover:not(:disabled) {
+  color: var(--primary-text);
+  background: var(--workspace-accent);
+}
+
+.focus-workspace .task-section-header {
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 18px 10px 8px;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.focus-workspace .task-section-header strong {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: inherit;
+  background: var(--workspace-subtle);
+  font-size: 11px;
+  font-weight: 500;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-workspace .task-row {
+  column-gap: 10px;
+  padding-right: 10px;
+  padding-left: 10px;
+  border-bottom-color: color-mix(in srgb, var(--workspace-line) 70%, transparent);
+  border-radius: 10px;
+}
+
+.focus-workspace .task-row:hover,
+.focus-workspace .task-row:focus-within {
+  background: color-mix(in srgb, var(--workspace-accent) 4%, var(--surface));
+}
+
+.focus-workspace .task-row.overdue:not(.completed) {
+  padding-left: 10px;
+  border-left: 0;
+}
+
+.focus-workspace .task-row.overdue:not(.completed):hover,
+.focus-workspace .task-row.overdue:not(.completed):focus-within {
+  background: color-mix(in srgb, var(--workspace-accent) 4%, var(--surface));
+}
+
+.focus-workspace .check-button::before {
+  width: 21px;
+  height: 21px;
+  border: 1.5px solid var(--primary-strong);
+  background: transparent;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.focus-workspace .check-button:hover:not(:disabled)::before {
+  border-color: var(--primary-strong);
+  background: color-mix(in srgb, var(--workspace-accent) 9%, var(--surface));
+}
+
+.focus-workspace .check-button svg {
+  z-index: 1;
+  grid-area: 1 / 1;
+}
+
+.focus-workspace .task-row.completed .check-button::before {
+  border-color: var(--workspace-accent);
+  background: var(--workspace-accent);
+}
+
+.focus-workspace .task-row.completed .check-button::after {
+  content: none;
+}
+
+.focus-workspace .task-edit-trigger {
+  min-height: 0;
+  line-height: 1.6;
+}
+
+.focus-workspace .task-meta {
+  gap: 5px 14px;
+  margin-top: 7px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.focus-workspace .task-schedule,
+.focus-workspace .task-context,
+.focus-workspace .task-feature-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.focus-workspace .task-schedule svg,
+.focus-workspace .task-context svg,
+.focus-workspace .task-feature-badge svg {
+  flex: none;
+  stroke-width: 1.6;
+}
+
+.focus-workspace .task-row.overdue:not(.completed) .task-schedule,
+.focus-workspace .task-schedule.is-invalid {
+  color: var(--workspace-danger);
+}
+
+.focus-workspace .task-feature-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 7px;
+  margin-top: 7px;
+}
+
+.focus-workspace .task-feature-badge,
+.focus-workspace .task-extra-schedule > summary {
+  min-height: 22px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: var(--muted-strong);
+  background: var(--surface-muted);
+  font-size: 11px;
+  font-weight: 450;
+  line-height: 1.5;
+}
+
+.focus-workspace .task-priority-badge.is-high {
+  color: var(--workspace-danger);
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+}
+
+.focus-workspace .task-extra-schedule {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 6px;
+  color: var(--workspace-muted);
+  font-size: 12px;
+}
+
+.focus-workspace .task-extra-schedule > summary,
+.focus-workspace .task-conflict-comparison > summary {
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+}
+
+.focus-workspace .task-extra-schedule[open] > span {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+.focus-workspace .sync-pill {
+  color: var(--primary-strong);
+  background: color-mix(in srgb, var(--workspace-accent) 9%, var(--surface));
+  font-weight: 500;
+}
+
+.focus-workspace .sync-pill.is-error,
+.focus-workspace .sync-pill.is-warning {
+  color: var(--workspace-danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+}
+
+.focus-workspace .conflict-detail {
+  border-radius: 10px;
+}
+
+.focus-workspace .task-conflict-comparison {
+  margin-top: 10px;
+}
+
+.focus-workspace .task-conflict-comparison > summary {
+  color: var(--workspace-danger);
+  font-size: 12px;
+}
+
+.focus-workspace .task-conflict-comparison[open] .conflict-snapshot-grid {
+  margin-top: 10px;
+}
+
+.focus-workspace .task-menu-trigger {
+  border-color: transparent;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.focus-workspace .task-menu-trigger:hover,
+.focus-workspace .task-menu-trigger[aria-expanded="true"] {
+  border-color: var(--workspace-line);
+  background: var(--surface);
+}
+
+.focus-workspace .task-search-field,
+.focus-workspace .filter-menu > summary,
+.focus-workspace .segment-control.task-filter-segments {
+  border-radius: var(--control-radius);
+}
+
+.focus-workspace .task-search-field input {
+  border-radius: 0;
+}
+
+.focus-workspace .segment-control.task-filter-segments button {
+  border-radius: 7px;
+  font-weight: 550;
+}
+
+.focus-workspace .account-menu-items,
+.focus-workspace .task-menu-panel,
+.focus-workspace .filter-menu-panel,
+.focus-workspace .metadata-menu {
+  border-radius: 12px;
+}
+
+.focus-workspace .account-menu-items button,
+.focus-workspace .task-menu-panel button,
+.focus-workspace .settings-category-nav button {
+  border-radius: 7px;
+  font-weight: 500;
+}
+
+.focus-workspace .today-view .empty-state-action {
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 320px;
+  padding: 48px 24px;
+  border: 0;
+  background: transparent;
+  text-align: center;
+}
+
+.focus-workspace .today-empty-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 16px;
+  color: var(--primary-strong);
+  background: color-mix(in srgb, var(--workspace-accent) 9%, var(--surface));
+}
+
+.focus-workspace .today-empty-copy h2 {
+  color: var(--heading);
+  font-size: 18px;
+  font-weight: 550;
+  line-height: 1.5;
+}
+
+.focus-workspace .today-empty-copy p {
+  margin-top: 6px;
+  color: var(--workspace-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.focus-workspace ::selection {
+  color: var(--text);
+  background: color-mix(in srgb, var(--primary) 20%, var(--surface));
+}
+
+.focus-workspace .undo-notice {
+  border-radius: 12px;
+}
+
+:root[data-density="compact"] .focus-workspace {
+  --task-row-padding: 9px;
+  --task-row-height: 52px;
+  --task-title-size: 14px;
+}
+
+:root[data-density="compact"] .focus-workspace .task-meta,
+:root[data-density="compact"] .focus-workspace .task-feature-badges {
+  margin-top: 4px;
+}
+
+@media (max-width: 899px) {
+  .focus-workspace .view-shell {
+    padding-top: 28px;
+  }
+
+  .focus-workspace .brand {
+    padding: 2px 0 10px;
+  }
+}
+
+@media (max-width: 799px) {
+  .focus-workspace .today-view .view-header {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .focus-workspace .today-view .view-header h1 {
+    font-size: 28px;
+  }
+
+  .focus-workspace .today-date-line {
+    gap: 4px 7px;
+    font-size: 12px;
+  }
+
+  .focus-workspace .task-row,
+  .focus-workspace .task-row.overdue:not(.completed) {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+}

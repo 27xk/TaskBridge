@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import test from "node:test";
 import { loadElectronModule } from "./helpers/mock-electron-windows.mjs";
+import { loadVueComponent } from "./helpers/load-vue-component.mjs";
 
 const { formatTaskDate, getTaskSchedulePresentation } = loadElectronModule("src/utils/task-presentation.ts");
 const now = "2026-10-14T12:00:00Z";
 const options = { language: "zh-CN", timeZone: "Asia/Shanghai", now };
+const require = createRequire(import.meta.url);
+const { createSSRApp } = require("vue");
+const { renderToString } = require("@vue/server-renderer");
+const { translate } = loadElectronModule("src/i18n.ts");
 
 test("task dates compare calendar days in the selected display time zone", () => {
   const value = "2026-10-14T23:00:00Z";
@@ -90,3 +96,38 @@ test("invalid dates are visible, retain the source in the tooltip, and cannot hi
   assert.equal(formatTaskDate(null, options).label, "");
   assert.equal(formatTaskDate("2026-10-14", { ...options, timeZone: "invalid-zone" }).label, "今天");
 });
+
+test("task rows keep the main metadata concise while preserving priority, checklist, repeat, and template information", async () => {
+  const html = await renderTask({
+    dueTime: "2026-10-14T23:00:00Z", plannedDate: "2026-10-14", project: "工作", tag: "设计",
+    priority: 3, repeatRule: "weekly", checklistJson: '[{"done":true},{"done":false}]', isTemplate: true,
+  });
+  const metadata = html.match(/class="task-meta">([\s\S]*?)<\/div>/)[1];
+  assert.ok(metadata.includes("明天 07:00 截止") && metadata.includes("工作") && metadata.includes("设计"));
+  assert.ok(!metadata.includes("每周") && !metadata.includes("清单") && !metadata.includes("优先级"));
+  assert.ok(html.includes("每周") && html.includes("清单 1/2") && html.includes("优先级 高") && html.includes("模板"));
+  assert.ok(html.includes("<summary>计划</summary>") && html.includes("计划 今天"));
+});
+
+test("conflict comparison may collapse while the warning and recovery actions stay visible", async () => {
+  const html = await renderTask({
+    syncStatus: "conflict",
+    conflictLocalJson: '{"title":"本地方案","content":"local"}',
+    conflictServerJson: '{"title":"云端方案","content":"cloud"}',
+  });
+  assert.ok(html.includes("查看版本差异") && html.includes("本地方案") && html.includes("云端方案"));
+  assert.match(html, /<\/details><div class="conflict-actions-inline">/);
+  assert.ok(html.includes("sync-pill is-warning"));
+  assert.ok(!html.includes('class="task-menu-panel"'));
+});
+
+async function renderTask(fields) {
+  const settings = { language: "zh-CN", displayTimeZone: "Asia/Shanghai", t: key => translate(key, "zh-CN") };
+  const component = loadVueComponent("src/components/TaskItem.vue", {
+    "../stores/settings": { useSettingsStore: () => settings },
+    "../stores/task": { useTaskStore: () => ({ timelineNow: new Date(now) }) },
+  }, { window: {} });
+  return renderToString(createSSRApp(component, {
+    task: { localId: "preview", title: "完成方案", status: "todo", syncStatus: "synced", priority: 0, checklistJson: "[]", ...fields },
+  }));
+}

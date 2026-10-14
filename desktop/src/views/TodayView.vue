@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef } from "vue";
+import { Check, Plus } from "lucide-vue-next";
 
 import AppToast from "../components/AppToast.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
@@ -13,7 +14,7 @@ import { useAuthStore } from "../stores/auth";
 import { useCaptureStore } from "../stores/capture";
 import { useTaskStore, type TaskDraft } from "../stores/task";
 import { isCompletedStatus, isTaskOverdue, sortTasksByTimeline } from "../utils/task-order";
-import { todayLocalDate } from "../../shared/quick-add-parser";
+import { getDateTimeFormatter, normalizeTimeZone, todayLocalDate } from "../../shared/quick-add-parser";
 import { getTaskActionConfirmationMessage } from "../../shared/task-ui-policy";
 
 interface WorkspaceQuickAddHandle {
@@ -62,6 +63,18 @@ const overdueTodayTasks = computed(() =>
 const upcomingTodayTasks = computed(() =>
   openTodayTasks.value.filter((task) => !isTaskOverdue(task, taskStore.timelineNow, settingsStore.displayTimeZone)),
 );
+const todayDate = computed(() => todayLocalDate(taskStore.timelineNow, settingsStore.displayTimeZone));
+const todayDateLabel = computed(() => getDateTimeFormatter(settingsStore.language, {
+  month: "long",
+  day: "numeric",
+  weekday: "long",
+  timeZone: normalizeTimeZone(settingsStore.displayTimeZone),
+}).format(taskStore.timelineNow));
+const remainingLabel = computed(() => {
+  const count = openTodayTasks.value.length;
+  if (settingsStore.language === "zh-CN") return count ? `还有 ${count} 件待办` : "今天没有待办";
+  return count ? `${count} ${count === 1 ? "task" : "tasks"} to go` : "No tasks for today";
+});
 
 function setEditorDirty(dirty: boolean): void {
   editorDirty.value = dirty;
@@ -241,9 +254,17 @@ onBeforeUnmount(() => {
   <section class="view-shell today-view" :class="{ 'has-editor': editorOpen }">
     <header class="view-header">
       <div>
-        <h1>{{ settingsStore.t("nav.today") }}</h1>
-        <p class="view-count">{{ openTodayTasks.length }} {{ settingsStore.t("task.todayCountSuffix") }}</p>
+        <h1>{{ settingsStore.language === "zh-CN" ? "今天" : settingsStore.t("nav.today") }}</h1>
+        <p class="today-date-line">
+          <time :datetime="todayDate">{{ todayDateLabel }}</time>
+          <span class="today-date-divider" aria-hidden="true">·</span>
+          <span class="view-count">{{ remainingLabel }}</span>
+        </p>
       </div>
+      <button class="primary-button today-create-button" type="button" :disabled="isSaving" @click="openCreate">
+        <Plus :size="17" aria-hidden="true" />
+        <span>{{ settingsStore.language === "zh-CN" ? "新建任务" : "New task" }}</span>
+      </button>
     </header>
 
     <WorkspaceQuickAdd
@@ -321,7 +342,11 @@ onBeforeUnmount(() => {
           />
 
         <div v-if="openTodayTasks.length === 0" class="empty-state empty-state-action">
-          <span>{{ settingsStore.t("task.emptyToday") }}</span>
+          <span class="today-empty-mark" aria-hidden="true"><Check :size="24" /></span>
+          <div class="today-empty-copy">
+            <h2>{{ settingsStore.language === "zh-CN" ? "给今天留一点空间" : "Make room for your day" }}</h2>
+            <p>{{ settingsStore.language === "zh-CN" ? "记下一件想做的事，从这里开始。" : "Start with one thing you would like to do." }}</p>
+          </div>
           <button class="secondary-button" type="button" @click="openCreate">{{ settingsStore.t("task.addToday") }}</button>
         </div>
       </div>

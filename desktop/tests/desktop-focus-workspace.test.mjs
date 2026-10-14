@@ -197,7 +197,7 @@ test("today view integrates reliable quick add and save error feedback", async (
 
   assert.match(today, /import AppToast from "\.\.\/components\/AppToast\.vue"/);
   assert.match(today, /import WorkspaceQuickAdd from "\.\.\/components\/WorkspaceQuickAdd\.vue"/);
-  assert.match(today, /import \{ todayLocalDate \} from "\.\.\/\.\.\/shared\/quick-add-parser"/);
+  assert.match(today, /import \{[^}]*\btodayLocalDate\b[^}]*\} from "\.\.\/\.\.\/shared\/quick-add-parser"/);
   assert.match(today, /interface WorkspaceQuickAddHandle \{\s*clear\(submittedTitle: string\): boolean;\s*focus\(\): void;\s*\}/);
   assert.match(today, /const quickAddRef = useTemplateRef<WorkspaceQuickAddHandle>\("quickAdd"\)/);
   assert.ok(today.indexOf("<WorkspaceQuickAdd") < today.indexOf('class="task-list today-task-list"'));
