@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { workspacePaths } from "./script-helpers.mjs";
+import { normalizeLineEndings, workspacePaths } from "./script-helpers.mjs";
 
 const { desktopRoot, repoRoot } = workspacePaths(import.meta.url);
 
@@ -23,7 +23,7 @@ const [
   userQuickStartSource,
   desktopReadmeSource,
   androidReadmeSource,
-] = await Promise.all([
+] = (await Promise.all([
   readFile(resolve(repoRoot, "web/index.html"), "utf8"),
   readFile(resolve(repoRoot, "web/app.js"), "utf8"),
   readFile(resolve(repoRoot, "web/styles.css"), "utf8"),
@@ -41,7 +41,7 @@ const [
   readFile(resolve(repoRoot, "docs/user-quick-start.md"), "utf8"),
   readFile(resolve(repoRoot, "desktop/README.md"), "utf8"),
   readFile(resolve(repoRoot, "android/README.md"), "utf8"),
-]);
+])).map(normalizeLineEndings);
 
 function sourceBetween(source, start, end) {
   const startIndex = source.indexOf(start);

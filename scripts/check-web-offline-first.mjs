@@ -92,8 +92,13 @@ assert.match(
 
 assert.match(
   serviceWorkerSource,
-  /CACHE_NAME\s*=\s*`taskbridge-web-shell-v\$\{WEB_VERSION\}`/,
-  "web service worker cache version must track the published web client version",
+  /\bconst\s+SHELL_REVISION\s*=\s*"[^"\s]+";/,
+  "web service worker must declare a non-empty shell revision",
+);
+assert.match(
+  serviceWorkerSource,
+  /CACHE_NAME\s*=\s*`taskbridge-web-shell-v\$\{WEB_VERSION\}-\$\{SHELL_REVISION\}`/,
+  "web service worker cache version must track the published web client version and shell revision",
 );
 assert.match(
   serviceWorkerSource,
