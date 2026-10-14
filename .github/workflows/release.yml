@@ -680,6 +680,8 @@ jobs:
   release:
     name: Update GitHub Release
     runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
     needs:
       - android
       - deployment
