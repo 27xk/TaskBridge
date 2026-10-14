@@ -49,7 +49,6 @@ for (const token of [
   "gh release delete-asset",
   "Verify published release assets",
   "Skipping public Android APK because signing secrets are not configured",
-  "Skipping public Windows installer because signing secrets are not configured",
   "Build desktop application",
 ]) {
   assert.match(releaseSource, new RegExp(escapeRegExp(token)), `release workflow must include ${token}`);
@@ -67,18 +66,75 @@ assert.match(
 );
 assert.match(
   releaseSource,
-  /required_assets=.*deployment\.zip[\s\S]{0,300}SHA256SUMS\.txt/,
+  /forbidden_assets=[\s\S]{0,240}unsigned[\s\S]{0,240}builder-debug\.yml/,
+  "published release verification must reject unsigned Android and builder debug assets",
+);
+
+const normalizedReleaseSource = releaseSource.replace(/\r\n?/g, "\n");
+function releaseStep(name) {
+  const marker = `      - name: ${name}\n`;
+  const index = normalizedReleaseSource.indexOf(marker);
+  assert.ok(index >= 0, `release workflow must include step ${name}`);
+  const body = normalizedReleaseSource.slice(index + marker.length);
+  const boundary = body.search(/^(?:      - name:|  [\w-]+:)/m);
+  return boundary < 0 ? body : body.slice(0, boundary);
+}
+
+for (const name of [
+  "Build Windows installer",
+  "Prepare desktop artifacts",
+  "Validate desktop update artifacts",
+  "Upload Windows artifacts",
+]) {
+  assert.doesNotMatch(releaseStep(name), /^        if:/m, `${name} must run without Windows signing secrets`);
+}
+assert.match(releaseStep("Build Windows installer"), /^        run:\s*npm run dist\s*$/m, "Windows installer delivery must build the distributable");
+const windowsSigningStep = releaseStep("Prepare Windows signing certificate");
+assert.match(windowsSigningStep, /TASKBRIDGE_WINDOWS_SIGNED_RELEASE=false/, "missing Windows signing must select unsigned delivery");
+assert.match(windowsSigningStep, /CSC_IDENTITY_AUTO_DISCOVERY=false/, "unsigned Windows delivery must disable certificate discovery");
+assert.match(
+  windowsSigningStep,
+  /::notice::[^\n]*unsigned[^\n]*(?:Windows|installer)|::notice::[^\n]*(?:Windows|installer)[^\n]*unsigned/i,
+  "missing Windows signing must explicitly announce unsigned installer delivery",
+);
+const windowsVerifyStep = releaseStep("Verify Windows installer signatures");
+assert.match(
+  windowsVerifyStep,
+  /^        if:\s*(?:\$\{\{\s*)?env\.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'(?:\s*\}\})?\s*$/m,
+  "release workflow must verify Windows signatures when signing is configured",
+);
+assert.match(windowsVerifyStep, /Get-AuthenticodeSignature/, "signed Windows releases must validate Authenticode signatures");
+assert.match(windowsVerifyStep, /\$signature\.Status -ne 'Valid'[\s\S]*throw/, "invalid Windows signatures must fail the release");
+for (const name of [
+  "Build release APK",
+  "Verify Android APK signature",
+  "Prepare Android artifact",
+  "Upload Android artifact",
+]) {
+  assert.match(
+    releaseStep(name),
+    /^        if:\s*(?:\$\{\{\s*)?env\.TASKBRIDGE_ANDROID_SIGNED_RELEASE == 'true'(?:\s*\}\})?\s*$/m,
+    `${name} must require Android signing`,
+  );
+}
+assert.match(releaseStep("Verify Android APK signature"), /apksigner[\s\S]*verify/, "Android release APKs must pass signature verification");
+const releaseVerificationStep = releaseStep("Verify published release assets");
+const requiredAssets = releaseVerificationStep.match(/required_assets=\([\s\S]*?\)/)?.[0] ?? "";
+const requiredAssetNames = [...requiredAssets.matchAll(/["']([^"']+)["']/g)].map((match) => match[1]);
+assert.ok(
+  requiredAssetNames.some((name) => name.endsWith("-deployment.zip")) && requiredAssetNames.includes("SHA256SUMS.txt"),
   "published release verification must require the deployment archive and checksums",
 );
+for (const token of [".exe", ".blockmap", "latest.yml"]) {
+  assert.ok(
+    requiredAssetNames.some((name) => token === "latest.yml" ? name === token : name.endsWith(token)),
+    `published release verification must require Windows installer and update artifacts: ${token}`,
+  );
+}
 assert.match(
-  releaseSource,
-  /forbidden_assets=[\s\S]{0,240}unsigned[\s\S]{0,240}builder-debug\.yml/,
-  "published release verification must reject unsigned and builder debug assets",
-);
-assert.doesNotMatch(
-  releaseSource,
-  /building an unsigned installer/i,
-  "release workflow must never attach an unsigned Windows installer to a public release",
+  releaseStep("Publish GitHub Release"),
+  /Windows[^\n]*unsigned|unsigned[^\n]*Windows/i,
+  "release notes must disclose unsigned Windows installers",
 );
 assert.doesNotMatch(
   releaseSource,
@@ -92,8 +148,8 @@ assert.match(
 );
 assert.match(
   releaseDocsSource,
-  /未配置签名[^\n]*不会上传[^\n]*(?:APK|安装包)/,
-  "release docs must explain that unsigned client artifacts are omitted",
+  /未配置签名[^\n]*不会上传[^\n]*APK/,
+  "release docs must explain that unsigned Android APKs are omitted",
 );
 for (const requiredPath of ["deploy/start-local.cmd", "deploy/start-local.sh"]) {
   assert.match(

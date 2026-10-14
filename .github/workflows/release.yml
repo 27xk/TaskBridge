@@ -506,11 +506,11 @@ jobs:
           if (-not $hasCertificate -and -not $hasPassword) {
             "TASKBRIDGE_WINDOWS_SIGNED_RELEASE=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             "CSC_IDENTITY_AUTO_DISCOVERY=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-            Write-Host "::notice::Skipping public Windows installer because signing secrets are not configured."
+            Write-Host "::notice::Windows signing is not configured; building an unsigned installer."
             exit 0
           }
           if (-not $hasCertificate -or -not $hasPassword) {
-            throw "Incomplete Windows signing secrets. Configure both values, or remove both to omit the installer from the public release."
+            throw "Incomplete Windows signing secrets. Configure both values, or remove both to build without code signing."
           }
           $certificatePath = Join-Path $env:RUNNER_TEMP "taskbridge-codesign.pfx"
           [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
@@ -525,7 +525,6 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
       - name: Build Windows installer
-        if: env.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'
         run: npm run dist
         env:
           TASKBRIDGE_BASE_URL: ${{ env.TASKBRIDGE_BASE_URL }}
@@ -549,7 +548,6 @@ jobs:
           }
 
       - name: Prepare desktop artifacts
-        if: env.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path ..\artifacts | Out-Null
@@ -561,7 +559,6 @@ jobs:
           }
 
       - name: Validate desktop update artifacts
-        if: env.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'
         shell: pwsh
         run: |
           # Desktop auto-update publishes to the stable latest channel.
@@ -577,7 +574,6 @@ jobs:
           }
 
       - name: Upload Windows artifacts
-        if: env.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: taskbridge-desktop
@@ -732,10 +728,14 @@ jobs:
           files: release-artifacts/*
           fail_on_unmatched_files: true
           body: |
-            The deployment bundle is ready for Docker Compose self-hosting. Android and
-            Windows downloads are attached only when their signing secrets were configured
-            and the generated files passed signature verification. Unsigned client files are
-            never attached to a public release.
+            The deployment bundle is ready for Docker Compose self-hosting.
+
+            The Windows installer is included in this release. When a code-signing
+            certificate is configured, the installer signature is verified before upload.
+            Otherwise the installer is unsigned, and Windows may show an unknown-publisher warning.
+
+            Android downloads are attached only when release signing is configured and
+            the generated APK passes signature verification. Unsigned Android APKs are never published.
 
             Backend Docker images:
 
@@ -753,7 +753,13 @@ jobs:
         shell: bash
         run: |
           asset_names="$(gh release view "$RELEASE_VERSION" --json assets --jq '.assets[].name')"
-          required_assets=("TaskBridge-${RELEASE_VERSION}-deployment.zip" "SHA256SUMS.txt")
+          required_assets=(
+            "TaskBridge-${RELEASE_VERSION}-deployment.zip"
+            "SHA256SUMS.txt"
+            "TaskBridge-${RELEASE_VERSION#v}-Setup.exe"
+            "TaskBridge-${RELEASE_VERSION#v}-Setup.exe.blockmap"
+            "latest.yml"
+          )
           for required_asset in "${required_assets[@]}"; do
             if ! grep -Fxq "$required_asset" <<<"$asset_names"; then
               echo "::error::Published release is missing ${required_asset}."
