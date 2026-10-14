@@ -1,4 +1,4 @@
-const WEB_VERSION = "0.1.8";
+const WEB_VERSION = "0.1.9";
 const SHELL_REVISION = "20261010-drafts-menus";
 const CACHE_NAME = `taskbridge-web-shell-v${WEB_VERSION}-${SHELL_REVISION}`;
 const SHELL_ASSETS = [
