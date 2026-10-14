@@ -233,32 +233,15 @@ jobs:
       - name: Prepare Android signing key
         shell: bash
         run: |
-          signing_values=(
-            "$ANDROID_KEYSTORE_BASE64"
-            "$ANDROID_KEYSTORE_PASSWORD"
-            "$ANDROID_KEY_ALIAS"
-            "$ANDROID_KEY_PASSWORD"
-          )
-          configured=0
-          for value in "${signing_values[@]}"; do
-            if [ -n "$value" ]; then
-              configured=1
-            fi
-          done
           missing=()
           for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
             if [ -z "${!name}" ]; then
               missing+=("$name")
             fi
           done
-          if [ "$configured" -eq 0 ]; then
-            echo "::notice::Skipping public Android APK because signing secrets are not configured."
-            echo "TASKBRIDGE_ANDROID_SIGNED_RELEASE=false" >> "$GITHUB_ENV"
-            exit 0
-          fi
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::Incomplete Android signing secrets: ${missing[*]}."
-            echo "Configure all Android signing secrets, or remove all of them to omit the APK from the public release." >&2
+            echo "Configure all four persistent Android release signing secrets before publishing." >&2
             exit 1
           fi
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
@@ -280,7 +263,6 @@ jobs:
         run: ./gradlew testReleaseUnitTest -PTASKBRIDGE_USE_CHINA_MIRRORS=false -PTASKBRIDGE_BASE_URL="${TASKBRIDGE_BASE_URL}" -PTASKBRIDGE_WS_URL="${TASKBRIDGE_WS_URL}" --stacktrace
 
       - name: Build release APK
-        if: env.TASKBRIDGE_ANDROID_SIGNED_RELEASE == 'true'
         run: ./gradlew :app:assembleRelease -PTASKBRIDGE_USE_CHINA_MIRRORS=false -PTASKBRIDGE_BASE_URL="${TASKBRIDGE_BASE_URL}" -PTASKBRIDGE_WS_URL="${TASKBRIDGE_WS_URL}" --stacktrace
         env:
           ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android/release.keystore
@@ -289,7 +271,6 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Verify Android APK signature
-        if: env.TASKBRIDGE_ANDROID_SIGNED_RELEASE == 'true'
         shell: bash
         run: |
           apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-release.apk' | head -n 1)"
@@ -310,7 +291,6 @@ jobs:
           "$apksigner" verify --verbose --print-certs "$apk_path"
 
       - name: Prepare Android artifact
-        if: env.TASKBRIDGE_ANDROID_SIGNED_RELEASE == 'true'
         shell: bash
         run: |
           mkdir -p ../artifacts
@@ -324,7 +304,6 @@ jobs:
           cp "$apk_path" "../artifacts/${artifact_name}"
 
       - name: Upload Android artifact
-        if: env.TASKBRIDGE_ANDROID_SIGNED_RELEASE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: taskbridge-android
@@ -734,8 +713,9 @@ jobs:
             certificate is configured, the installer signature is verified before upload.
             Otherwise the installer is unsigned, and Windows may show an unknown-publisher warning.
 
-            Android downloads are attached only when release signing is configured and
-            the generated APK passes signature verification. Unsigned Android APKs are never published.
+            The Android APK is included and verified with the persistent release signing key.
+            Unsigned Android APKs are never published. Release publishing fails if either
+            the Android APK or the Windows installer is missing.
 
             Backend Docker images:
 
@@ -756,6 +736,7 @@ jobs:
           required_assets=(
             "TaskBridge-${RELEASE_VERSION}-deployment.zip"
             "SHA256SUMS.txt"
+            "TaskBridge-${RELEASE_VERSION}-android.apk"
             "TaskBridge-${RELEASE_VERSION#v}-Setup.exe"
             "TaskBridge-${RELEASE_VERSION#v}-Setup.exe.blockmap"
             "latest.yml"

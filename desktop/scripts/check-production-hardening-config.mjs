@@ -60,8 +60,7 @@ assert.match(
   /Verify Windows installer signatures[\s\S]*TASKBRIDGE_WINDOWS_SIGNED_RELEASE[\s\S]*Get-AuthenticodeSignature[\s\S]*Status -ne 'Valid'/,
   "release workflow must verify Windows Authenticode signatures when Windows signing is configured",
 );
-assert.match(releaseSource, /Prepare Android signing key/, "release workflow must prepare optional Android signing");
-assert.match(releaseSource, /TASKBRIDGE_ANDROID_SIGNED_RELEASE/, "release workflow must track whether Android artifacts are signed");
+assert.match(releaseSource, /Prepare Android signing key/, "release workflow must prepare mandatory Android signing");
 for (const token of [
   "ANDROID_KEYSTORE_BASE64",
   "ANDROID_KEYSTORE_PASSWORD",
@@ -71,20 +70,60 @@ for (const token of [
 ]) {
   assert.match(releaseSource, new RegExp(escapeRegExp(token)), `release workflow must require ${token}`);
 }
-assert.match(
-  releaseSource,
-  /Verify Android APK signature[\s\S]*TASKBRIDGE_ANDROID_SIGNED_RELEASE[\s\S]*apksigner[\s\S]*verify --verbose --print-certs/,
-  "release workflow must verify the Android APK signature when Android signing is configured",
-);
 assert.doesNotMatch(
   releaseSource,
   /app-release-unsigned\.apk|android-unsigned\.apk/,
   "release workflow must not publish unsigned Android APKs",
 );
-assert.match(
+assert.doesNotMatch(
   releaseSource,
-  /Skipping public Android APK because signing secrets are not configured/,
-  "release workflow must omit Android downloads when signing is unavailable",
+  /Skipping public Android APK|TASKBRIDGE_ANDROID_SIGNED_RELEASE=false/,
+  "release workflow must not silently omit Android downloads when signing is unavailable",
+);
+const normalizedReleaseSource = releaseSource.replace(/\r\n?/g, "\n");
+function releaseStep(name) {
+  const marker = `      - name: ${name}\n`;
+  const index = normalizedReleaseSource.indexOf(marker);
+  assert.ok(index >= 0, `release workflow must include step ${name}`);
+  const body = normalizedReleaseSource.slice(index + marker.length);
+  const boundary = body.search(/^(?:      -(?:\s|$)|  [\w-]+:)/m);
+  return boundary < 0 ? body : body.slice(0, boundary);
+}
+const androidSigningStep = releaseStep("Prepare Android signing key");
+assert.doesNotMatch(androidSigningStep, /^        if:|\bexit 0\b/m, "Android signing preparation must not be optional");
+const missingSigningBranch = androidSigningStep.match(/if \[ "\$\{#missing\[@\]\}" -gt 0 \]; then([\s\S]*?)\n          fi/)?.[1] ?? "";
+assert.ok(
+  missingSigningBranch.includes("::error::") && /\bexit 1\b/.test(missingSigningBranch),
+  "release workflow must fail when Android signing secrets are missing",
+);
+const signingSecretLoop = androidSigningStep.match(/for name in ([^\n]*); do([\s\S]*?)\n          done/) ?? [];
+for (const name of ["ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD"]) {
+  assert.ok(signingSecretLoop[1]?.split(/\s+/).includes(name), `Android signing preparation must require ${name}`);
+  assert.ok(androidSigningStep.includes(`secrets.${name}`), `Android signing preparation must load ${name} from secrets`);
+}
+assert.match(signingSecretLoop[2] ?? "", /if \[ -z "\$\{!name\}" \]; then[\s\S]*missing\+=/, "Android signing preparation must detect empty secrets");
+assert.match(
+  androidSigningStep,
+  /base64 --decode > release\.keystore[\s\S]*if \[ ! -s release\.keystore \]; then[\s\S]*exit 1/,
+  "release workflow must validate the decoded Android signing keystore",
+);
+for (const name of ["Build release APK", "Verify Android APK signature", "Prepare Android artifact", "Upload Android artifact"]) {
+  assert.doesNotMatch(releaseStep(name), /^        if:/m, `${name} must always deliver signed Android artifacts`);
+}
+assert.match(
+  releaseStep("Verify Android APK signature"),
+  /apksigner[\s\S]*verify --verbose --print-certs/,
+  "release workflow must verify the Android APK signature before upload",
+);
+assert.doesNotMatch(
+  androidSigningStep + releaseStep("Build release APK"),
+  /debug\.keystore|androiddebugkey|signingConfigs(?:\.|\[|\.getByName\()["']?debug/i,
+  "release workflow must not use Android debug signing keys",
+);
+const requiredAssets = releaseStep("Verify published release assets").match(/required_assets=\([\s\S]*?\)/)?.[0] ?? "";
+assert.ok(
+  [...requiredAssets.matchAll(/["']([^"']+)["']/g)].some((match) => match[1] === "TaskBridge-${RELEASE_VERSION}-android.apk"),
+  "published release verification must require the signed Android APK",
 );
 assert.match(
   releaseSource,
