@@ -33,6 +33,9 @@ const workspaceMain = useTemplateRef<HTMLElement>("workspaceMain");
 let scrollRestorePending = true;
 let restoringScroll = false;
 const openTaskRequest = ref<{ localId: string; nonce: number } | null>(null);
+let taskDetailRequestSequence = 0;
+let quickAddRequestSequence = 0;
+let editorRequestGeneration = 0;
 const settingsSectionRequest = ref<{ sectionId: string; nonce: number } | null>(null);
 const workspaceInstanceKey = ref(0);
 const continueOfflineAfterExpiry = ref(false);
@@ -233,7 +236,7 @@ function resetWorkspaceUiState(): void {
   editorDirty.value = false;
   settingsConnectionDirty.value = false;
   activeView.value = "today";
-  openTaskRequest.value = null;
+  clearPendingEditorRequests();
   settingsSectionRequest.value = null;
   notifiedReminderIds.clear();
   saveNotifiedReminderIds();
@@ -306,6 +309,7 @@ async function requestViewChange(nextView: AppView): Promise<boolean> {
   editorDirty.value = false;
   settingsConnectionDirty.value = false;
   scrollRestorePending = true;
+  if (activeView.value === "tasks" && nextView !== "tasks") clearPendingEditorRequests();
   activeView.value = nextView;
   await restoreCurrentScroll();
   return true;
@@ -368,13 +372,33 @@ async function confirmDiscardCurrentEditor(): Promise<boolean> {
 }
 
 async function openQuickAdd(): Promise<void> {
-  if (!(await requestViewChange("tasks"))) return;
-  quickAddSignal.value += 1;
+  const workspaceKey = auth.workspaceKey;
+  const generation = ++editorRequestGeneration;
+  if (!(await requestViewChange("tasks")) || workspaceKey !== auth.workspaceKey || generation !== editorRequestGeneration || activeView.value !== "tasks") return;
+  openTaskRequest.value = null;
+  quickAddSignal.value = ++quickAddRequestSequence;
 }
 
 async function openTaskDetail(localId: string): Promise<void> {
-  if (!(await requestViewChange("tasks"))) return;
-  openTaskRequest.value = { localId, nonce: Date.now() };
+  const workspaceKey = auth.workspaceKey;
+  const generation = ++editorRequestGeneration;
+  if (!(await requestViewChange("tasks")) || workspaceKey !== auth.workspaceKey || generation !== editorRequestGeneration || activeView.value !== "tasks") return;
+  quickAddSignal.value = 0;
+  openTaskRequest.value = { localId, nonce: ++taskDetailRequestSequence };
+}
+
+function consumeTaskDetailRequest(nonce: number): void {
+  if (openTaskRequest.value?.nonce === nonce) openTaskRequest.value = null;
+}
+
+function consumeQuickAddRequest(signal: number): void {
+  if (quickAddSignal.value === signal) quickAddSignal.value = 0;
+}
+
+function clearPendingEditorRequests(): void {
+  editorRequestGeneration += 1;
+  openTaskRequest.value = null;
+  quickAddSignal.value = 0;
 }
 
 function updateEditorDirty(dirty: boolean): void {
@@ -523,6 +547,8 @@ function saveNotifiedReminderIds(): void {
         :quick-add-signal="quickAddSignal"
         :search-signal="searchSignal"
         :open-task-request="openTaskRequest"
+        @task-request-consumed="consumeTaskDetailRequest"
+        @quick-add-consumed="consumeQuickAddRequest"
         @editor-dirty-change="updateEditorDirty"
       />
       <TodayView
