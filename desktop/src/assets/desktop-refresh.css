@@ -385,6 +385,28 @@ html[data-theme="harbor"] {
   border-radius: 0;
 }
 
+.focus-workspace .task-sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted-strong);
+}
+
+.focus-workspace .task-sort-control select {
+  min-height: 36px;
+  max-width: 240px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+@media (max-width: 799px) {
+  .focus-workspace .task-sort-control select {
+    width: 100%;
+    max-width: none;
+  }
+}
+
 .focus-workspace .segment-control.task-filter-segments button {
   border-radius: 7px;
   font-weight: 550;

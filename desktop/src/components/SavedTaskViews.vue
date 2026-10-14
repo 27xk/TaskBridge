@@ -4,6 +4,7 @@ import { Bookmark, Trash2 } from "lucide-vue-next";
 
 import { useSettingsStore } from "../stores/settings";
 import { useWorkspaceStore } from "../stores/workspace";
+import { useDismissibleDetails } from "../composables/useDismissibleDetails";
 import { normalizeTaskViewCriteria, type TaskViewCriteria } from "../../shared/workspace-view-state";
 
 const props = defineProps<{ disabled?: boolean }>();
@@ -15,6 +16,7 @@ const errorCode = shallowRef("");
 const message = shallowRef("");
 const menu = useTemplateRef<HTMLDetailsElement>("menu");
 const menuSummary = useTemplateRef<HTMLElement>("menuSummary");
+const { close: closeMenu } = useDismissibleDetails(menu, menuSummary);
 const isChinese = computed(() => settingsStore.language === "zh-CN");
 const disabled = computed(() => props.disabled || !workspaceStore.workspaceKey);
 const currentCriteria = computed(() => JSON.stringify(normalizeTaskViewCriteria(workspaceStore.taskView)));
@@ -86,14 +88,10 @@ function removeView(id: string): void {
   }
 }
 
-function closeMenu(): void {
-  if (menu.value) menu.value.open = false;
-  menuSummary.value?.focus();
-}
 </script>
 
 <template>
-  <details ref="menu" class="saved-views" @keydown.esc.stop.prevent="closeMenu">
+  <details ref="menu" class="saved-views">
     <summary ref="menuSummary" :aria-label="labels.title">
       <Bookmark :size="15" aria-hidden="true" />
       <span>{{ labels.views }}</span>

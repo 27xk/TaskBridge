@@ -273,35 +273,62 @@ test("all-tasks view centralizes save feedback and drops inline sync diagnostics
   const taskUnmount = tasks.match(/onBeforeUnmount\(\(\) => \{([\s\S]*?)\n\}\);/);
   assert.ok(taskUnmount, "TaskView must clean up its notice timer when unmounted");
   assert.match(taskUnmount[1], /if \(noticeTimer !== undefined\) \{\s*window\.clearTimeout\(noticeTimer\);\s*noticeTimer = undefined;\s*\}/);
-  assert.match(tasks, /async function openCreate\(\): Promise<void> \{[\s\S]{0,280}editorSaveError\.value = "";/);
-  assert.match(tasks, /async function openEdit\(task: TaskRecord\): Promise<void> \{[\s\S]{0,280}editorSaveError\.value = "";/);
+  const createWrapper = extractBalancedBlock(tasks, "async function openCreate()");
+  const createEditor = extractBalancedBlock(tasks, "async function openCreateIfCurrent");
+  const editEditor = extractBalancedBlock(tasks, "async function openEdit");
+  assert.match(createWrapper, /\+\+openRequestGeneration/);
+  assert.match(createWrapper, /await openCreateIfCurrent\(/);
+  for (const editor of [createEditor, editEditor]) {
+    assert.match(editor, /await canLeaveEditor\(\)/);
+    assert.match(editor, /epoch !== workspaceEpoch \|\| !isCurrent\(\)/);
+    assert.match(editor, /editorSaveError\.value = "";/);
+  }
 });
 
 test("all tasks keeps common filters visible and moves secondary filters into menus", async () => {
-  const [taskView, taskItem, taskEditor] = await Promise.all([
+  const [taskView, taskItem, taskEditor, filterPanel, workspace] = await Promise.all([
     source("desktop/src/views/TaskView.vue"),
     source("desktop/src/components/TaskItem.vue"),
     source("desktop/src/components/TaskEditor.vue"),
+    source("desktop/src/components/TaskFilterPanel.vue"),
+    source("desktop/src/stores/workspace.ts"),
   ]);
 
   assert.match(taskView, /class="task-command-bar"/);
   assert.match(taskView, /class="segment-control task-filter-segments"/);
-  assert.match(taskView, /class="filter-menu"/);
+  const filterPanelTag = extractOpeningTag(taskView, "<TaskFilterPanel");
+  for (const contract of [':criteria="criteria"', ':projects="taskStore.projects"', ':categories="taskStore.tags"', ':disabled="bulkBusy"', '@selection-change="toggleSelection"']) {
+    assert.ok(filterPanelTag.includes(contract), `filter panel must wire ${contract}`);
+  }
+  assert.match(filterPanel, /class="filter-menu task-filter-panel"/);
+  assert.match(filterPanel, /useDismissibleDetails\(menu, menuSummary\)/);
+  assert.match(filterPanel, /selectionChange: \[key: TaskViewSelectionKey, value: string \| number\]/);
+  assert.match(filterPanel, /role="group" :aria-label="section\.label"/);
+  assert.match(filterPanel, /:aria-pressed="selected\(section\.key, option\.value\)"/);
+  assert.match(filterPanel, /if \(!props\.disabled\) emit\("selectionChange", key, value\)/);
+  assert.match(filterPanel, /props\.criteria\[key\][\s\S]{0,100}values\.includes\(value\)/);
+  for (const key of ["lists", "statuses", "projects", "categories", "priorities"]) {
+    assert.match(filterPanel, new RegExp(`key: "${key}"`));
+    assert.match(taskView, new RegExp(`criteria\\.value\\.${key}`));
+  }
+  const toggleFilter = extractBalancedBlock(workspace, "function toggleTaskViewSelection");
+  assert.match(toggleFilter, /values\.includes\(value\) \? values\.filter\(\(item\) => item !== value\) : \[\.\.\.values, value\]/);
+  assert.match(toggleFilter, /applyTaskView\(\{ \.\.\.taskView, \[key\]: next, filter: "all" \}\)/);
   assert.match(taskView, /activeFilterItems/);
   assert.match(taskView, /clearActiveFilter/);
-  assert.match(taskView, /if \(key === "filter"\) filter\.value = "all"/);
-  assert.match(taskView, /if \(key === "project"\) selectedProject\.value = ""/);
-  assert.match(taskView, /if \(key === "tag"\) selectedTag\.value = ""/);
   assert.match(taskView, /if \(key === "search"\) search\.value = ""/);
+  assert.match(taskView, /else toggleSelection\(key, value\)/);
+  assert.match(taskView, /@click="clearActiveFilter\(item\.key, item\.value\)"/);
+  assert.match(taskView, /workspaceStore\.applyTaskView\(\{ sortMode: criteria\.value\.sortMode \}\)/);
   assert.match(taskView, /const taskSearchInput = useTemplateRef<HTMLInputElement>\("taskSearchInput"\)/);
   assert.match(taskView, /const clearFiltersButton = useTemplateRef<HTMLButtonElement>\("clearFiltersButton"\)/);
   assert.match(taskView, /await focusAfterActiveFilterRemoval\(\)/);
   assert.match(taskView, /settingsStore\.language === "zh-CN" \? `搜索: \$\{keyword\}` : `Search: \$\{keyword\}`/);
   assert.match(taskView, /ref="taskSearchInput"/);
   assert.match(taskView, /ref="clearFiltersButton"/);
-  assert.match(taskView, /v-for="option in secondaryFilterOptions"/);
-  assert.match(taskView, /v-model="selectedProject"/);
-  assert.match(taskView, /v-model="selectedTag"/);
+  assert.match(filterPanel, /v-for="option in section\.options"/);
+  assert.match(taskView, /:aria-pressed="isPrimaryFilterSelected\(option\.value\)"/);
+  assert.doesNotMatch(taskView, /v-model="selectedProject"|v-model="selectedTag"|v-model="selectedStatus"/);
   assert.match(taskEditor, /role="alert"/);
   assert.match(taskView, /<AppToast/);
   assert.match(taskView, /v-if="selectionMode" class="bulk-action-toolbar"/);
@@ -601,5 +628,7 @@ test("desktop batch actions use an explicit selection mode without competing com
   assert.doesNotMatch(completeSelected, /requestConfirmation/);
   assert.match(taskItem, /v-if="selectable" class="task-selection-checkbox"/);
   assert.match(taskItem, /v-if="!trash && !selectable"[\s\S]{0,100}class="check-button"/);
-  assert.match(taskListSection, /:selectable="selectionMode && selectable"/);
+  const taskRow = extractOpeningTag(taskListSection, "<TaskItem");
+  assert.match(taskRow, /:selectable="selectionMode && selectable && \(trash \|\| \(!isCompletedStatus\(tasks\[row\.index\]\.status\) && !tasks\[row\.index\]\.isTemplate\)\)"/);
+  assert.match(taskRow, /:selected="selectedTaskIds\.has\(tasks\[row\.index\]\.localId\)"/);
 });

@@ -65,7 +65,7 @@ function onDetailsToggle(event: Event): void {
           <span>{{ settingsStore.t("settings.tagFrom") }}</span>
           <select :value="tagFrom" @change="onTagFromChange">
             <option value="">{{ settingsStore.t("settings.tagFrom") }}</option>
-            <option v-for="tag in tags" :key="tag" :value="tag">#{{ tag }}</option>
+            <option v-for="tag in tags" :key="tag" :value="tag">{{ tag }}</option>
           </select>
         </label>
         <label>

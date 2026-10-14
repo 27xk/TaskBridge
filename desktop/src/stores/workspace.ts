@@ -10,6 +10,9 @@ import {
   writeWorkspaceViewState,
   type SavedTaskView,
   type TaskViewCriteria,
+  type TaskViewFilter,
+  type TaskViewSelectionKey,
+  type TaskViewSelectionValue,
   type WorkspaceViewState,
   type WorkspaceViewStorage,
 } from "../../shared/workspace-view-state";
@@ -25,7 +28,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
 
   function snapshot(): WorkspaceViewState {
-    return { taskView: { ...taskView }, todayScrollTop: todayScrollTop.value, savedViews: savedViews.value };
+    return { taskView: { ...normalizeTaskViewCriteria(taskView), scrollTop: taskView.scrollTop }, todayScrollTop: todayScrollTop.value, savedViews: savedViews.value };
   }
 
   function cancelPendingPersist(): void {
@@ -73,6 +76,23 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     Object.assign(taskView, normalizeTaskViewCriteria(criteria), { scrollTop: 0 });
   }
 
+  function toggleTaskViewSelection<K extends TaskViewSelectionKey>(key: K, value: TaskViewSelectionValue<K>): void {
+    const values = taskView[key] as TaskViewSelectionValue<K>[];
+    const next = values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+    applyTaskView({ ...taskView, [key]: next, filter: "all" });
+  }
+
+  function setTaskViewFilter(filter: TaskViewFilter): void {
+    const preset = normalizeTaskViewCriteria({ filter });
+    applyTaskView({
+      ...taskView,
+      filter,
+      lists: preset.lists,
+      statuses: preset.statuses,
+      priorities: preset.priorities,
+    });
+  }
+
   function saveCurrentView(name: string): SavedTaskView {
     const view = createSavedTaskView(name, taskView, savedViews.value);
     commitSavedViews([...savedViews.value, view]);
@@ -99,7 +119,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     cancelPendingPersist();
   }
 
-  return { taskView, todayScrollTop, savedViews, workspaceKey, persistenceError, rememberScroll, persist, applyTaskView, saveCurrentView, applySavedView, deleteSavedView };
+  return { taskView, todayScrollTop, savedViews, workspaceKey, persistenceError, rememberScroll, persist, applyTaskView, toggleTaskViewSelection, setTaskViewFilter, saveCurrentView, applySavedView, deleteSavedView };
 });
 
 function storage(): WorkspaceViewStorage | null {

@@ -3,6 +3,7 @@ import { useTemplateRef } from "vue";
 import TaskItem from "./TaskItem.vue";
 import { useTaskVirtualList } from "../composables/useTaskVirtualList";
 import { useSettingsStore } from "../stores/settings";
+import { isCompletedStatus } from "../utils/task-order";
 
 const props = withDefaults(defineProps<{
   title?: string;
@@ -64,7 +65,7 @@ defineEmits<{
     <TaskItem
       :task="tasks[row.index]"
       :trash="trash"
-      :selectable="selectionMode && selectable"
+      :selectable="selectionMode && selectable && (trash || (!isCompletedStatus(tasks[row.index].status) && !tasks[row.index].isTemplate))"
       :selected="selectedTaskIds.has(tasks[row.index].localId)"
       :busy="busy"
       @edit="$emit('edit', $event)"

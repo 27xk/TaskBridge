@@ -45,6 +45,8 @@ const [
   desktopAppSource,
   desktopAppSidebarSource,
   desktopTaskViewSource,
+  desktopTaskFilterPanelSource,
+  desktopWorkspaceViewStateSource,
   desktopTodayViewSource,
   desktopTaskStoreSource,
   desktopTaskEditorSource,
@@ -129,6 +131,8 @@ const [
   readFile(resolve(desktopRoot, "src/App.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/AppSidebar.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/views/TaskView.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "src/components/TaskFilterPanel.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "shared/workspace-view-state.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/views/TodayView.vue"), "utf8"),
   readFile(resolve(desktopRoot, "src/stores/task.ts"), "utf8"),
   readFile(resolve(desktopRoot, "src/components/TaskEditor.vue"), "utf8"),
@@ -712,7 +716,8 @@ for (const [name, source] of [
   assert.doesNotMatch(source, /@click="editorOpen = false"/, `${name} drawer scrim must not discard edits directly`);
   assert.doesNotMatch(source, /@cancel="editorOpen = false"/, `${name} editor cancel must not discard edits directly`);
 }
-assert.match(desktopTaskViewSource, /TaskFilter = "all"[\s\S]*"trash"/, "Desktop task list must expose a trash/recycle-bin filter");
+assert.match(desktopWorkspaceViewStateSource, /export type TaskViewList = [^;]*"trash"/, "Desktop task list criteria must support a trash/recycle-bin filter");
+assert.match(desktopTaskFilterPanelSource, /value: "trash", label: settingsStore\.t\("task\.trash"\)/, "Desktop filter panel must expose the trash/recycle-bin option");
 assert.match(desktopTaskViewSource, /taskStore\.trashTasks/, "Desktop trash view must read deleted local tasks");
 assert.match(desktopTaskItemSource, /trash\?: boolean/, "Desktop task item must support a trash restore-only mode");
 assert.match(desktopTaskItemSource, /<button\s+v-if="!trash && !selectable"[\s\S]{0,180}class="check-button"/, "Desktop trash and selection rows must hide the completion checkbox-style button");
@@ -888,19 +893,27 @@ assertOrder(
   "Desktop task editor must offer notes/checklist before optional scheduling settings",
 );
 assert.match(desktopTaskViewSource, /primaryFilterOptions/, "Desktop task list must keep common filters in a short primary strip");
-assert.match(desktopTaskViewSource, /secondaryFilterOptions/, "Desktop task list must move uncommon filters into a secondary selector");
-assert.match(desktopTaskViewSource, /<details class="filter-menu">/, "Desktop secondary, project, and tag filters must be hidden behind one on-demand menu");
+assert.match(desktopTaskFilterPanelSource, /listOptions/, "Desktop task list must move uncommon filters into its focused filter panel");
+assert.match(desktopTaskFilterPanelSource, /<details[^>]*class="filter-menu task-filter-panel"/, "Desktop secondary, project, and category filters must be hidden behind one on-demand menu");
 const desktopFilterToolbar = sourceBetween(desktopTaskViewSource, '<div class="task-filter-toolbar">', '<div v-if="hasActiveFilters"');
-const desktopFilterMenu = sourceBetween(desktopFilterToolbar, '<details class="filter-menu">', '</details>');
-assert.match(desktopFilterMenu, /selectedProject[\s\S]*selectedTag/, "Desktop project and tag selectors must stay inside the filter menu");
-assert.doesNotMatch(desktopFilterToolbar.replace(/<details class="filter-menu">[\s\S]*?<\/details>/, ""), /selectedProject|selectedTag/, "Desktop project and tag selectors must not sit in the default filter toolbar");
-assert.match(desktopI18nSource, /"task\.projectTagFilters"/, "Desktop project/tag advanced filter must have a distinct label instead of repeating More filters");
-assert.match(desktopFilterMenu, /settingsStore\.t\("task\.projectTagFilters"\)/, "Desktop project/tag filter section must remain clearly labelled inside the menu");
+const desktopFilterPanelMount = sourceBetween(desktopFilterToolbar, '<TaskFilterPanel', '/>');
+const desktopFilterMenu = sourceBetween(desktopTaskFilterPanelSource, '<template>', '</template>');
+assert.match(desktopFilterPanelMount, /:criteria="criteria"/, "Desktop filter panel must read authoritative criteria from the workspace");
+assert.match(desktopFilterPanelMount, /:projects="taskStore\.projects"[\s\S]*:categories="taskStore\.tags"/, "Desktop project and category options must be wired into the filter menu");
+assert.match(desktopFilterPanelMount, /:disabled="bulkBusy"[\s\S]*@selection-change="toggleSelection"/, "Desktop filter menu must honor batch-action locking and emit selection changes");
+assert.doesNotMatch(desktopFilterToolbar, /v-model="selectedProject"|v-model="selectedTag"|v-model="selectedStatus"/, "Desktop default toolbar must not retain the old single-selection filter controls");
+for (const key of ["lists", "statuses", "projects", "categories", "priorities"]) {
+  assert.match(desktopTaskFilterPanelSource, new RegExp(`key: "${key}", label: labels\\.value\\.${key}`), `Desktop ${key} filter section must have a distinct localized label`);
+  assert.match(desktopWorkspaceViewStateSource, new RegExp(`\\b${key}: [^;]*\\[\\]`), `Desktop ${key} filter must support multiple selections`);
+}
+assert.match(desktopTaskFilterPanelSource, /props\.criteria\[key\][\s\S]{0,100}values\.includes\(value\)/, "Desktop filter pressed state must follow the selected values");
+assert.match(desktopTaskFilterPanelSource, /if \(!props\.disabled\) emit\("selectionChange", key, value\)/, "Desktop filter buttons must emit explicit selection toggles only when enabled");
+assert.match(desktopTaskFilterPanelSource, /useDismissibleDetails\(menu, menuSummary\)/, "Desktop filter menu must support closing on outside interactions");
 assert.match(desktopTaskViewSource, /TaskListSection/, "Desktop task list sections must use one focused component instead of repeating TaskItem event wiring");
 assert.match(desktopTaskViewSource, /:aria-label="settingsStore\.t\('task\.search'\)"/, "Desktop task search input must have an accessible name");
-assert.match(desktopTaskViewSource, /:aria-pressed="filter === option\.value"/, "Desktop primary task filters must expose their pressed state");
-assert.match(desktopTaskViewSource, /:aria-label="settingsStore\.t\('task\.allProjects'\)"/, "Desktop project filter select must have an accessible name");
-assert.match(desktopTaskViewSource, /:aria-label="settingsStore\.t\('task\.allTags'\)"/, "Desktop tag filter select must have an accessible name");
+assert.match(desktopTaskViewSource, /:aria-pressed="isPrimaryFilterSelected\(option\.value\)"/, "Desktop primary task filters must expose their current pressed state");
+assert.match(desktopFilterMenu, /role="group" :aria-label="section\.label"/, "Desktop filter groups must have accessible names");
+assert.match(desktopFilterMenu, /:aria-pressed="selected\(section\.key, option\.value\)"/, "Desktop multi-select filter buttons must expose their selected state");
 const desktopPrimaryFilters = sourceBetween(desktopTaskViewSource, "const primaryFilterOptions", "const secondaryFilterOptions");
 assert.doesNotMatch(desktopPrimaryFilters, /pending|conflict|templates|trash|week|high|inbox/, "Desktop primary filters must avoid overwhelming users with rare modes");
 assert.match(desktopTaskViewSource, /canCreateIntoCurrentEmptyView/, "Desktop empty task state must know whether a new task will remain visible in the current filters");
@@ -908,7 +921,7 @@ assert.match(desktopTaskViewSource, /createVisibleEmptyFilters = new Set<TaskFil
 assert.match(desktopTaskViewSource, /function handleEmptyStateAction\(/, "Desktop empty task state must route filtered empty views to a clear-filter action");
 assert.match(desktopTaskViewSource, /function resetTaskFilters\(/, "Desktop empty filtered-view action must reset list, project, tag, and search filters");
 assert.match(desktopTaskViewSource, /editorCreatePreset/, "Desktop task list must derive a create preset from the active filter");
-assert.match(desktopTaskViewSource, /filter\.value === "today" \? "today" : "default"/, "Desktop Today filter must open the editor with a Today create preset");
+assert.match(desktopTaskViewSource, /criteria\.value\.lists\.includes\("today"\) \? "today" : "default"/, "Desktop Today list selection must open the editor with a Today create preset");
 assert.match(desktopTaskViewSource, /:create-preset="editorCreatePreset"/, "Desktop task editor must receive the current-view create preset");
 assert.match(desktopTaskViewSource, /bulkActionTargets/, "Desktop task list must expose current-view batch actions for dense lists");
 assert.match(desktopTaskViewSource, /async function completeVisibleTasks\(/, "Desktop task list must support completing visible open tasks in one action");
@@ -1961,7 +1974,7 @@ assert.doesNotMatch(desktopLoginSource, /auth\.setupChecklistTitle|class="setup-
 assert.match(desktopI18nSource, /"task\.scheduleHelp"/, "Desktop task editor must define plan/due/reminder helper copy");
 assert.match(desktopTaskEditorSource, /task\.scheduleHelp/, "Desktop task editor must show plan/due/reminder helper copy near scheduling fields");
 assert.match(desktopI18nSource, /"task\.arrangementSettings": \{ "zh-CN": "时间与安排", "en-US": "Time and schedule" \}/, "Desktop optional scheduling details must match the Android arrangement label");
-assert.match(desktopI18nSource, /"task\.moreSettings": \{ "zh-CN": "更多：标签、重复、模板", "en-US": "More: tags, repeat, templates" \}/, "Desktop optional metadata details must name the secondary concepts");
+assert.match(desktopI18nSource, /"task\.moreSettings": \{ "zh-CN": "更多：分类、重复、模板", "en-US": "More: categories, repeat, templates" \}/, "Desktop optional metadata details must name the secondary concepts using category terminology");
 assert.match(desktopI18nSource, /"task\.hideSettings": \{ "zh-CN": "收起更多", "en-US": "Hide more" \}/, "Desktop optional task details collapse copy must match the shorter More label");
 assert.match(desktopI18nSource, /"settings\.syncAtAGlance"/, "Desktop settings must define a user-facing sync-at-a-glance label");
 assert.match(desktopSettingsDataPanelSource, /settings\.syncAtAGlance/, "Desktop data settings must show sync status before diagnostics");
@@ -2320,9 +2333,10 @@ assert.match(desktopTaskListSectionSource, /selectedTaskIds\??: Set<string>/, "D
 assert.match(desktopTaskListSectionSource, /selection-change/, "Desktop list sections must forward selection changes");
 assert.match(
   desktopTaskViewSource,
-  /filter\.value === "trash"\s*\?\s*filteredTasks\.value/,
+  /trashOnly\.value\s*\?\s*filteredTasks\.value/,
   "Desktop trash view must support explicit selection instead of disabling all batch actions",
 );
+assert.match(desktopTaskViewSource, /criteria\.value\.lists\.length === 1 && criteria\.value\.lists\[0\] === "trash"/, "Desktop restore/purge batch actions must require an exclusive trash selection");
 assert.match(desktopTaskViewSource, /async function restoreSelectedTrashTasks\(/, "Desktop trash view must support restoring selected tasks");
 assert.match(desktopTaskViewSource, /async function purgeSelectedTrashTasks\(/, "Desktop trash view must support permanently deleting selected tasks");
 assert.match(desktopTaskStoreSource, /async function batchRestore\(/, "Desktop task store must expose batch restore for trash recovery");
@@ -2388,7 +2402,7 @@ assert.match(desktopTaskEditorSource, /settingsStore\.t\("task\.bodyDetails"\)/,
 assert.match(desktopTaskEditorSource, /settingsStore\.t\("task\.arrangementSettings"\)/, "Desktop task editor must label the scheduling section consistently with Android");
 assert.match(desktopI18nSource, /"task\.bodyDetails": \{ "zh-CN": "添加备注和清单", "en-US": "Add notes and checklist" \}/, "Desktop i18n must define optional notes/checklist copy");
 assert.match(desktopI18nSource, /"task\.arrangementSettings": \{ "zh-CN": "时间与安排", "en-US": "Time and schedule" \}/, "Desktop i18n must define arrangement copy that matches Android");
-assert.match(desktopI18nSource, /"task\.moreSettings": \{ "zh-CN": "更多：标签、重复、模板", "en-US": "More: tags, repeat, templates" \}/, "Desktop optional task metadata must name the secondary concepts");
+assert.match(desktopI18nSource, /"task\.moreSettings": \{ "zh-CN": "更多：分类、重复、模板", "en-US": "More: categories, repeat, templates" \}/, "Desktop optional task metadata must name the secondary concepts using category terminology");
 assert.doesNotMatch(
   sourceBetween(desktopTaskEditorSource, "function hasAdvancedMetadataFields", "</script>"),
   /task\.listType !== "inbox"/,

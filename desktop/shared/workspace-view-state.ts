@@ -1,15 +1,30 @@
 export type TaskViewFilter = "all" | "inbox" | "today" | "overdue" | "week" | "high" | "completed" | "pending" | "conflict" | "templates" | "trash";
 export type TaskViewPriority = "all" | "high" | 0 | 1 | 2 | 3 | 4 | 5;
 export type TaskViewStatus = "all" | "open" | "completed";
+export type TaskViewList = "inbox" | "today" | "overdue" | "week" | "pending" | "conflict" | "templates" | "trash";
+export type TaskViewSelectedStatus = Exclude<TaskViewStatus, "all">;
+export type TaskViewSelectedPriority = Exclude<TaskViewPriority, "all">;
+export type TaskViewSortMode = "time" | "category";
 
 export interface TaskViewCriteria {
   search: string;
+  // Legacy fields remain readable for version-one saved views and shortcuts.
+  // Arrays are the authoritative filters; empty arrays impose no restriction.
   filter: TaskViewFilter;
   project: string;
   tag: string;
   priority: TaskViewPriority;
   status: TaskViewStatus;
+  lists: TaskViewList[];
+  statuses: TaskViewSelectedStatus[];
+  categories: string[];
+  projects: string[];
+  priorities: TaskViewSelectedPriority[];
+  sortMode: TaskViewSortMode;
 }
+
+export type TaskViewSelectionKey = "lists" | "statuses" | "categories" | "projects" | "priorities";
+export type TaskViewSelectionValue<K extends TaskViewSelectionKey> = TaskViewCriteria[K][number];
 
 export interface TaskViewState extends TaskViewCriteria {
   scrollTop: number;
@@ -33,16 +48,31 @@ export interface WorkspaceViewStorage {
 }
 
 const filters = new Set<TaskViewFilter>(["all", "inbox", "today", "overdue", "week", "high", "completed", "pending", "conflict", "templates", "trash"]);
+const lists = new Set<TaskViewList>(["inbox", "today", "overdue", "week", "pending", "conflict", "templates", "trash"]);
 
 export function normalizeTaskViewCriteria(value: unknown): TaskViewCriteria {
   const candidate = record(value);
+  const filter = filters.has(candidate.filter as TaskViewFilter) ? candidate.filter as TaskViewFilter : "all";
+  const priority = selectedPriority(candidate.priority) ? candidate.priority : "all";
+  const status = selectedStatus(candidate.status) ? candidate.status : "all";
+  const projects = selection(candidate.projects, textValue(candidate.project) ? [textValue(candidate.project)] : [], stringValue);
+  const categories = selection(candidate.categories, textValue(candidate.tag) ? [textValue(candidate.tag)] : [], stringValue);
+  const selectedLists = selection(candidate.lists, lists.has(filter as TaskViewList) ? [filter as TaskViewList] : [], (item): item is TaskViewList => lists.has(item as TaskViewList));
+  const priorities = selection<TaskViewSelectedPriority>(candidate.priorities, priority !== "all" ? [priority] : filter === "high" ? ["high"] : [], selectedPriority);
+  const statuses = selection<TaskViewSelectedStatus>(candidate.statuses, status !== "all" ? [status] : filter === "completed" ? ["completed"] : filter === "inbox" || filter === "high" ? ["open"] : [], selectedStatus);
   return {
     search: textValue(candidate.search),
-    filter: filters.has(candidate.filter as TaskViewFilter) ? candidate.filter as TaskViewFilter : "all",
-    project: textValue(candidate.project),
-    tag: textValue(candidate.tag),
-    priority: candidate.priority === "high" || candidate.priority === 0 || candidate.priority === 1 || candidate.priority === 2 || candidate.priority === 3 || candidate.priority === 4 || candidate.priority === 5 ? candidate.priority : "all",
-    status: candidate.status === "open" || candidate.status === "completed" ? candidate.status : "all",
+    filter,
+    project: projects.length === 1 ? projects[0] : "",
+    tag: categories.length === 1 ? categories[0] : "",
+    priority: priorities.length === 1 ? priorities[0] : "all",
+    status: statuses.length === 1 ? statuses[0] : "all",
+    lists: selectedLists,
+    statuses,
+    categories,
+    projects,
+    priorities,
+    sortMode: candidate.sortMode === "category" ? "category" : "time",
   };
 }
 
@@ -116,28 +146,30 @@ interface TaskViewDateContext {
 }
 
 export function matchesTaskView(task: FilterableTask, criteria: TaskViewCriteria, context: TaskViewDateContext): boolean {
-  if (criteria.project && task.project !== criteria.project) return false;
-  if (criteria.tag && task.tag !== criteria.tag) return false;
-  if (criteria.status === "open" && context.completed) return false;
-  if (criteria.status === "completed" && !context.completed) return false;
-  if (criteria.priority !== "all" && (criteria.priority === "high" ? task.priority < 3 : task.priority !== criteria.priority)) return false;
+  if (criteria.projects.length && !criteria.projects.includes(task.project ?? "")) return false;
+  if (criteria.categories.length && !criteria.categories.includes(task.tag ?? "")) return false;
+  if (criteria.statuses.length && !criteria.statuses.includes(context.completed ? "completed" : "open")) return false;
+  if (criteria.priorities.length && !criteria.priorities.some((priority) => priority === "high" ? task.priority >= 3 : task.priority === priority)) return false;
   const keyword = criteria.search.trim().toLowerCase();
   if (keyword && !`${task.title} ${task.content ?? ""} ${task.tag ?? ""} ${task.project ?? ""}`.toLowerCase().includes(keyword)) return false;
-  switch (criteria.filter) {
-    case "inbox": return task.listType === "inbox" && !context.completed;
+  if (!criteria.lists.length) return !task.isDeleted;
+  return criteria.lists.some((list) => matchesList(task, list, context));
+}
+
+function matchesList(task: FilterableTask, list: TaskViewList, context: TaskViewDateContext): boolean {
+  if (list === "trash") return task.isDeleted;
+  if (task.isDeleted) return false;
+  switch (list) {
+    case "inbox": return task.listType === "inbox";
     case "today": return context.taskDate === context.today || task.listType === "today";
     case "overdue": return context.overdue;
     case "week": {
       const week = context.week ?? calendarWeekBounds(context.today);
       return Boolean(context.taskDate && context.taskDate >= week.start && context.taskDate <= week.end);
     }
-    case "high": return task.priority >= 3 && !context.completed;
-    case "completed": return context.completed;
     case "pending": return task.syncStatus !== "synced";
     case "conflict": return task.syncStatus === "conflict";
     case "templates": return task.isTemplate;
-    case "trash": return task.isDeleted;
-    default: return true;
   }
 }
 
@@ -169,6 +201,22 @@ function record(value: unknown): Record<string, unknown> {
 
 function textValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function stringValue(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function selectedStatus(value: unknown): value is TaskViewSelectedStatus {
+  return value === "open" || value === "completed";
+}
+
+function selectedPriority(value: unknown): value is TaskViewSelectedPriority {
+  return value === "high" || value === 0 || value === 1 || value === 2 || value === 3 || value === 4 || value === 5;
+}
+
+function selection<T>(value: unknown, legacy: readonly T[], valid: (item: unknown) => item is T): T[] {
+  return [...new Set(Array.isArray(value) ? value.filter(valid) : legacy)];
 }
 
 function scrollPosition(value: unknown): number {

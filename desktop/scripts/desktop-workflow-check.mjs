@@ -96,15 +96,19 @@ export async function verifyDesktopWorkflow(cdp, { setWindowSize, cdpPort, conne
   await evaluate("document.querySelector('.active-filter-bar .text-button')?.click();");
   await setValue(".task-search-field input", "回归任务");
   await click(".filter-menu > summary");
-  await setValue(".filter-menu .filter-selects select", "交互验证", 0);
+  await cdp.waitFor("Boolean(document.querySelector('.task-filter-panel[open] [role=group][aria-label=\"项目\"]'))", "opened project filter group");
+  await evaluate("ui.clickText('.task-filter-panel [role=group][aria-label=\"项目\"] button', '交互验证');");
+  await cdp.waitFor(`${workspaceStore}.taskView.projects.length === 1 && ${workspaceStore}.taskView.projects[0] === '交互验证'`, "selected workflow project");
+  assert.equal(await evaluate("return [...document.querySelectorAll('.task-filter-panel [role=group][aria-label=\"项目\"] button')].find((button) => button.textContent.trim() === '交互验证')?.getAttribute('aria-pressed');"), "true");
   await click(".filter-menu > summary");
+  await cdp.waitFor("!document.querySelector('.task-filter-panel[open]')", "closed project filter panel");
   await cdp.waitFor("[...document.querySelectorAll('.task-workspace-view [data-task-count]')].reduce((n, section) => n + Number(section.dataset.taskCount), 0) === 70", "70 reachable filtered workflow fixtures");
   assert.ok(await cdp.evaluate("document.querySelectorAll('.task-workspace-view .task-row').length < 70"), "only visible workflow rows should mount");
   await evaluate("document.querySelector('.workspace-main').scrollTop = 450;");
   await navigate("设置", ".settings-workspace");
   await navigate("全部", ".task-workspace-view");
   await cdp.waitFor("Math.abs(document.querySelector('.workspace-main').scrollTop - 450) <= 2", "restored task scroll position");
-  assert.deepEqual(await evaluate("return [workspace.taskView.search, workspace.taskView.project];"), ["回归任务", "交互验证"]);
+  assert.deepEqual(await evaluate("return [workspace.taskView.search, [...workspace.taskView.projects]];"), ["回归任务", ["交互验证"]]);
 
   await evaluate("document.querySelector('.workspace-main').scrollTop = 0;");
   await cdp.waitFor("document.querySelector('[data-task-id=\"workflow-0\"] .task-edit-trigger')", "first virtual row");
@@ -125,10 +129,10 @@ export async function verifyDesktopWorkflow(cdp, { setWindowSize, cdpPort, conne
   await cdp.waitFor(`${workspaceStore}.savedViews.some((view) => view.name === ${quote(viewName)})`, "saved named view");
   await click(".saved-views > summary");
   await click(".active-filter-bar .text-button");
-  await cdp.waitFor(`${workspaceStore}.taskView.search === '' && ${workspaceStore}.taskView.project === ''`, "cleared saved-view conditions");
+  await cdp.waitFor(`${workspaceStore}.taskView.search === '' && ${workspaceStore}.taskView.projects.length === 0`, "cleared saved-view conditions");
   await click(".saved-views > summary");
   await evaluate(`ui.clickText('.saved-views-list .saved-view-apply', ${quote(viewName)});`);
-  await cdp.waitFor(`${workspaceStore}.taskView.search === '回归任务' && ${workspaceStore}.taskView.project === '交互验证'`, "applied saved view");
+  await cdp.waitFor(`${workspaceStore}.taskView.search === '回归任务' && ${workspaceStore}.taskView.projects.length === 1 && ${workspaceStore}.taskView.projects[0] === '交互验证'`, "applied saved view");
   await cdp.send("Page.reload", { ignoreCache: true });
   await cdp.waitFor("Boolean(document.querySelector('.today-view'))", "default Today view after reload", 15_000);
   await cdp.evaluate("window.taskBridge.window.openMain()");
@@ -137,7 +141,7 @@ export async function verifyDesktopWorkflow(cdp, { setWindowSize, cdpPort, conne
   await installHelpers(cdp);
   await chord(cdp, "f", "KeyF", 70);
   await cdp.waitFor("document.activeElement === document.querySelector('.task-search-field input')", "restored search focus after reload");
-  assert.deepEqual(await evaluate("return [workspace.taskView.search, workspace.taskView.project];"), ["回归任务", "交互验证"]);
+  assert.deepEqual(await evaluate("return [workspace.taskView.search, [...workspace.taskView.projects]];"), ["回归任务", ["交互验证"]]);
   await click(".saved-views > summary");
   assert.ok((await evaluate("return document.querySelector('.saved-views-list').textContent;")).includes(viewName));
   await click(".saved-views > summary");

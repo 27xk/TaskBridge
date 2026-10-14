@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { CalendarDays, Check, Copy, Flag, Folder, Hash, ListChecks, Repeat } from "lucide-vue-next";
+import { CalendarDays, Check, Copy, Flag, Folder, FolderOpen, ListChecks, Repeat } from "lucide-vue-next";
 import TaskActionMenu from "./TaskActionMenu.vue";
 
 import { useSettingsStore } from "../stores/settings";
@@ -228,7 +228,7 @@ function isOverdue(task: TaskRecord): boolean {
           <Folder :size="12" aria-hidden="true" />{{ task.project }}
         </span>
         <span v-if="task.tag" class="task-context" :title="`${settingsStore.t('task.tag')}: ${task.tag}`">
-          <Hash :size="12" aria-hidden="true" />{{ task.tag }}
+          <FolderOpen :size="12" aria-hidden="true" />{{ task.tag }}
         </span>
       </div>
       <div v-if="hasFeatureBadges" class="task-feature-badges">

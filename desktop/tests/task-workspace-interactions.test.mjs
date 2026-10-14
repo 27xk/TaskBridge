@@ -5,13 +5,16 @@ import { loadTsFunctions } from "./helpers/load-ts-functions.mjs";
 async function editorHarness({ dirty = true, saving = false, confirm = false, current = { localId: "a", title: "A" } } = {}) {
   const globals = {
     workspaceEpoch: 0,
+    openRequestGeneration: 0,
+    criteria: { value: { lists: [] } },
+    editorCreatePreset: { value: "default" },
     editorOpen: { value: true }, editingTask: { value: current }, editorDirty: { value: dirty },
     isSaving: { value: saving }, editorSaveError: { value: "previous failure" },
     settingsStore: { t: (key) => key }, confirmations: [],
     requestConfirmation: async (options) => { globals.confirmations.push(options); return confirm; },
     setEditorDirty: (value) => { globals.editorDirty.value = value; },
   };
-  const functions = await loadTsFunctions("src/views/TaskView.vue", ["canLeaveEditor", "openEdit", "openCreate", "closeEditor"], globals);
+  const functions = await loadTsFunctions("src/views/TaskView.vue", ["canLeaveEditor", "openEdit", "openCreate", "openCreateIfCurrent", "closeEditor"], globals);
   return { ...functions, globals };
 }
 

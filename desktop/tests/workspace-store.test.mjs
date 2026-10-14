@@ -37,8 +37,8 @@ test("actual workspace store switches accounts synchronously without leaking con
   const h = harness();
   try {
     h.store.taskView.search = "account-a search";
-    h.store.taskView.project = "Project A";
-    h.store.taskView.priority = 3;
+    h.store.toggleTaskViewSelection("projects", "Project A");
+    h.store.toggleTaskViewSelection("priorities", 3);
     h.store.rememberScroll("all", 510);
     h.store.rememberScroll("today", 205);
     h.store.saveCurrentView("View A");
@@ -131,5 +131,69 @@ test("scroll bursts debounce writes and workspace switches synchronously flush t
     assert.equal(h.storage.writes, 2);
     h.auth.workspaceKey = "workspace-a";
     assert.equal(h.store.taskView.scrollTop, 450);
+  } finally { h.dispose(); }
+});
+
+test("filter selections toggle independently and allow multiple values", () => {
+  const h = harness();
+  try {
+    h.store.toggleTaskViewSelection("lists", "week");
+    h.store.toggleTaskViewSelection("lists", "today");
+    h.store.toggleTaskViewSelection("statuses", "open");
+    h.store.toggleTaskViewSelection("statuses", "completed");
+    h.store.toggleTaskViewSelection("categories", "");
+    h.store.toggleTaskViewSelection("categories", "release");
+    assert.deepEqual(h.store.taskView.lists, ["week", "today"]);
+    assert.deepEqual(h.store.taskView.statuses, ["open", "completed"]);
+    assert.deepEqual(h.store.taskView.categories, ["", "release"]);
+    h.store.toggleTaskViewSelection("lists", "week");
+    h.store.toggleTaskViewSelection("statuses", "completed");
+    assert.deepEqual(h.store.taskView.lists, ["today"]);
+    assert.deepEqual(h.store.taskView.statuses, ["open"]);
+    assert.deepEqual(h.store.taskView.categories, ["", "release"]);
+  } finally { h.dispose(); }
+});
+
+test("quick presets replace list status and priority restrictions while retaining categories and ordering", () => {
+  const h = harness();
+  try {
+    h.store.applyTaskView({ search: "release", categories: ["review"], projects: ["TaskBridge"], priorities: [0], statuses: ["open"], lists: ["week", "inbox"], sortMode: "category" });
+    h.store.setTaskViewFilter("completed");
+    assert.deepEqual(h.store.taskView.lists, []);
+    assert.deepEqual(h.store.taskView.statuses, ["completed"]);
+    assert.deepEqual(h.store.taskView.priorities, []);
+    assert.deepEqual(h.store.taskView.categories, ["review"]);
+    assert.deepEqual(h.store.taskView.projects, ["TaskBridge"]);
+    assert.equal(h.store.taskView.search, "release");
+    assert.equal(h.store.taskView.sortMode, "category");
+    h.store.toggleTaskViewSelection("lists", "week");
+    assert.equal(h.store.taskView.filter, "all", "a multi-select action leaves the legacy quick preset");
+    assert.deepEqual(h.store.taskView.statuses, ["completed"]);
+    h.store.setTaskViewFilter("all");
+    assert.deepEqual(h.store.taskView.lists, []);
+    assert.deepEqual(h.store.taskView.statuses, []);
+    assert.deepEqual(h.store.taskView.priorities, []);
+  } finally { h.dispose(); }
+});
+
+test("multi-select saved views retain values after edits and remain isolated between accounts", () => {
+  const h = harness();
+  try {
+    h.store.applyTaskView({ lists: ["week", "today"], statuses: ["completed"], categories: ["", "release"], priorities: [0, 4], sortMode: "category" });
+    const saved = h.store.saveCurrentView("Multiple choices");
+    h.store.taskView.categories.push("changed");
+    assert.deepEqual(saved.criteria.categories, ["", "release"]);
+    assert.equal(h.store.applySavedView(saved.id), true);
+    assert.deepEqual(h.store.taskView.categories, ["", "release"]);
+    h.store.taskView.lists.push("overdue");
+    assert.deepEqual(saved.criteria.lists, ["week", "today"]);
+    h.auth.workspaceKey = "workspace-b";
+    assert.deepEqual(h.store.taskView.lists, []);
+    assert.deepEqual(h.store.taskView.categories, []);
+    assert.equal(h.store.taskView.sortMode, "time");
+    h.auth.workspaceKey = "workspace-a";
+    assert.deepEqual(h.store.taskView.lists, ["week", "today", "overdue"]);
+    assert.equal(h.store.taskView.sortMode, "category");
+    assert.deepEqual(h.store.savedViews[0].criteria.lists, ["week", "today"]);
   } finally { h.dispose(); }
 });
