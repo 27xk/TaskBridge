@@ -17,6 +17,19 @@ if (!electronVersion) {
   process.exit(1);
 }
 
+// Electron downloads its executable lazily; prepare it before parallel tests spawn it.
+const install = spawnSync(process.execPath, [join(process.cwd(), "node_modules", "electron", "install.js")], {
+  stdio: "inherit",
+  shell: false,
+  windowsHide: true,
+});
+if (install.error) {
+  console.error(install.error);
+}
+if (install.status !== 0) {
+  process.exit(install.status ?? 1);
+}
+
 const electronRebuild = join(process.cwd(), "node_modules", "@electron", "rebuild", "lib", "cli.js");
 const headersUrl = process.env.TASKBRIDGE_ELECTRON_HEADERS_URL?.trim();
 const result = spawnSync(process.execPath, [
