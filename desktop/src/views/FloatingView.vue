@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
+import { ArrowUpRight, Check, RefreshCw } from "lucide-vue-next";
+
+import "../assets/floating-refresh.css";
 
 import FloatingHeader from "../components/FloatingHeader.vue";
 import FloatingTaskItem from "../components/FloatingTaskItem.vue";
@@ -9,9 +12,11 @@ import { useSettingsStore } from "../stores/settings";
 import { bridge } from "../db/sqlite";
 import { formatShanghaiDate } from "../../shared/quick-add-parser";
 import { useFloatingCaptureDraft } from "../composables/useFloatingCaptureDraft";
+import { usePresentationClock } from "../composables/usePresentationClock";
 
 const floating = useFloatingStore();
 const settingsStore = useSettingsStore();
+const presentationNow = usePresentationClock();
 const captureDraft = useFloatingCaptureDraft(() => floating.workspaceKey, (durable) => {
   void bridge().floating.setDraftDurable(durable).catch(() => { /* The main process defaults to retaining the renderer until acknowledged. */ });
 });
@@ -61,12 +66,14 @@ async function saveCapture(title: string): Promise<void> {
   }
 }
 
-const dateLabel = computed(() => formatShanghaiDate(new Date(), settingsStore.language, settingsStore.displayTimeZone));
+const dateLabel = computed(() => formatShanghaiDate(presentationNow.value, settingsStore.language, settingsStore.displayTimeZone));
+const totalOpenTasks = computed(() => floating.openTasks.length + floating.hiddenTaskCount);
+const taskCountLabel = computed(() => `${totalOpenTasks.value} ${settingsStore.t("floating.todayTasks")}`);
 const hiddenTaskCountLabel = computed(() =>
   settingsStore.t("floating.hiddenTasks").replace("{count}", String(floating.hiddenTaskCount)),
 );
 const surfaceStyle = computed(() => {
-  const alpha = Math.min(0.98, Math.max(0.45, floating.opacity));
+  const alpha = Math.min(1, Math.max(0.45, floating.opacity));
   const controlAlpha = Math.min(0.96, alpha + 0.12);
   return {
     "--floating-surface-opacity": alpha.toFixed(2),
@@ -140,7 +147,7 @@ function stopResize(): void {
 </script>
 
 <template>
-  <main class="floating-shell" :style="surfaceStyle">
+  <main class="floating-shell floating-note" :style="surfaceStyle">
     <FloatingHeader
       :date-label="dateLabel"
       :sync-message="floating.syncMessage"
@@ -153,51 +160,66 @@ function stopResize(): void {
 
     <section class="floating-content" :aria-label="settingsStore.t('floating.todayList')">
       <div class="floating-section-title">
-        <span>{{ settingsStore.t("floating.todayList") }}</span>
-        <button type="button" :title="settingsStore.t('floating.refresh')" @click="floating.refresh">{{ settingsStore.t("floating.refresh") }}</button>
+        <div class="floating-heading-group">
+          <h1>{{ settingsStore.t("floating.todayList") }}</h1>
+          <span v-if="floating.authenticated" class="floating-task-count" :aria-label="taskCountLabel" :title="taskCountLabel">{{ totalOpenTasks }}</span>
+        </div>
+        <button type="button" :title="settingsStore.t('floating.refresh')" :aria-label="settingsStore.t('floating.refresh')" :disabled="floating.loading" @click="floating.refresh">
+          <RefreshCw :size="14" aria-hidden="true" />
+        </button>
       </div>
 
       <div v-if="!floating.authenticated" class="floating-empty">
-        {{ settingsStore.t("floating.loginRequired") }}
+        <span>{{ settingsStore.t("floating.loginRequired") }}</span>
+        <button type="button" class="floating-empty-action" @click="floating.openMain">
+          {{ settingsStore.t("floating.openMain") }}
+          <ArrowUpRight :size="13" aria-hidden="true" />
+        </button>
       </div>
 
-      <div v-else-if="floating.openTasks.length === 0" class="floating-empty">
-        {{ settingsStore.t("floating.noToday") }}
-      </div>
-
-      <div v-else class="floating-task-list">
+      <TransitionGroup v-else name="floating-task-motion" tag="div" class="floating-task-list">
+        <div v-if="floating.openTasks.length === 0" key="empty-list" class="floating-empty">
+          <span class="floating-empty-mark" aria-hidden="true"><Check :size="20" /></span>
+          <span>{{ settingsStore.t("floating.noToday") }}</span>
+        </div>
         <FloatingTaskItem
           v-for="task in floating.openTasks"
           :key="task.localId"
           :task="task"
+          :now="presentationNow"
           @complete="floating.complete"
           @open="floating.openDetail"
         />
         <button
           v-if="floating.hiddenTaskCount > 0"
+          key="more-tasks"
           type="button"
           class="floating-more-button"
           @click="floating.openMain"
         >
           {{ hiddenTaskCountLabel }}
+          <ArrowUpRight :size="13" aria-hidden="true" />
         </button>
-      </div>
+      </TransitionGroup>
     </section>
 
-    <p v-if="floating.feedback" class="floating-feedback">{{ floating.feedback }}</p>
-    <p v-if="captureError" id="floating-quick-add-error" class="floating-capture-error" role="alert">{{ captureError }}</p>
-    <QuickAddTask
-      v-if="floating.authenticated"
-      ref="captureInput"
-      v-model="captureTitle"
-      :disabled="isAdding"
-      :error-message="captureError"
-      @submit="saveCapture"
-    />
+    <footer class="floating-footer">
+      <p v-if="floating.feedback" class="floating-feedback" role="status">{{ floating.feedback }}</p>
+      <p v-if="captureError" id="floating-quick-add-error" class="floating-capture-error" role="alert">{{ captureError }}</p>
+      <QuickAddTask
+        v-if="floating.authenticated"
+        ref="captureInput"
+        v-model="captureTitle"
+        :disabled="isAdding"
+        :error-message="captureError"
+        @submit="saveCapture"
+      />
+    </footer>
     <button
       type="button"
       class="floating-resize-handle"
       :title="settingsStore.t('floating.resize')"
+      :aria-label="settingsStore.t('floating.resize')"
       @pointerdown="startResize"
     />
   </main>

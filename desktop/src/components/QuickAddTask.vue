@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useTemplateRef } from "vue";
-import { Plus } from "lucide-vue-next";
+import { LoaderCircle, Plus } from "lucide-vue-next";
 
 import { useSettingsStore } from "../stores/settings";
 
@@ -46,6 +46,7 @@ defineExpose({ focus });
       :aria-describedby="errorMessage ? 'floating-quick-add-error' : undefined"
       :aria-label="settingsStore.t('floating.addTask')"
       :placeholder="settingsStore.t('floating.placeholder')"
+      autocomplete="off"
     />
     <button
       type="submit"
@@ -53,7 +54,8 @@ defineExpose({ focus });
       :title="settingsStore.t('floating.addTask')"
       :aria-label="settingsStore.t('floating.addTask')"
     >
-      <Plus :size="18" aria-hidden="true" />
+      <LoaderCircle v-if="disabled" class="floating-save-spinner" :size="16" aria-hidden="true" />
+      <Plus v-else :size="18" aria-hidden="true" />
     </button>
   </form>
 </template>
