@@ -88,8 +88,8 @@ assert.match(
 );
 assert.match(
   releaseSource,
-  /Skipping public Windows installer because signing secrets are not configured/,
-  "release workflow must omit Windows downloads when signing is unavailable",
+  /::notice::[^\r\n]*(?:Windows|installer)[^\r\n]*unsigned|::notice::[^\r\n]*unsigned[^\r\n]*(?:Windows|installer)/i,
+  "release workflow must explicitly disclose unsigned Windows installer delivery when signing is unavailable",
 );
 assert.doesNotMatch(androidBuildSource, /Release signing is required/, "Android release builds must not fail solely because signing is not configured");
 assert.match(androidReadmeSource, /unsigned release/i, "Android docs must explain local unsigned release builds");
