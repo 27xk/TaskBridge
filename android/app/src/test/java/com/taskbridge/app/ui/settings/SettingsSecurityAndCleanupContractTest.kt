@@ -24,6 +24,7 @@ class SettingsSecurityAndCleanupContractTest {
     @Test
     fun editingPasswordClearsTheVisibleValidationError() {
         val screen = androidSource("src/main/java/com/taskbridge/app/ui/settings/SettingsScreen.kt")
+            .replace("\r\n", "\n")
 
         assertTrue(
             screen.contains(
