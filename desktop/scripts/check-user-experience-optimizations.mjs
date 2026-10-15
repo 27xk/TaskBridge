@@ -92,6 +92,7 @@ const [
   androidQuickAddParserSource,
   androidI18nSource,
   androidTaskListSource,
+  androidTaskHomeComponentsSource,
   androidTaskListViewModelSource,
   androidTaskDetailSource,
   androidSyncStatusBarSource,
@@ -178,6 +179,7 @@ const [
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/domain/usecase/QuickAddParser.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/i18n/TaskBridgeI18n.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/task/TaskListScreen.kt"), "utf8"),
+  readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/task/TaskHomeComponents.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/task/TaskListViewModel.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/task/TaskDetailScreen.kt"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/components/SyncStatusBar.kt"), "utf8"),
@@ -1408,7 +1410,7 @@ assert.match(
 );
 assert.doesNotMatch(androidTaskListSource, /SyncStatusBar\(uiState\.syncMessage, modifier = Modifier\.statusBarsPadding\(\)\)/, "Android task list must not apply a second status-bar inset to the sync bar");
 assert.doesNotMatch(androidTaskListSource, /label = ""/, "Android task list dropdowns must have visible labels so two 'all' controls are distinguishable");
-assert.match(androidTaskListSource, /TaskListPrimaryNavigation\(/, "Android task view switching must be visible as primary navigation");
+assert.match(androidTaskListSource, /TaskHomeScaffold\(/, "Android task view switching must use the persistent home navigation shell");
 assert.match(androidTaskListSource, /label = strings\.filter/, "Android task filter dropdown must be labeled from centralized i18n");
 assert.match(androidTaskListSource, /private val primaryTaskListFilters/, "Android task list must keep common filters separate from secondary filters");
 assert.match(androidTaskListSource, /private val moreTaskListFilters/, "Android task list must keep secondary filters grouped separately from common filters");
@@ -2548,7 +2550,14 @@ assertOrder(
 );
 assert.match(androidLoginSource, /KeyboardOptions\(keyboardType = KeyboardType\.Email\)/, "Android login username-or-email field should request an email-friendly keyboard");
 assert.match(androidRegisterSource, /KeyboardOptions\(keyboardType = KeyboardType\.Email\)/, "Android registration email field must request the email keyboard");
-assert.match(androidTaskListSource, /TaskListPrimaryNavigation\(/, "Android task list must expose Today, All, and Settings as visible navigation controls");
+const androidTaskHomeScaffoldSource = extractBalancedBlock(androidTaskHomeComponentsSource, "internal fun TaskHomeScaffold(");
+assert.match(androidTaskListSource, /TaskHomeScaffold\(/, "Android task list must use the home shell with visible navigation controls");
+assert.match(androidTaskHomeScaffoldSource, /bottomBar = \{[\s\S]*NavigationBar\(/, "Android phone navigation must remain available below scrolling tasks");
+assert.match(androidTaskHomeScaffoldSource, /NavigationRail\(/, "Android wide windows must retain visible navigation in a rail");
+for (const destination of ["Today", "All", "Settings"]) {
+  assert.match(androidTaskHomeScaffoldSource, new RegExp(`onClick = on${destination}Click`), `Android home navigation must preserve the ${destination} destination`);
+}
+assert.match(androidTaskHomeScaffoldSource, /floatingActionButton = \{[\s\S]*onClick = onAddClick/, "Android new-task action must remain available independently of list scrolling");
 assert.doesNotMatch(androidTaskListSource, /label = if \(isEnglish\) "View" else "视图"/, "Android task list must not hide Today/All behind a View dropdown");
 const androidHeaderActionsSource = sourceBetween(
   androidTaskListSource,
@@ -3047,12 +3056,19 @@ assert.match(
   /private fun TaskListSearchField\(/,
   "Android task list search field must be a focused composable instead of being hidden inside the filter panel",
 );
+const androidTaskListScrollContent = extractBalancedBlock(androidTaskListSource, "LazyColumn(");
+assert.match(androidTaskListScrollContent, /TaskListSearchField\(/, "Android search must scroll with the task list so short screens retain a usable task viewport");
+assert.match(androidTaskListScrollContent, /TaskHomeLocalNotice\(/, "Android local workspace notice must scroll instead of consuming a fixed task viewport");
 assertOrder(
-  androidTaskListSource,
+  androidTaskListScrollContent,
   "TaskListSearchField(",
-  "TextButton(onClick = { listToolsOpen = !listToolsOpen }",
-  "Android task list must show search before the optional filter tools toggle",
+  "if (!todayOnly && listToolsOpen)",
+  "Android task search must remain on the main path before optional filter controls",
 );
+assert.match(androidTaskListScrollContent, /onFilterClick = \{ listToolsOpen = !listToolsOpen \}/, "Android search toolbar must let users open and close the optional filter controls");
+assert.match(androidTaskHomeComponentsSource, /fun TaskHomeSearch\([\s\S]*onClick = onFilterClick/, "Android search must expose a direct accessible filter action");
+const androidActiveFilterLabelsSource = extractBalancedBlock(androidTaskListSource, "private fun activeTaskFilterLabels(");
+assert.doesNotMatch(androidActiveFilterLabelsSource, /strings\.viewPrefix/, "Android default Today view must not repeat itself as an active-filter notice");
 assert.match(
   desktopLoginSource,
   /const registrationConnectionHint = computed/,

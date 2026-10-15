@@ -11,9 +11,11 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.lifecycle.ViewModelProvider
@@ -99,6 +101,7 @@ class TaskListPagingUiTest {
                     compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, output)
                 }
             }
+            compose.onNodeWithTag("task-home-list").performScrollToNode(hasText("SyntheticTask-001"))
             compose.onNodeWithText("SyntheticTask-001").performTouchInput { longClick() }
             compose.onNodeWithText("全选本页").performClick()
             compose.onNodeWithText(stringsFor(AppLanguage.Chinese).selectedCount.format(100)).assertIsDisplayed()
@@ -112,8 +115,10 @@ class TaskListPagingUiTest {
             File(directory, "paging-last.png").outputStream().use { output ->
                 compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, output)
             }
+            compose.onNodeWithTag("task-home-list").performScrollToNode(hasSetTextAction())
             compose.onNode(hasSetTextAction()).performTextInput("SyntheticTask-260")
             compose.waitUntil(10_000) { compose.onAllNodesWithText("下一页").fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithTag("task-home-list").performScrollToNode(hasText("SyntheticTask-260") and hasSetTextAction().not())
             compose.onNode(hasText("SyntheticTask-260") and hasSetTextAction().not()).assertIsDisplayed()
             compose.onNodeWithText("下一页").assertDoesNotExist()
         } finally {

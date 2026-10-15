@@ -1,8 +1,7 @@
 package com.taskbridge.app.ui.task
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -19,8 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -28,9 +25,8 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,8 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -55,17 +50,15 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.Instant
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import com.taskbridge.app.domain.model.SyncStatus
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
 import com.taskbridge.app.domain.model.isOverdueAt
 import com.taskbridge.app.ui.components.AppDropdownField
-import com.taskbridge.app.ui.components.AppHeader
-import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
 import com.taskbridge.app.ui.components.AppUiOption
-import com.taskbridge.app.ui.components.glass.GlassStyle
-import com.taskbridge.app.ui.components.glass.LiquidGlassSurface
 import com.taskbridge.app.ui.components.SyncStatusMessage
 import com.taskbridge.app.ui.components.SyncStatusBar
 import com.taskbridge.app.ui.i18n.LocalAppLanguage
@@ -201,6 +194,17 @@ fun TaskListScreen(
     val syncHealth = remember(page.syncCounts, appLanguage.code) {
         taskListSyncHealthText(page.syncCounts.errors, page.syncCounts.pending, appLanguage.code)
     }
+    val dateLabel = remember(now, displayTimeZone, isEnglish) {
+        DateTimeFormatter.ofPattern(
+            if (isEnglish) "EEE, MMM d" else "M月d日 EEEE",
+            if (isEnglish) Locale.US else Locale.CHINA,
+        ).format(now.atZone(ShanghaiTime.zone(displayTimeZone)))
+    }
+    val taskOverview = if (isEnglish) {
+        "${page.total - page.completed} to do · ${page.completed} completed"
+    } else {
+        "${page.total - page.completed} 项待办 · ${page.completed} 项已完成"
+    }
 
     pendingDeleteTask?.let { task ->
         DeleteTaskConfirmationDialog(
@@ -271,121 +275,14 @@ fun TaskListScreen(
         )
     }
 
-    AppPage(modifier = Modifier.fillMaxSize()) {
-        val showLocalModeActionMessage = uiState.syncMessage == SyncStatusMessage.PurgeRequiresConnection ||
-            uiState.syncMessage == SyncStatusMessage.PurgeFailed
-        if (uiState.syncMessage != SyncStatusMessage.LocalCacheReady && (!localWorkspaceMode || showLocalModeActionMessage)) {
-            SyncStatusBar(uiState.syncMessage)
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            AppHeader(
-                title = if (todayOnly) strings.todayTasks else strings.allTasks,
-                subtitle = "${page.total} ${strings.taskCountSuffix}",
-                trailing = {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Button(onClick = onAddClick) {
-                            Text(strings.add, maxLines = 1)
-                        }
-                        if (!localWorkspaceMode) {
-                            TaskListHeaderActions(
-                                strings = strings,
-                                expanded = headerActionsExpanded,
-                                onExpandedChange = { headerActionsExpanded = it },
-                                onSyncNow = { viewModel.refresh() },
-                                languageCode = appLanguage.code,
-                            )
-                        }
-                    }
-                },
-            )
-
-            if (localWorkspaceMode) {
-                AppPanel {
-                    Text(
-                        text = strings.localWorkspaceMode,
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    Text(
-                        text = strings.localWorkspaceModeBody,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    OutlinedButton(
-                        onClick = onSignInToSync,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(strings.signInToSync)
-                    }
-                }
-            }
-
-            TaskListPrimaryNavigation(
-                todaySelected = todayOnly,
-                strings = strings,
-                onTodayClick = onTodayClick,
-                onAllClick = onAllClick,
-                onSettingsClick = onSettingsClick,
-            )
-
-            if (!localWorkspaceMode && syncHealth.needsAttention) {
-                TaskListSyncHealthBar(
-                    syncHealth = syncHealth,
-                    strings = strings,
-                    onOpenDetails = onSyncDetailsClick,
-                )
-            }
-
-            TaskListSearchField(
-                searchQuery = uiState.searchQuery,
-                strings = strings,
-                onSearchChange = viewModel::updateSearchQuery,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            if (!todayOnly) {
-                TextButton(onClick = { listToolsOpen = !listToolsOpen }, modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        if (listToolsOpen || uiState.filter != TaskListFilter.All) {
-                            if (isEnglish) "Hide filters" else "收起筛选"
-                        } else {
-                            if (isEnglish) "Filters" else "筛选"
-                        },
-                    )
-                }
-            }
-
-            if (!todayOnly && (listToolsOpen || uiState.filter != TaskListFilter.All)) {
-                AppPanel(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)) {
-                    val selectedFilterLabel = uiState.filter.localizedLabel(strings)
-                    AppDropdownField(
-                        label = strings.filter,
-                        selectedLabel = selectedFilterLabel,
-                        expanded = filterMenuExpanded,
-                        options = combinedTaskListFilterOptions(strings),
-                        onExpandedChange = { filterMenuExpanded = it },
-                        onSelect = viewModel::setFilter,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-
-            TaskFilterSummaryBar(
-                activeFilterLabels = activeFilterLabels,
-                strings = strings,
-                canClearSearch = uiState.searchQuery.isNotBlank(),
-                canClearFilter = !todayOnly && uiState.filter != TaskListFilter.All,
-                onClearSearch = { viewModel.updateSearchQuery("") },
-                onClearFilter = { viewModel.setFilter(TaskListFilter.All) },
-            )
-
+    TaskHomeScaffold(
+        todaySelected = todayOnly,
+        strings = strings,
+        onTodayClick = onTodayClick,
+        onAllClick = onAllClick,
+        onSettingsClick = onSettingsClick,
+        onAddClick = onAddClick,
+        topBar = {
             if (!isTrashFilter && openTaskSelectionMode) {
                 OpenTaskSelectionActionBar(
                     selectedCount = selectedOpenTaskIds.size,
@@ -409,8 +306,31 @@ fun TaskListScreen(
                     },
                     onCancelSelection = { clearOpenTaskSelection() },
                 )
+            } else {
+                TaskHomeHeader(
+                    title = if (todayOnly) strings.todayTasks else strings.allTasks,
+                    dateLabel = dateLabel,
+                    subtitle = taskOverview,
+                    actions = {
+                        if (!localWorkspaceMode) {
+                            TaskListHeaderActions(
+                                strings = strings,
+                                expanded = headerActionsExpanded,
+                                onExpandedChange = { headerActionsExpanded = it },
+                                onSyncNow = { viewModel.refresh() },
+                                languageCode = appLanguage.code,
+                            )
+                        }
+                    },
+                )
             }
-
+        },
+    ) { contentPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding),
+        ) {
             if (page.total > page.pageSize) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -432,10 +352,68 @@ fun TaskListScreen(
 
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize().testTag("task-home-list"),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                item(key = "home-search") {
+                    TaskListSearchField(
+                        searchQuery = uiState.searchQuery,
+                        strings = strings,
+                        onSearchChange = viewModel::updateSearchQuery,
+                        showFilter = !todayOnly,
+                        filterActive = listToolsOpen || uiState.filter != TaskListFilter.All,
+                        onFilterClick = { listToolsOpen = !listToolsOpen },
+                    )
+                }
+                if (localWorkspaceMode) {
+                    item(key = "home-local-notice") {
+                        TaskHomeLocalNotice(strings = strings, onSignIn = onSignInToSync)
+                    }
+                }
+                item(key = "home-sync-feedback") {
+                    val showLocalModeActionMessage = uiState.syncMessage == SyncStatusMessage.PurgeRequiresConnection ||
+                        uiState.syncMessage == SyncStatusMessage.PurgeFailed
+                    if (uiState.syncMessage != SyncStatusMessage.LocalCacheReady && (!localWorkspaceMode || showLocalModeActionMessage)) {
+                        SyncStatusBar(uiState.syncMessage)
+                    }
+                }
+                if (!localWorkspaceMode && syncHealth.needsAttention) {
+                    item(key = "home-sync-health") {
+                        TaskListSyncHealthBar(
+                            syncHealth = syncHealth,
+                            strings = strings,
+                            onOpenDetails = onSyncDetailsClick,
+                        )
+                    }
+                }
+                if (!todayOnly && listToolsOpen) {
+                    item(key = "home-filter-picker") {
+                        AppDropdownField(
+                            label = strings.filter,
+                            selectedLabel = uiState.filter.localizedLabel(strings),
+                            expanded = filterMenuExpanded,
+                            options = combinedTaskListFilterOptions(strings),
+                            onExpandedChange = { filterMenuExpanded = it },
+                            onSelect = {
+                                viewModel.setFilter(it)
+                                listToolsOpen = false
+                            },
+                        )
+                    }
+                }
+                if (activeFilterLabels.isNotEmpty()) {
+                    item(key = "home-active-filters") {
+                        TaskFilterSummaryBar(
+                            activeFilterLabels = activeFilterLabels,
+                            strings = strings,
+                            canClearSearch = uiState.searchQuery.isNotBlank(),
+                            canClearFilter = !todayOnly && uiState.filter != TaskListFilter.All,
+                            onClearSearch = { viewModel.updateSearchQuery("") },
+                            onClearFilter = { viewModel.setFilter(TaskListFilter.All) },
+                        )
+                    }
+                }
                 if (tasks.isEmpty()) {
                     item {
                         EmptyTaskState(
@@ -647,20 +625,18 @@ private fun TaskListSearchField(
     searchQuery: String,
     strings: TaskBridgeStrings,
     onSearchChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
+    showFilter: Boolean,
+    filterActive: Boolean,
+    onFilterClick: () -> Unit,
 ) {
-    AppPanel(
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = onSearchChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            placeholder = { Text(strings.searchHint) },
-        )
-    }
+    TaskHomeSearch(
+        searchQuery = searchQuery,
+        strings = strings,
+        onSearchChange = onSearchChange,
+        showFilter = showFilter,
+        filterActive = filterActive,
+        onFilterClick = onFilterClick,
+    )
 }
 
 @Composable
@@ -684,12 +660,6 @@ private fun TaskFilterSummaryBar(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(
-                text = strings.currentFilters,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.SemiBold,
-            )
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -753,86 +723,6 @@ private fun TaskSectionHeader(title: String, count: Int, isWarning: Boolean = fa
 }
 
 @Composable
-@OptIn(ExperimentalLayoutApi::class)
-private fun TaskListPrimaryNavigation(
-    todaySelected: Boolean,
-    strings: TaskBridgeStrings,
-    onTodayClick: () -> Unit,
-    onAllClick: () -> Unit,
-    onSettingsClick: () -> Unit,
-) {
-    LiquidGlassSurface(
-        modifier = Modifier.fillMaxWidth(),
-        cornerRadius = 28.dp,
-        style = GlassStyle.Elevated,
-    ) {
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(6.dp)
-                .selectableGroup(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            TaskListNavigationTab(
-                label = strings.today,
-                selected = todaySelected,
-                onClick = onTodayClick,
-            )
-            TaskListNavigationTab(
-                label = strings.all,
-                selected = !todaySelected,
-                onClick = onAllClick,
-            )
-            TextButton(
-                onClick = onSettingsClick,
-                modifier = Modifier.heightIn(min = 48.dp),
-                shape = RoundedCornerShape(24.dp),
-            ) {
-                Text(strings.settings, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-}
-
-@Composable
-private fun TaskListNavigationTab(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val containerColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-        label = "navigationContainer",
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-        label = "navigationContent",
-    )
-    Box(
-        modifier = Modifier
-            .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(containerColor)
-            .selectable(
-                selected = selected,
-                role = Role.Tab,
-                onClick = onClick,
-            )
-            .padding(horizontal = 18.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            color = contentColor,
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
 private fun TaskListHeaderActions(
     strings: TaskBridgeStrings,
     expanded: Boolean,
@@ -841,20 +731,23 @@ private fun TaskListHeaderActions(
     languageCode: String,
 ) {
     val moreLabel = if (languageCode == "en-US") "More" else "更多"
-    TextButton(onClick = { onExpandedChange(true) }) {
-        Text(moreLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = { onExpandedChange(false) },
-    ) {
-        DropdownMenuItem(
-            text = { Text(strings.syncNow) },
-            onClick = {
-                onExpandedChange(false)
-                onSyncNow()
-            },
-        )
+    Box {
+        IconButton(onClick = { onExpandedChange(true) }) {
+            TaskHomeIcon(TaskHomeIcon.More, contentDescription = moreLabel)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) },
+        ) {
+            DropdownMenuItem(
+                text = { Text(strings.syncNow) },
+                leadingIcon = { TaskHomeIcon(TaskHomeIcon.Sync, contentDescription = null) },
+                onClick = {
+                    onExpandedChange(false)
+                    onSyncNow()
+                },
+            )
+        }
     }
 }
 
@@ -871,37 +764,41 @@ private fun OpenTaskSelectionActionBar(
 ) {
     val strings = LocalTaskBridgeStrings.current
     val isEnglish = languageCode == "en-US"
-    AppPanel(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
-        Text(
-            text = strings.selectedCount.format(selectedCount),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            TextButton(
-                onClick = onSelectAllVisible,
-                enabled = canSelectAllVisible,
-            ) {
-                Text(if (isEnglish) "Select this page" else "全选本页")
+    Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = strings.selectedCount.format(selectedCount),
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                TextButton(onClick = onCancelSelection) {
+                    Text(if (isEnglish) "Cancel selection" else "取消选择", maxLines = 1)
+                }
             }
-            TextButton(
-                onClick = onCompleteSelected,
-                enabled = selectedCount > 0,
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(if (isEnglish) "Complete selected" else "完成所选")
-            }
-            TextButton(
-                onClick = onDeleteSelected,
-                enabled = selectedCount > 0,
-            ) {
-                Text(if (isEnglish) "Delete selected" else "删除所选")
-            }
-            TextButton(onClick = onCancelSelection) {
-                Text(if (isEnglish) "Cancel selection" else "取消选择")
+                TextButton(
+                    onClick = onSelectAllVisible,
+                    enabled = canSelectAllVisible,
+                ) {
+                    Text(if (isEnglish) "Select this page" else "全选本页", maxLines = 1)
+                }
+                TextButton(
+                    onClick = onCompleteSelected,
+                    enabled = selectedCount > 0,
+                ) {
+                    Text(if (isEnglish) "Complete selected" else "完成所选", maxLines = 1)
+                }
+                TextButton(
+                    onClick = onDeleteSelected,
+                    enabled = selectedCount > 0,
+                ) {
+                    Text(if (isEnglish) "Delete selected" else "删除所选", maxLines = 1)
+                }
             }
         }
     }
@@ -953,8 +850,17 @@ private fun TrashBatchActionBar(
 
 @Composable
 private fun EmptyTaskState(title: String, hint: String, actionLabel: String, onAction: () -> Unit) {
-    AppPanel {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 44.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+            TaskHomeIcon(
+                TaskHomeIcon.Check,
+                contentDescription = null,
+                modifier = Modifier.padding(bottom = 4.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
@@ -963,11 +869,11 @@ private fun EmptyTaskState(title: String, hint: String, actionLabel: String, onA
                 text = hint,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
             Button(onClick = onAction) {
                 Text(actionLabel)
             }
-        }
     }
 }
 
@@ -1110,11 +1016,6 @@ private fun TaskRow(
 ) {
     val selectingThisRow = selectionMode && selectionEnabled
     val isOverdue = task.isOverdueAt(now, displayTimeZone)
-    val borderColor = when {
-        selectingThisRow && selected -> MaterialTheme.colorScheme.primary
-        isOverdue -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.outlineVariant
-    }
     val showCompletionControl = !isTrash
     val showLeadingControl = showCompletionControl || isTrash
     var moreMenuExpanded by remember { mutableStateOf(false) }
@@ -1123,10 +1024,10 @@ private fun TaskRow(
     val adjustPlanSectionLabel = if (languageCode == "en-US") "Adjust plan" else "调整计划"
     val resolveConflictSectionLabel = if (languageCode == "en-US") "Resolve conflict" else "解决冲突"
     val dangerSectionLabel = if (languageCode == "en-US") "Danger zone" else "危险操作"
-    LiquidGlassSurface(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(16.dp))
             .then(
                 if (selectionEnabled) {
                     Modifier.combinedClickable(
@@ -1140,9 +1041,13 @@ private fun TaskRow(
                     Modifier.clickable(onClick = onOpen)
                 },
             ),
-        cornerRadius = 20.dp,
-        style = GlassStyle.Quiet,
-        borderColor = borderColor,
+        shape = RoundedCornerShape(16.dp),
+        color = if (selectingThisRow && selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        border = if (selectingThisRow && selected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
     ) {
         Column(
             modifier = Modifier
@@ -1203,111 +1108,111 @@ private fun TaskRow(
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
-            }
-            if (task.syncStatus == SyncStatus.Conflict) {
-                ConflictSnapshotSummary(task = task, languageCode = languageCode)
-            }
-            if (!selectingThisRow) {
-                FlowRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = if (showLeadingControl) 42.dp else 0.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    if (isTrash) {
-                        TextButton(onClick = onRestoreDeleted) { Text(strings.restore) }
-                        TextButton(onClick = onPurge) { Text(strings.purge) }
-                    } else {
-                        TextButton(
+                if (!isTrash && !selectingThisRow) {
+                    Box {
+                        IconButton(
                             onClick = { moreMenuExpanded = true },
                             modifier = Modifier.semantics {
                                 contentDescription = taskActionAccessibilityLabel(actionsLabel, task.title)
                             },
-                        ) { Text(actionsLabel) }
-                    }
-                    DropdownMenu(
-                        expanded = moreMenuExpanded,
-                        onDismissRequest = { moreMenuExpanded = false },
-                    ) {
-                        if (selectionEnabled) {
+                        ) {
+                            TaskHomeIcon(TaskHomeIcon.More, contentDescription = null)
+                        }
+                        DropdownMenu(
+                            expanded = moreMenuExpanded,
+                            onDismissRequest = { moreMenuExpanded = false },
+                        ) {
+                            if (selectionEnabled) {
+                                DropdownMenuItem(
+                                    text = { Text(selectionLabel) },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        onEnterSelection()
+                                    },
+                                )
+                                HorizontalDivider()
+                            }
                             DropdownMenuItem(
-                                text = { Text(selectionLabel) },
+                                text = { Text(strings.edit) },
                                 onClick = {
                                     moreMenuExpanded = false
-                                    onEnterSelection()
+                                    onEdit()
                                 },
                             )
+                            if (task.status == TaskStatus.Completed) {
+                                DropdownMenuItem(
+                                    text = { Text(strings.restore) },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        onUndoComplete()
+                                    },
+                                )
+                            } else {
+                                DropdownMenuSectionLabel(adjustPlanSectionLabel)
+                                DropdownMenuItem(
+                                    text = { Text(strings.today) },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        onPlanToday()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(strings.tomorrow) },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        onPostpone()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(strings.snoozeOneHour) },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        onSnooze()
+                                    },
+                                )
+                            }
+                            if (task.syncStatus == SyncStatus.Conflict) {
+                                HorizontalDivider()
+                                DropdownMenuSectionLabel(resolveConflictSectionLabel)
+                                DropdownMenuItem(
+                                    text = { Text(strings.keepServerVersion) },
+                                    enabled = !task.conflictServerJson.isNullOrBlank(),
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        onUseServer()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(strings.keepDeviceVersion) },
+                                    onClick = {
+                                        moreMenuExpanded = false
+                                        onOverwriteServer()
+                                    },
+                                )
+                            }
                             HorizontalDivider()
-                        }
-                        DropdownMenuItem(
-                            text = { Text(strings.edit) },
-                            onClick = {
-                                moreMenuExpanded = false
-                                onEdit()
-                            },
-                        )
-                        if (task.status == TaskStatus.Completed) {
+                            DropdownMenuSectionLabel(dangerSectionLabel)
                             DropdownMenuItem(
-                                text = { Text(strings.restore) },
+                                text = { Text(strings.delete) },
                                 onClick = {
                                     moreMenuExpanded = false
-                                    onUndoComplete()
-                                },
-                            )
-                        } else {
-                            DropdownMenuSectionLabel(adjustPlanSectionLabel)
-                            DropdownMenuItem(
-                                text = { Text(strings.today) },
-                                onClick = {
-                                    moreMenuExpanded = false
-                                    onPlanToday()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(strings.tomorrow) },
-                                onClick = {
-                                    moreMenuExpanded = false
-                                    onPostpone()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(strings.snoozeOneHour) },
-                                onClick = {
-                                    moreMenuExpanded = false
-                                    onSnooze()
+                                    onDelete()
                                 },
                             )
                         }
-                        if (task.syncStatus == SyncStatus.Conflict) {
-                            HorizontalDivider()
-                            DropdownMenuSectionLabel(resolveConflictSectionLabel)
-                            DropdownMenuItem(
-                                text = { Text(strings.keepServerVersion) },
-                                enabled = !task.conflictServerJson.isNullOrBlank(),
-                                onClick = {
-                                    moreMenuExpanded = false
-                                    onUseServer()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(strings.keepDeviceVersion) },
-                                onClick = {
-                                    moreMenuExpanded = false
-                                    onOverwriteServer()
-                                },
-                            )
-                        }
-                        HorizontalDivider()
-                        DropdownMenuSectionLabel(dangerSectionLabel)
-                        DropdownMenuItem(
-                            text = { Text(strings.delete) },
-                            onClick = {
-                                moreMenuExpanded = false
-                                onDelete()
-                            },
-                        )
                     }
+                }
+            }
+            if (task.syncStatus == SyncStatus.Conflict) {
+                ConflictSnapshotSummary(task = task, languageCode = languageCode)
+            }
+            if (isTrash && !selectingThisRow) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onRestoreDeleted) { Text(strings.restore) }
+                    TextButton(onClick = onPurge) { Text(strings.purge) }
                 }
             }
         }
@@ -1513,9 +1418,7 @@ private fun activeTaskFilterLabels(
 ): List<String> {
     val keyword = searchQuery.trim()
     return buildList {
-        if (todayOnly) {
-            add("${strings.viewPrefix}: ${strings.today}")
-        } else if (filter != TaskListFilter.All) {
+        if (!todayOnly && filter != TaskListFilter.All) {
             add("${strings.filterPrefix}: ${filter.localizedLabel(strings)}")
         }
         if (keyword.isNotEmpty()) {
