@@ -42,7 +42,7 @@ import {
   shouldShowConnectionBadge,
   withRefreshLease,
   withClientRequestId,
-} from "./offline-core.js?v=0.1.9";
+} from "./offline-core.js?v=0.2.0";
 
 const LOCAL_FALLBACK_SERVER_BASE_URL = "http://127.0.0.1:8080";
 const DEFAULT_SERVER_BASE_URL = supportsHttpOrigin() ? location.origin : LOCAL_FALLBACK_SERVER_BASE_URL;
@@ -68,7 +68,7 @@ const TASK_LIMIT = 100;
 const OFFLINE_TASK_RENDER_STEP = TASK_LIMIT;
 const MAX_TASK_PAGES = 50;
 const APP_VERSION_META_SELECTOR = 'meta[name="taskbridge-version"]';
-const WEB_APP_VERSION = document.querySelector(APP_VERSION_META_SELECTOR)?.content?.trim() || "0.1.9";
+const WEB_APP_VERSION = document.querySelector(APP_VERSION_META_SELECTOR)?.content?.trim() || "0.2.0";
 const WEB_OFFLINE_DB_VERSION = 1;
 const OFFLINE_TASK_STORE = "tasks";
 const OFFLINE_QUEUE_STORE = "offline_mutations";
