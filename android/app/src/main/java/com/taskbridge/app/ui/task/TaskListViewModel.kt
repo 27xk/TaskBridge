@@ -26,9 +26,35 @@ import java.time.Instant
 
 data class TaskListUiState(
     val syncMessage: SyncStatusMessage = SyncStatusMessage.LocalCacheReady,
+    val feedbackId: Long = 0L,
+    val feedback: TaskFeedback? = null,
     val searchQuery: String = "",
     val filter: TaskListFilter = TaskListFilter.All,
 )
+
+data class TaskFeedback(
+    val id: Long,
+    val message: SyncStatusMessage,
+) {
+    val isError: Boolean
+        get() = message == SyncStatusMessage.PurgeFailed ||
+            message == SyncStatusMessage.PurgeRequiresConnection ||
+            message == SyncStatusMessage.SyncFailed
+}
+
+internal fun TaskListUiState.withSyncMessage(message: SyncStatusMessage): TaskListUiState {
+    val showToast = message != SyncStatusMessage.LocalCacheReady &&
+        message != SyncStatusMessage.Syncing && message != SyncStatusMessage.Offline
+    return if (showToast) {
+        val nextId = feedbackId + 1L
+        copy(syncMessage = message, feedbackId = nextId, feedback = TaskFeedback(nextId, message))
+    } else {
+        copy(syncMessage = message)
+    }
+}
+
+internal fun TaskListUiState.dismissFeedback(id: Long): TaskListUiState =
+    if (feedback?.id == id) copy(feedback = null) else this
 
 typealias TaskListFilter = TaskFilter
 
@@ -68,7 +94,7 @@ class TaskListViewModel(
                     is SyncRunState.Failure -> SyncStatusMessage.SyncFailed
                 }
                 if (message != null) {
-                    _uiState.update { it.copy(syncMessage = message) }
+                    _uiState.update { it.withSyncMessage(message) }
                 }
             }
         }
@@ -100,15 +126,15 @@ class TaskListViewModel(
         viewModelScope.launch {
             val taskBeforePurge = taskRepository.getTask(localId) ?: return@launch
             if (shouldBlockOfflinePurge(listOf(taskBeforePurge), !tokenDataStore.accessToken.first().isNullOrBlank())) {
-                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.PurgeRequiresConnection) }
+                _uiState.update { state -> state.withSyncMessage(SyncStatusMessage.PurgeRequiresConnection) }
                 return@launch
             }
             runCatching {
                 taskRepository.purgeDeletedTask(localId)
             }.onSuccess {
-                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.Purged) }
+                _uiState.update { state -> state.withSyncMessage(SyncStatusMessage.Purged) }
             }.onFailure {
-                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.PurgeFailed) }
+                _uiState.update { state -> state.withSyncMessage(SyncStatusMessage.PurgeFailed) }
             }
         }
     }
@@ -145,15 +171,15 @@ class TaskListViewModel(
         viewModelScope.launch {
             val tasks = localIds.distinct().mapNotNull { taskRepository.getTask(it) }
             if (shouldBlockOfflinePurge(tasks, !tokenDataStore.accessToken.first().isNullOrBlank())) {
-                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.PurgeRequiresConnection) }
+                _uiState.update { state -> state.withSyncMessage(SyncStatusMessage.PurgeRequiresConnection) }
                 return@launch
             }
             runCatching {
                 taskRepository.batchPurgeDeleted(localIds)
             }.onSuccess {
-                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.BatchPurged(localIds.distinct().size)) }
+                _uiState.update { state -> state.withSyncMessage(SyncStatusMessage.BatchPurged(localIds.distinct().size)) }
             }.onFailure {
-                _uiState.update { state -> state.copy(syncMessage = SyncStatusMessage.PurgeFailed) }
+                _uiState.update { state -> state.withSyncMessage(SyncStatusMessage.PurgeFailed) }
             }
         }
     }
@@ -215,6 +241,10 @@ class TaskListViewModel(
         requestSync(SyncStatusMessage.Syncing)
     }
 
+    fun dismissFeedback(id: Long) {
+        _uiState.update { it.dismissFeedback(id) }
+    }
+
     fun updateSearchQuery(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
         updatePageSelection()
@@ -240,7 +270,7 @@ class TaskListViewModel(
     }
 
     private fun requestSync(message: SyncStatusMessage) {
-        _uiState.update { it.copy(syncMessage = message) }
+        _uiState.update { it.withSyncMessage(message) }
         syncManager.requestSync(followUpIfRunning = message != SyncStatusMessage.Syncing)
     }
 }

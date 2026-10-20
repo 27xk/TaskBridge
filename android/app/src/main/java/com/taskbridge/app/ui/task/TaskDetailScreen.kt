@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -41,6 +40,9 @@ import com.taskbridge.app.domain.model.isOverdueAt
 import com.taskbridge.app.ui.components.AppHeader
 import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
+import com.taskbridge.app.ui.components.AppPopconfirm
+import com.taskbridge.app.ui.components.popconfirmAnchor
+import com.taskbridge.app.ui.components.rememberPopconfirmAnchor
 import com.taskbridge.app.ui.i18n.LocalAppLanguage
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
 import com.taskbridge.app.utils.ShanghaiTime
@@ -69,6 +71,7 @@ fun TaskDetailScreen(
     var task by remember(localId) { mutableStateOf<Task?>(null) }
     var newChecklistTitle by remember(localId) { mutableStateOf("") }
     var pendingChecklistDelete by remember(localId) { mutableStateOf<UiChecklistItem?>(null) }
+    val confirmationAnchor = rememberPopconfirmAnchor()
     var pendingTaskDelete by remember(localId) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val strings = LocalTaskBridgeStrings.current
@@ -115,7 +118,9 @@ fun TaskDetailScreen(
                 }
             } else {
                 if (pendingTaskDelete) {
-                    AlertDialog(
+                    AppPopconfirm(
+                        anchor = confirmationAnchor,
+                        danger = true,
                         onDismissRequest = { pendingTaskDelete = false },
                         title = { Text(strings.delete) },
                         text = {
@@ -149,7 +154,9 @@ fun TaskDetailScreen(
                     )
                 }
                 pendingChecklistDelete?.let { pending ->
-                    AlertDialog(
+                    AppPopconfirm(
+                        anchor = confirmationAnchor,
+                        danger = true,
                         onDismissRequest = { pendingChecklistDelete = null },
                         title = { Text(strings.delete) },
                         text = {
@@ -249,7 +256,11 @@ fun TaskDetailScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 TextButton(
-                                    onClick = { pendingChecklistDelete = item },
+                                    onClick = {
+                                        confirmationAnchor.select("delete-checklist:${item.id}")
+                                        pendingChecklistDelete = item
+                                    },
+                                    modifier = Modifier.popconfirmAnchor(confirmationAnchor, key = "delete-checklist:${item.id}"),
                                 ) {
                                     Text(strings.delete)
                                 }
@@ -367,11 +378,14 @@ fun TaskDetailScreen(
                             }
                         }
                         TextButton(
-                            onClick = { pendingTaskDelete = true },
+                            onClick = {
+                                confirmationAnchor.select("delete-task:$localId")
+                                pendingTaskDelete = true
+                            },
                             colors = ButtonDefaults.textButtonColors(
                                 contentColor = MaterialTheme.colorScheme.error,
                             ),
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().popconfirmAnchor(confirmationAnchor, key = "delete-task:$localId"),
                         ) {
                             Text(strings.delete, color = MaterialTheme.colorScheme.error)
                         }

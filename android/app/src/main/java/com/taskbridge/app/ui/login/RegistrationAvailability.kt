@@ -14,6 +14,19 @@ data class PendingRegistrationNavigationResult(
     val shouldShowUnknownRegistrationMessage: Boolean,
 )
 
+fun authConnectionFeedback(
+    message: String?,
+    isError: Boolean,
+    manualTestRequested: Boolean,
+    isAuthenticating: Boolean,
+    authError: String?,
+): String? {
+    if (message.isNullOrBlank()) return null
+    return message.takeIf {
+        isError || (manualTestRequested && !isAuthenticating && authError == null)
+    }
+}
+
 fun registrationAvailabilityUi(
     registrationStatusKnown: Boolean,
     registrationEnabled: Boolean,

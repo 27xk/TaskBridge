@@ -57,6 +57,10 @@ class LoginViewModel(
         }
     }
 
+    fun clearFeedback() {
+        _uiState.update { it.copy(error = null, connectionMessage = null, connectionMessageIsError = false) }
+    }
+
     fun updateUsernameOrEmail(value: String) {
         _uiState.update { it.copy(usernameOrEmail = value, error = null) }
     }
@@ -90,12 +94,22 @@ class LoginViewModel(
                 registrationEnabled = false,
                 registrationStatusKnown = false,
                 error = null,
+                connectionMessage = null,
+                connectionMessageIsError = false,
             )
         }
     }
 
     fun updateWebSocketUrl(value: String) {
-        _uiState.update { it.copy(webSocketUrl = value, advancedEndpointsEdited = true, error = null) }
+        _uiState.update {
+            it.copy(
+                webSocketUrl = value,
+                advancedEndpointsEdited = true,
+                error = null,
+                connectionMessage = null,
+                connectionMessageIsError = false,
+            )
+        }
     }
 
     fun saveConnectionSettings() {

@@ -24,7 +24,7 @@ class AccessibilityContractTest {
             "ui/settings/SettingsScreen.kt",
         ).forEach { relativePath ->
             val source = androidSource("src/main/java/com/taskbridge/app/$relativePath")
-            assertTrue("$relativePath does not use AppDynamicStatusText", source.contains("AppDynamicStatusText("))
+            assertTrue("$relativePath does not use accessible feedback", source.contains("AppDynamicStatusText(") || source.contains("AppToast("))
             assertTrue("$relativePath does not mark invalid input", source.contains("isError ="))
         }
     }

@@ -29,10 +29,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.taskbridge.app.BuildConfig
 import com.taskbridge.app.ui.components.AppDropdownField
+import com.taskbridge.app.ui.components.AppDrawer
 import com.taskbridge.app.ui.components.AppDynamicStatusText
 import com.taskbridge.app.ui.components.AppHeader
+import com.taskbridge.app.ui.components.AppHelpTooltip
 import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
+import com.taskbridge.app.ui.components.AppToast
 import com.taskbridge.app.ui.components.tryOpenExternalUri
 import com.taskbridge.app.ui.components.loginFailureMessageKey
 import com.taskbridge.app.ui.components.registrationDisabledMessageKey
@@ -64,6 +67,9 @@ fun LoginScreen(
     var advancedConnectionOpen by remember { mutableStateOf(false) }
     var pendingRegisterNavigation by remember { mutableStateOf(false) }
     var showRegistrationStatusUnknownAfterCheck by remember { mutableStateOf(false) }
+    var signInAttempt by remember { mutableStateOf(0) }
+    var connectionAttempt by remember { mutableStateOf(0) }
+    var manualConnectionTestRequested by remember { mutableStateOf(false) }
     val isEnglish = language == AppLanguage.English
     val registrationAvailability = registrationAvailabilityUi(
         registrationStatusKnown = state.registrationStatusKnown,
@@ -124,22 +130,45 @@ fun LoginScreen(
                 showRegistrationStatusUnknownAfterCheck = showRegistrationStatusUnknownAfterCheck,
                 isEnglish = isEnglish,
                 canContinueOffline = canContinueOffline,
+                signInAttempt = signInAttempt,
                 onServerBaseUrlChange = viewModel::updateServerBaseUrl,
                 onUsernameOrEmailChange = viewModel::updateUsernameOrEmail,
                 onPasswordChange = viewModel::updatePassword,
-                onSignIn = { viewModel.login(onLoginSuccess) },
+                onSignIn = {
+                    viewModel.clearFeedback()
+                    manualConnectionTestRequested = false
+                    signInAttempt += 1
+                    viewModel.login(onLoginSuccess)
+                },
                 onContinueOffline = onContinueOffline,
                 onCreateAccount = {
+                    viewModel.clearFeedback()
+                    manualConnectionTestRequested = false
                     if (state.registrationStatusKnown && state.registrationEnabled) {
                         viewModel.saveConnectionSettings()
                         onRegisterClick()
                     } else {
                         showRegistrationStatusUnknownAfterCheck = false
                         pendingRegisterNavigation = true
+                        connectionAttempt += 1
                         viewModel.testConnection()
                     }
                 },
             )
+
+            authConnectionFeedback(
+                message = state.connectionMessage,
+                isError = state.connectionMessageIsError,
+                manualTestRequested = manualConnectionTestRequested,
+                isAuthenticating = state.isLoading,
+                authError = state.error,
+            )?.let {
+                AppDynamicStatusText(
+                    text = localizeConnectionMessage(it, isEnglish),
+                    isError = state.connectionMessageIsError,
+                    eventKey = Triple(connectionAttempt, signInAttempt, it),
+                )
+            }
 
             if (BuildConfig.DEBUG) AppPanel {
                 Text(
@@ -147,34 +176,31 @@ fun LoginScreen(
                     style = MaterialTheme.typography.titleMedium,
                 )
                 localhostWarningText(state.serverBaseUrl, isEnglish)?.let { warning ->
-                    Text(
+                    AppHelpTooltip(
                         text = warning,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
+                        label = if (isEnglish) "Local address help" else "本机地址说明",
                     )
                 }
                 TextButton(onClick = { advancedConnectionOpen = !advancedConnectionOpen }) {
                     Text(strings.advancedConnectionSettings)
                 }
-                Text(
+                AppHelpTooltip(
                     text = strings.advancedConnectionSecondaryHint,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
+                    label = if (isEnglish) "Advanced connection help" else "高级连接说明",
                 )
                 if (advancedConnectionOpen) {
                     OutlinedButton(
-                        onClick = { viewModel.testConnection() },
-                        enabled = !state.isTestingConnection,
+                        onClick = {
+                            viewModel.clearFeedback()
+                            manualConnectionTestRequested = true
+                            connectionAttempt += 1
+                            viewModel.testConnection()
+                        },
+                        enabled = !state.isTestingConnection && !state.isLoading,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
                             if (state.isTestingConnection) strings.testingConnection else strings.saveAndTestConnection,
-                        )
-                    }
-                    state.connectionMessage?.takeUnless { state.connectionMessageIsError }?.let {
-                        AppDynamicStatusText(
-                            text = localizeConnectionMessage(it, isEnglish),
-                            isError = false,
                         )
                     }
                     OutlinedTextField(
@@ -197,10 +223,9 @@ fun LoginScreen(
                         Text(strings.regenerateFromServerUrl)
                     }
                 }
-                Text(
+                AppHelpTooltip(
                     text = strings.savedBeforeSignIn,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
+                    label = if (isEnglish) "Connection saving help" else "连接保存说明",
                 )
             }
 
@@ -217,6 +242,7 @@ private fun SignInPanel(
     showRegistrationStatusUnknownAfterCheck: Boolean,
     isEnglish: Boolean,
     canContinueOffline: Boolean,
+    signInAttempt: Int,
     onServerBaseUrlChange: (String) -> Unit,
     onUsernameOrEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
@@ -239,30 +265,16 @@ private fun SignInPanel(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (state.connectionMessageIsError) {
-            state.connectionMessage?.let { message ->
-                AppDynamicStatusText(
-                    text = localizeConnectionMessage(message, isEnglish),
-                    isError = true,
-                )
-            }
-        }
         if (BuildConfig.DEBUG) {
-            Text(
+            AppHelpTooltip(
                 text = strings.serverUrlHint,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
+                label = if (isEnglish) "Server address help" else "服务器地址说明",
             )
         }
         if (canContinueOffline) {
-            Text(
-                text = strings.localWorkspaceAvailableTitle,
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
+            AppHelpTooltip(
                 text = strings.localWorkspaceAvailableBody,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
+                label = strings.localWorkspaceAvailableTitle,
             )
             OutlinedButton(
                 onClick = onContinueOffline,
@@ -287,20 +299,20 @@ private fun SignInPanel(
             isError = state.error != null,
             modifier = Modifier.fillMaxWidth(),
         )
-        Text(
+        AppHelpTooltip(
             text = passwordRecoveryHelp(isEnglish),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
+            label = if (isEnglish) "Forgot password?" else "忘记密码？",
         )
         state.error?.let {
             AppDynamicStatusText(
                 text = localizeLoginError(it, strings),
                 isError = true,
+                eventKey = signInAttempt to it,
             )
         }
         Button(
             onClick = onSignIn,
-            enabled = !state.isLoading,
+            enabled = !state.isLoading && !state.isTestingConnection,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(if (state.isLoading) strings.signingIn else strings.signIn)
@@ -320,10 +332,9 @@ private fun SignInPanel(
             registrationAvailability.helperText
         }
         if (registrationHelperText != null) {
-            Text(
+            AppHelpTooltip(
                 text = registrationHelperText,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
+                label = if (isEnglish) "Registration help" else "注册说明",
             )
         }
     }
@@ -333,67 +344,49 @@ private fun SignInPanel(
 private fun FirstUseGuide(strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings) {
     var detailsOpen by remember { mutableStateOf(false) }
     var externalLinkError by remember { mutableStateOf("") }
+    var externalLinkAttempt by remember { mutableStateOf(0) }
     val uriHandler = LocalUriHandler.current
-    AppPanel {
-        Text(
-            text = strings.signInFirstUseTitle,
-            style = MaterialTheme.typography.titleSmall,
-        )
-        Text(
-            text = strings.signInFirstUseBody,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-        )
-        TextButton(onClick = { detailsOpen = !detailsOpen }) {
-            Text(if (detailsOpen) strings.hideSetupChoices else strings.setupHelpSummary)
-        }
-        if (detailsOpen) {
-            Text(
-                text = strings.localTrialHelp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = strings.localTrialGuide,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = strings.selfHostGuide,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            OutlinedButton(
-                onClick = {
-                    externalLinkError = if (tryOpenExternalUri(uriHandler, LOCAL_TRIAL_GUIDE_URL)) {
-                        ""
-                    } else {
-                        strings.externalLinkFailed
+    fun openGuide(url: String) {
+        externalLinkError = ""
+        externalLinkAttempt += 1
+        if (!tryOpenExternalUri(uriHandler, url)) externalLinkError = strings.externalLinkFailed
+    }
+    TextButton(onClick = { detailsOpen = true }, modifier = Modifier.fillMaxWidth()) {
+        Text(strings.setupHelpSummary)
+    }
+    if (detailsOpen) {
+        AppDrawer(
+            onDismissRequest = { detailsOpen = false },
+            title = { Text(strings.signInFirstUseTitle) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(strings.signInFirstUseBody)
+                    Text(strings.localTrialHelp)
+                    Text(strings.localTrialGuide)
+                    Text(strings.selfHostGuide)
+                    OutlinedButton(
+                        onClick = { openGuide(LOCAL_TRIAL_GUIDE_URL) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(strings.openLocalTrialGuide)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(strings.openLocalTrialGuide)
-            }
-            TextButton(
-                onClick = {
-                    externalLinkError = if (tryOpenExternalUri(uriHandler, SELF_HOST_GUIDE_URL)) {
-                        ""
-                    } else {
-                        strings.externalLinkFailed
+                    TextButton(
+                        onClick = { openGuide(SELF_HOST_GUIDE_URL) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(strings.openSelfHostGuide)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(strings.openSelfHostGuide)
-            }
-            if (externalLinkError.isNotBlank()) {
-                AppDynamicStatusText(
-                    text = externalLinkError,
-                    isError = true,
-                )
-            }
-        }
+                }
+            },
+        )
+    }
+    if (externalLinkError.isNotBlank()) {
+        AppToast(
+            text = externalLinkError,
+            isError = true,
+            eventKey = externalLinkAttempt,
+            onDismiss = { externalLinkError = "" },
+        )
     }
 }
 

@@ -16,7 +16,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.darkColorScheme
@@ -54,6 +53,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.google.gson.JsonParser
+import com.taskbridge.app.ui.components.AppDrawer
+import com.taskbridge.app.ui.components.AppFeedbackHost
+import com.taskbridge.app.ui.components.AppPopconfirm
+import com.taskbridge.app.ui.components.AppToast
 import com.taskbridge.app.ui.editor.EditorEntryPreset
 import com.taskbridge.app.ui.editor.EditorScreen
 import com.taskbridge.app.ui.editor.requireSharedPayloadWithinLimit
@@ -297,95 +300,89 @@ fun TaskBridgeApp(
     }
 
     TaskBridgeLanguageProvider(language) {
-        TaskBridgeNavHost(
-            container = container,
-            navController = navController,
-            sharedTextState = sharedTextState,
-            language = language,
-            startDestination = startDestination,
-            localWorkspaceMode = localWorkspaceMode,
-            canContinueOffline = workspace != null && token.isNullOrBlank(),
-            onContinueOffline = {
-                if (workspace != null) {
-                    continueWithCachedWorkspace = true
-                    navController.navigateAfterAuthentication(Routes.Today)
-                }
-            },
-            onSignInToSync = {
-                continueWithCachedWorkspace = false
-                navController.navigateToAuthentication()
-            },
-            onRequestNotificationPermission = onRequestNotificationPermission,
-            onEditorNavigationGuardChanged = { editorNavigationGuard.value = it },
-        )
-        val pendingBackupText = sharedText
-        if (workspaceActive && pendingBackupText != null && isTaskBridgeBackupText(pendingBackupText)) {
-            SharedBackupImportDialog(
-                isEnglish = language == AppLanguage.English,
-                onDismiss = { sharedTextState.value = null },
-                onConfirm = {
-                    scope.launch {
-                        val imported = container.taskRepository.importBackupJson(pendingBackupText)
-                        if (imported > 0) {
-                            TodayTaskWidgetUpdateWorker.enqueue(appContext)
-                            container.syncManager.requestSync(followUpIfRunning = true)
+        AppFeedbackHost {
+            TaskBridgeNavHost(
+                container = container,
+                navController = navController,
+                sharedTextState = sharedTextState,
+                language = language,
+                startDestination = startDestination,
+                localWorkspaceMode = localWorkspaceMode,
+                canContinueOffline = workspace != null && token.isNullOrBlank(),
+                onContinueOffline = {
+                    if (workspace != null) {
+                        continueWithCachedWorkspace = true
+                        navController.navigateAfterAuthentication(Routes.Today)
+                    }
+                },
+                onSignInToSync = {
+                    continueWithCachedWorkspace = false
+                    navController.navigateToAuthentication()
+                },
+                onRequestNotificationPermission = onRequestNotificationPermission,
+                onEditorNavigationGuardChanged = { editorNavigationGuard.value = it },
+            )
+            val pendingBackupText = sharedText
+            if (workspaceActive && pendingBackupText != null && isTaskBridgeBackupText(pendingBackupText)) {
+                SharedBackupImportDialog(
+                    isEnglish = language == AppLanguage.English,
+                    onDismiss = { sharedTextState.value = null },
+                    onConfirm = {
+                        scope.launch {
+                            val imported = container.taskRepository.importBackupJson(pendingBackupText)
+                            if (imported > 0) {
+                                TodayTaskWidgetUpdateWorker.enqueue(appContext)
+                                container.syncManager.requestSync(followUpIfRunning = true)
+                            }
+                            sharedTextState.value = null
                         }
-                        sharedTextState.value = null
-                    }
-                },
-            )
-        }
-        if (sharedTextErrorState.value) {
-            AlertDialog(
-                onDismissRequest = { sharedTextErrorState.value = false },
-                title = { Text(if (language == AppLanguage.English) "Unable to import shared text" else "无法导入分享内容") },
-                text = {
-                    Text(
-                        if (language == AppLanguage.English) {
-                            "The shared text is unreadable or larger than 1 MiB. Choose a smaller plain-text file."
-                        } else {
-                            "分享内容无法读取或超过 1 MiB，请选择更小的纯文本文件。"
-                        },
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = { sharedTextErrorState.value = false }) {
-                        Text(if (language == AppLanguage.English) "OK" else "知道了")
-                    }
-                },
-            )
-        }
-        pendingExternalRoute.value?.let { route ->
-            AlertDialog(
-                onDismissRequest = { pendingExternalRoute.value = null },
-                title = { Text(if (language == AppLanguage.English) "Discard unsaved changes?" else "放弃未保存的修改？") },
-                text = {
-                    Text(
-                        if (language == AppLanguage.English) {
-                            "Opening this task will leave the current editor. Your unsaved changes are still available if you keep editing."
-                        } else {
-                            "打开该任务会离开当前编辑页。选择继续编辑可保留当前未保存内容。"
-                        },
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            editorNavigationGuard.value.discardDraft?.invoke()
-                            editorNavigationGuard.value = EditorNavigationGuardState()
-                            pendingExternalRoute.value = null
-                            navController.navigateAfterAuthentication(route)
-                        },
-                    ) {
-                        Text(if (language == AppLanguage.English) "Discard and open" else "放弃并打开")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingExternalRoute.value = null }) {
-                        Text(if (language == AppLanguage.English) "Keep editing" else "继续编辑")
-                    }
-                },
-            )
+                    },
+                )
+            }
+            if (sharedTextErrorState.value) {
+                AppToast(
+                    text = if (language == AppLanguage.English) {
+                        "The shared text is unreadable or larger than 1 MiB. Choose a smaller plain-text file."
+                    } else {
+                        "分享内容无法读取或超过 1 MiB，请选择更小的纯文本文件。"
+                    },
+                    isError = true,
+                    onDismiss = { sharedTextErrorState.value = false },
+                )
+            }
+            pendingExternalRoute.value?.let { route ->
+                AppPopconfirm(
+                    danger = true,
+                    onDismissRequest = { pendingExternalRoute.value = null },
+                    title = { Text(if (language == AppLanguage.English) "Discard unsaved changes?" else "放弃未保存的修改？") },
+                    text = {
+                        Text(
+                            if (language == AppLanguage.English) {
+                                "Opening this task will leave the current editor. Your unsaved changes are still available if you keep editing."
+                            } else {
+                                "打开该任务会离开当前编辑页。选择继续编辑可保留当前未保存内容。"
+                            },
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                editorNavigationGuard.value.discardDraft?.invoke()
+                                editorNavigationGuard.value = EditorNavigationGuardState()
+                                pendingExternalRoute.value = null
+                                navController.navigateAfterAuthentication(route)
+                            },
+                        ) {
+                            Text(if (language == AppLanguage.English) "Discard and open" else "放弃并打开")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingExternalRoute.value = null }) {
+                            Text(if (language == AppLanguage.English) "Keep editing" else "继续编辑")
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -406,7 +403,7 @@ private fun SharedBackupImportDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    AppDrawer(
         onDismissRequest = onDismiss,
         title = {
             Text(if (isEnglish) "Import backup?" else "\u5BFC\u5165\u5907\u4EFD\uFF1F")

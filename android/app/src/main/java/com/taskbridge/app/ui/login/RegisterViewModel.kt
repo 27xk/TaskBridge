@@ -66,6 +66,10 @@ class RegisterViewModel(
         }
     }
 
+    fun clearFeedback() {
+        _uiState.update { it.copy(error = null, connectionMessage = null, connectionMessageIsError = false) }
+    }
+
     fun updateUsername(value: String) = _uiState.update { it.copy(username = value, error = null) }
     fun updateEmail(value: String) = _uiState.update { it.copy(email = value, error = null) }
     fun updatePassword(value: String) = _uiState.update { it.copy(password = value, error = null) }
@@ -90,10 +94,18 @@ class RegisterViewModel(
             registrationEnabled = false,
             registrationStatusKnown = false,
             error = null,
+            connectionMessage = null,
+            connectionMessageIsError = false,
         )
     }
     fun updateWebSocketUrl(value: String) = _uiState.update {
-        it.copy(webSocketUrl = value, advancedEndpointsEdited = true, error = null)
+        it.copy(
+            webSocketUrl = value,
+            advancedEndpointsEdited = true,
+            error = null,
+            connectionMessage = null,
+            connectionMessageIsError = false,
+        )
     }
 
     fun resetGeneratedEndpoints() {

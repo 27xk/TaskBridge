@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -57,10 +56,16 @@ import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
 import com.taskbridge.app.domain.model.isOverdueAt
 import com.taskbridge.app.ui.components.AppDropdownField
+import com.taskbridge.app.ui.components.AppDrawer
 import com.taskbridge.app.ui.components.AppPanel
 import com.taskbridge.app.ui.components.AppUiOption
-import com.taskbridge.app.ui.components.SyncStatusMessage
-import com.taskbridge.app.ui.components.SyncStatusBar
+import com.taskbridge.app.ui.components.AppPopconfirm
+import com.taskbridge.app.ui.components.AppToast
+import com.taskbridge.app.ui.components.AppTooltip
+import com.taskbridge.app.ui.components.PopconfirmAnchor
+import com.taskbridge.app.ui.components.popconfirmAnchor
+import com.taskbridge.app.ui.components.rememberPopconfirmAnchor
+import com.taskbridge.app.ui.components.syncStatusMessageText
 import com.taskbridge.app.ui.i18n.LocalAppLanguage
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
 import com.taskbridge.app.ui.i18n.TaskBridgeStrings
@@ -134,6 +139,7 @@ fun TaskListScreen(
     val completedTasks = remember(tasks) { tasks.filter { it.status == TaskStatus.Completed } }
     var filterMenuExpanded by remember { mutableStateOf(false) }
     var listToolsOpen by rememberSaveable { mutableStateOf(false) }
+    val confirmationAnchor = rememberPopconfirmAnchor()
     var pendingDeleteTask by remember { mutableStateOf<Task?>(null) }
     var pendingDeleteSelectedTasks by remember { mutableStateOf<List<Task>>(emptyList()) }
     var pendingPurgeTask by remember { mutableStateOf<Task?>(null) }
@@ -207,6 +213,7 @@ fun TaskListScreen(
 
     pendingDeleteTask?.let { task ->
         DeleteTaskConfirmationDialog(
+            anchor = confirmationAnchor,
             task = task,
             strings = strings,
             languageCode = appLanguage.code,
@@ -220,6 +227,7 @@ fun TaskListScreen(
 
     pendingDeleteSelectedTasks.takeIf { it.isNotEmpty() }?.let { selected ->
         DeleteSelectedTasksConfirmationDialog(
+            anchor = confirmationAnchor,
             count = selected.size,
             strings = strings,
             languageCode = appLanguage.code,
@@ -234,6 +242,7 @@ fun TaskListScreen(
 
     pendingPurgeTask?.let { task ->
         PurgeTaskConfirmationDialog(
+            anchor = confirmationAnchor,
             task = task,
             strings = strings,
             onDismiss = { pendingPurgeTask = null },
@@ -246,6 +255,7 @@ fun TaskListScreen(
 
     pendingPurgeSelectedTasks.takeIf { it.isNotEmpty() }?.let { selected ->
         PurgeSelectedTasksConfirmationDialog(
+            anchor = confirmationAnchor,
             count = selected.size,
             strings = strings,
             onDismiss = { pendingPurgeSelectedTasks = emptyList() },
@@ -259,6 +269,7 @@ fun TaskListScreen(
 
     pendingConflictAction?.let { pending ->
         ConflictActionConfirmationDialog(
+            anchor = confirmationAnchor,
             task = pending.task,
             action = pending.action,
             strings = strings,
@@ -274,6 +285,15 @@ fun TaskListScreen(
         )
     }
 
+    uiState.feedback?.let { feedback ->
+        AppToast(
+            text = syncStatusMessageText(feedback.message, appLanguage),
+            isError = feedback.isError,
+            eventKey = feedback.id,
+            onDismiss = { viewModel.dismissFeedback(feedback.id) },
+        )
+    }
+
     TaskHomeScaffold(
         todaySelected = todayOnly,
         strings = strings,
@@ -284,6 +304,7 @@ fun TaskListScreen(
         topBar = {
             if (!isTrashFilter && openTaskSelectionMode) {
                 OpenTaskSelectionActionBar(
+                    confirmationAnchor = confirmationAnchor,
                     selectedCount = selectedOpenTaskIds.size,
                     canSelectAllVisible = visibleOpenTaskIds.isNotEmpty() &&
                         selectedOpenTaskIds.size < visibleOpenTaskIds.distinct().size,
@@ -367,13 +388,6 @@ fun TaskListScreen(
                         TaskHomeLocalNotice(strings = strings, onSignIn = onSignInToSync)
                     }
                 }
-                item(key = "home-sync-feedback") {
-                    val showLocalModeActionMessage = uiState.syncMessage == SyncStatusMessage.PurgeRequiresConnection ||
-                        uiState.syncMessage == SyncStatusMessage.PurgeFailed
-                    if (uiState.syncMessage != SyncStatusMessage.LocalCacheReady && (!localWorkspaceMode || showLocalModeActionMessage)) {
-                        SyncStatusBar(uiState.syncMessage)
-                    }
-                }
                 if (!localWorkspaceMode && syncHealth.needsAttention) {
                     item(key = "home-sync-health") {
                         TaskListSyncHealthBar(
@@ -424,6 +438,7 @@ fun TaskListScreen(
                     item { TaskSectionHeader(title = strings.trash, count = tasks.size) }
                     item {
                         TrashBatchActionBar(
+                            confirmationAnchor = confirmationAnchor,
                             selectedCount = selectedTrashTaskIds.size,
                             strings = strings,
                             onRestoreSelected = {
@@ -443,6 +458,7 @@ fun TaskListScreen(
                     }
                     items(tasks, key = { it.localId }) { task ->
                         TaskRow(
+                            confirmationAnchor = confirmationAnchor,
                             task = task,
                             strings = strings,
                             displayTimeZone = displayTimeZone,
@@ -452,7 +468,9 @@ fun TaskListScreen(
                             onSnooze = { viewModel.snoozeOneHour(task.localId) },
                             onPlanToday = { viewModel.planToday(task.localId) },
                             onUseServer = { pendingConflictAction = PendingConflictAction(task, ConflictAction.UseCloud) },
+                            onUseServerConfirmed = { viewModel.resolveConflictUseServer(task.localId) },
                             onOverwriteServer = { pendingConflictAction = PendingConflictAction(task, ConflictAction.OverwriteCloud) },
+                            onOverwriteServerConfirmed = { viewModel.forceOverwriteServer(task.localId) },
                             onRestoreDeleted = { viewModel.restoreDeleted(task.localId) },
                             onDelete = { pendingDeleteTask = task },
                             onPurge = { pendingPurgeTask = task },
@@ -476,6 +494,7 @@ fun TaskListScreen(
                     item { TaskSectionHeader(title = strings.overdue, count = overdueTasks.size, isWarning = true) }
                     items(overdueTasks, key = { it.localId }) { task ->
                         TaskRow(
+                            confirmationAnchor = confirmationAnchor,
                             task = task,
                             strings = strings,
                             displayTimeZone = displayTimeZone,
@@ -485,7 +504,9 @@ fun TaskListScreen(
                             onSnooze = { viewModel.snoozeOneHour(task.localId) },
                             onPlanToday = { viewModel.planToday(task.localId) },
                             onUseServer = { pendingConflictAction = PendingConflictAction(task, ConflictAction.UseCloud) },
+                            onUseServerConfirmed = { viewModel.resolveConflictUseServer(task.localId) },
                             onOverwriteServer = { pendingConflictAction = PendingConflictAction(task, ConflictAction.OverwriteCloud) },
+                            onOverwriteServerConfirmed = { viewModel.forceOverwriteServer(task.localId) },
                             onRestoreDeleted = { viewModel.restoreDeleted(task.localId) },
                             onDelete = { pendingDeleteTask = task },
                             onOpen = { onTaskClick(task.localId) },
@@ -514,6 +535,7 @@ fun TaskListScreen(
                     item { TaskSectionHeader(title = strings.todo, count = pendingOpenTasks.size) }
                     items(pendingOpenTasks, key = { it.localId }) { task ->
                         TaskRow(
+                            confirmationAnchor = confirmationAnchor,
                             task = task,
                             strings = strings,
                             displayTimeZone = displayTimeZone,
@@ -523,7 +545,9 @@ fun TaskListScreen(
                             onSnooze = { viewModel.snoozeOneHour(task.localId) },
                             onPlanToday = { viewModel.planToday(task.localId) },
                             onUseServer = { pendingConflictAction = PendingConflictAction(task, ConflictAction.UseCloud) },
+                            onUseServerConfirmed = { viewModel.resolveConflictUseServer(task.localId) },
                             onOverwriteServer = { pendingConflictAction = PendingConflictAction(task, ConflictAction.OverwriteCloud) },
+                            onOverwriteServerConfirmed = { viewModel.forceOverwriteServer(task.localId) },
                             onRestoreDeleted = { viewModel.restoreDeleted(task.localId) },
                             onDelete = { pendingDeleteTask = task },
                             onOpen = { onTaskClick(task.localId) },
@@ -552,6 +576,7 @@ fun TaskListScreen(
                     item { TaskSectionHeader(title = strings.completed, count = completedTasks.size) }
                     items(completedTasks, key = { it.localId }) { task ->
                         TaskRow(
+                            confirmationAnchor = confirmationAnchor,
                             task = task,
                             strings = strings,
                             displayTimeZone = displayTimeZone,
@@ -561,7 +586,9 @@ fun TaskListScreen(
                             onSnooze = { viewModel.snoozeOneHour(task.localId) },
                             onPlanToday = { viewModel.planToday(task.localId) },
                             onUseServer = { pendingConflictAction = PendingConflictAction(task, ConflictAction.UseCloud) },
+                            onUseServerConfirmed = { viewModel.resolveConflictUseServer(task.localId) },
                             onOverwriteServer = { pendingConflictAction = PendingConflictAction(task, ConflictAction.OverwriteCloud) },
+                            onOverwriteServerConfirmed = { viewModel.forceOverwriteServer(task.localId) },
                             onRestoreDeleted = { viewModel.restoreDeleted(task.localId) },
                             onDelete = { pendingDeleteTask = task },
                             onOpen = { onTaskClick(task.localId) },
@@ -736,6 +763,7 @@ private fun TaskListHeaderActions(
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun OpenTaskSelectionActionBar(
+    confirmationAnchor: PopconfirmAnchor,
     selectedCount: Int,
     canSelectAllVisible: Boolean,
     languageCode: String,
@@ -776,7 +804,11 @@ private fun OpenTaskSelectionActionBar(
                     Text(if (isEnglish) "Complete selected" else "完成所选", maxLines = 1)
                 }
                 TextButton(
-                    onClick = onDeleteSelected,
+                    onClick = {
+                        confirmationAnchor.select("delete-selected")
+                        onDeleteSelected()
+                    },
+                    modifier = Modifier.popconfirmAnchor(confirmationAnchor, key = "delete-selected"),
                     enabled = selectedCount > 0,
                 ) {
                     Text(if (isEnglish) "Delete selected" else "删除所选", maxLines = 1)
@@ -789,6 +821,7 @@ private fun OpenTaskSelectionActionBar(
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun TrashBatchActionBar(
+    confirmationAnchor: PopconfirmAnchor,
     selectedCount: Int,
     strings: TaskBridgeStrings,
     onRestoreSelected: () -> Unit,
@@ -814,7 +847,11 @@ private fun TrashBatchActionBar(
                     Text(strings.restoreSelected)
                 }
                 TextButton(
-                    onClick = onPurgeSelected,
+                    onClick = {
+                        confirmationAnchor.select("purge-selected")
+                        onPurgeSelected()
+                    },
+                    modifier = Modifier.popconfirmAnchor(confirmationAnchor, key = "purge-selected"),
                     enabled = selectedCount > 0,
                 ) {
                     Text(strings.deleteSelectedPermanently)
@@ -861,13 +898,16 @@ private fun EmptyTaskState(title: String, hint: String, actionLabel: String, onA
 
 @Composable
 private fun DeleteTaskConfirmationDialog(
+    anchor: PopconfirmAnchor,
     task: Task,
     strings: TaskBridgeStrings,
     languageCode: String,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    AppPopconfirm(
+        anchor = anchor,
+        danger = true,
         onDismissRequest = onDismiss,
         title = { Text(strings.delete) },
         text = { Text(getDeleteConfirmationMessage(task.title, languageCode)) },
@@ -882,13 +922,16 @@ private fun DeleteTaskConfirmationDialog(
 
 @Composable
 private fun DeleteSelectedTasksConfirmationDialog(
+    anchor: PopconfirmAnchor,
     count: Int,
     strings: TaskBridgeStrings,
     languageCode: String,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    AppPopconfirm(
+        anchor = anchor,
+        danger = true,
         onDismissRequest = onDismiss,
         title = { Text(if (languageCode == "en-US") "Delete selected tasks?" else "删除所选任务？") },
         text = { Text(getDeleteSelectedConfirmationMessage(count, languageCode)) },
@@ -903,12 +946,15 @@ private fun DeleteSelectedTasksConfirmationDialog(
 
 @Composable
 private fun PurgeTaskConfirmationDialog(
+    anchor: PopconfirmAnchor,
     task: Task,
     strings: TaskBridgeStrings,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    AppPopconfirm(
+        anchor = anchor,
+        danger = true,
         onDismissRequest = onDismiss,
         title = { Text(strings.purge) },
         text = { Text(strings.purgeConfirm.format(task.title)) },
@@ -923,12 +969,15 @@ private fun PurgeTaskConfirmationDialog(
 
 @Composable
 private fun PurgeSelectedTasksConfirmationDialog(
+    anchor: PopconfirmAnchor,
     count: Int,
     strings: TaskBridgeStrings,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    AppPopconfirm(
+        anchor = anchor,
+        danger = true,
         onDismissRequest = onDismiss,
         title = { Text(strings.deleteSelectedPermanentlyTitle) },
         text = {
@@ -945,6 +994,7 @@ private fun PurgeSelectedTasksConfirmationDialog(
 
 @Composable
 private fun ConflictActionConfirmationDialog(
+    anchor: PopconfirmAnchor,
     task: Task,
     action: ConflictAction,
     strings: TaskBridgeStrings,
@@ -956,7 +1006,9 @@ private fun ConflictActionConfirmationDialog(
         ConflictAction.UseCloud -> strings.keepServerVersion
         ConflictAction.OverwriteCloud -> strings.keepDeviceVersion
     }
-    AlertDialog(
+    AppPopconfirm(
+        anchor = anchor,
+        danger = true,
         onDismissRequest = onDismiss,
         title = { Text(strings.conflict) },
         text = { Text(getConflictConfirmationMessage(task.title, action, languageCode)) },
@@ -972,6 +1024,7 @@ private fun ConflictActionConfirmationDialog(
 @Composable
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 private fun TaskRow(
+    confirmationAnchor: PopconfirmAnchor,
     task: Task,
     strings: TaskBridgeStrings,
     displayTimeZone: String,
@@ -981,7 +1034,9 @@ private fun TaskRow(
     onSnooze: () -> Unit,
     onPlanToday: () -> Unit,
     onUseServer: () -> Unit,
+    onUseServerConfirmed: () -> Unit,
     onOverwriteServer: () -> Unit,
+    onOverwriteServerConfirmed: () -> Unit,
     onRestoreDeleted: () -> Unit,
     onDelete: () -> Unit,
     onPurge: () -> Unit = {},
@@ -1092,13 +1147,18 @@ private fun TaskRow(
                 }
                 if (!isTrash && !selectingThisRow) {
                     Box {
-                        IconButton(
-                            onClick = { moreMenuExpanded = true },
-                            modifier = Modifier.semantics {
-                                contentDescription = taskActionAccessibilityLabel(actionsLabel, task.title)
-                            },
-                        ) {
-                            TaskHomeIcon(TaskHomeIcon.More, contentDescription = null)
+                        AppTooltip(text = taskActionAccessibilityLabel(actionsLabel, task.title)) {
+                            IconButton(
+                                onClick = {
+                                    confirmationAnchor.select("task-actions:${task.localId}")
+                                    moreMenuExpanded = true
+                                },
+                                modifier = Modifier.popconfirmAnchor(confirmationAnchor, key = "task-actions:${task.localId}").semantics {
+                                    contentDescription = taskActionAccessibilityLabel(actionsLabel, task.title)
+                                },
+                            ) {
+                                TaskHomeIcon(TaskHomeIcon.More, contentDescription = null)
+                            }
                         }
                         DropdownMenu(
                             expanded = moreMenuExpanded,
@@ -1186,7 +1246,13 @@ private fun TaskRow(
                 }
             }
             if (task.syncStatus == SyncStatus.Conflict) {
-                ConflictSnapshotSummary(task = task, languageCode = languageCode)
+                ConflictSnapshotSummary(
+                    task = task,
+                    strings = strings,
+                    languageCode = languageCode,
+                    onUseServer = onUseServerConfirmed,
+                    onOverwriteServer = onOverwriteServerConfirmed,
+                )
             }
             if (isTrash && !selectingThisRow) {
                 FlowRow(
@@ -1194,7 +1260,13 @@ private fun TaskRow(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     TextButton(onClick = onRestoreDeleted) { Text(strings.restore) }
-                    TextButton(onClick = onPurge) { Text(strings.purge) }
+                    TextButton(
+                        onClick = {
+                            confirmationAnchor.select("purge-task:${task.localId}")
+                            onPurge()
+                        },
+                        modifier = Modifier.popconfirmAnchor(confirmationAnchor, key = "purge-task:${task.localId}"),
+                    ) { Text(strings.purge) }
                 }
             }
         }
@@ -1281,33 +1353,77 @@ private fun DropdownMenuSectionLabel(label: String) {
 }
 
 @Composable
-private fun ConflictSnapshotSummary(task: Task, languageCode: String) {
+internal fun ConflictSnapshotSummary(
+    task: Task,
+    strings: TaskBridgeStrings,
+    languageCode: String,
+    onUseServer: () -> Unit,
+    onOverwriteServer: () -> Unit,
+) {
+    var detailsOpen by remember(task.localId) { mutableStateOf(false) }
+    var pendingAction by remember(task.localId) { mutableStateOf<ConflictAction?>(null) }
+    val confirmationAnchor = rememberPopconfirmAnchor()
     val detailRows = conflictSnapshotDetailRows(task, languageCode)
     val fallbackText = conflictSnapshotDetailText(task, languageCode) ?: if (languageCode == "en-US") {
         "Differences: no displayable field differences were detected. Use the version details to choose which version to keep."
     } else {
         "差异：未检测到可展示的字段差异，请根据两侧版本信息选择保留哪一版。"
     }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 48.dp, top = 2.dp, bottom = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+    TextButton(
+        onClick = { detailsOpen = true },
+        modifier = Modifier.padding(start = 48.dp),
     ) {
-        ConflictSnapshotComparison(
-            task = task,
-            detailRows = detailRows,
-            languageCode = languageCode,
+        Text(if (languageCode == "en-US") "Review conflicting versions" else "\u67e5\u770b\u7248\u672c\u5dee\u5f02")
+    }
+    if (detailsOpen) {
+        AppDrawer(
+            onDismissRequest = {
+                detailsOpen = false
+                pendingAction = null
+            },
+            title = { Text(strings.conflict) },
+            text = {
+                Text(task.title, style = MaterialTheme.typography.titleMedium)
+                ConflictSnapshotComparison(task = task, detailRows = detailRows, languageCode = languageCode)
+                if (detailRows.isEmpty()) Text(fallbackText)
+                // Keep the popup in the drawer's window so dismissing it restores drawer focus.
+                pendingAction?.let { action ->
+                    ConflictActionConfirmationDialog(
+                        anchor = confirmationAnchor,
+                        task = task,
+                        action = action,
+                        strings = strings,
+                        languageCode = languageCode,
+                        onDismiss = { pendingAction = null },
+                        onConfirm = {
+                            pendingAction = null
+                            detailsOpen = false
+                            when (action) {
+                                ConflictAction.UseCloud -> onUseServer()
+                                ConflictAction.OverwriteCloud -> onOverwriteServer()
+                            }
+                        },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmationAnchor.select("keep-server:${task.localId}")
+                        pendingAction = ConflictAction.UseCloud
+                    },
+                    enabled = !task.conflictServerJson.isNullOrBlank(),
+                    modifier = Modifier.popconfirmAnchor(confirmationAnchor, key = "keep-server:${task.localId}"),
+                ) { Text(strings.keepServerVersion) }
+                TextButton(
+                    onClick = {
+                        confirmationAnchor.select("keep-device:${task.localId}")
+                        pendingAction = ConflictAction.OverwriteCloud
+                    },
+                    modifier = Modifier.popconfirmAnchor(confirmationAnchor, key = "keep-device:${task.localId}"),
+                ) { Text(strings.keepDeviceVersion) }
+            },
         )
-        if (detailRows.isEmpty()) {
-            Text(
-                text = fallbackText,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 
@@ -1373,8 +1489,6 @@ private fun ConflictSnapshotCard(
             )
             Text(
                 text = title,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.SemiBold,
@@ -1382,8 +1496,6 @@ private fun ConflictSnapshotCard(
             rows.forEach { (rowLabel, value) ->
                 Text(
                     text = "$rowLabel: ${value.ifBlank { "-" }}",
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

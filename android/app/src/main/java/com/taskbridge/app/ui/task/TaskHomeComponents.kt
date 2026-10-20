@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.taskbridge.app.ui.components.AppTooltip
 import com.taskbridge.app.ui.components.glass.GlassStyle
 import com.taskbridge.app.ui.components.glass.LiquidGlassBackdrop
 import com.taskbridge.app.ui.components.glass.LiquidGlassSurface
@@ -292,14 +293,16 @@ internal fun TaskHomeSearch(
             leadingIcon = { TaskHomeIcon(TaskHomeIcon.Search, null) },
             trailingIcon = if (searchQuery.isNotEmpty()) {
                 {
-                    IconButton(
-                        onClick = { onSearchChange("") },
-                        modifier = Modifier.size(48.dp).testTag("home-clear-search"),
-                    ) {
-                        TaskHomeIcon(
-                            TaskHomeIcon.Close,
-                            if (isEnglish) "Clear search" else "清空搜索",
-                        )
+                    AppTooltip(text = if (isEnglish) "Clear search" else "清空搜索") {
+                        IconButton(
+                            onClick = { onSearchChange("") },
+                            modifier = Modifier.size(48.dp).testTag("home-clear-search"),
+                        ) {
+                            TaskHomeIcon(
+                                TaskHomeIcon.Close,
+                                if (isEnglish) "Clear search" else "清空搜索",
+                            )
+                        }
                     }
                 }
             } else null,
@@ -313,30 +316,32 @@ internal fun TaskHomeSearch(
             ),
         )
         if (showFilter) {
-            IconButton(
-                onClick = onFilterClick,
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(
-                        color = if (filterActive) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(16.dp),
-                    )
-                    .semantics {
-                        stateDescription = if (filterActive) {
-                            if (isEnglish) "Filters applied" else "已应用筛选"
-                        } else {
-                            if (isEnglish) "No filters applied" else "未应用筛选"
+            AppTooltip(text = if (isEnglish) "Filter tasks" else "筛选待办") {
+                IconButton(
+                    onClick = onFilterClick,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(
+                            color = if (filterActive) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                        .semantics {
+                            stateDescription = if (filterActive) {
+                                if (isEnglish) "Filters applied" else "已应用筛选"
+                            } else {
+                                if (isEnglish) "No filters applied" else "未应用筛选"
+                            }
                         }
-                    }
-                    .testTag("home-filter"),
-            ) {
-                TaskHomeIcon(
-                    TaskHomeIcon.Filter,
-                    if (isEnglish) "Filter tasks" else "筛选待办",
-                    tint = if (filterActive) MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                        .testTag("home-filter"),
+                ) {
+                    TaskHomeIcon(
+                        TaskHomeIcon.Filter,
+                        if (isEnglish) "Filter tasks" else "筛选待办",
+                        tint = if (filterActive) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

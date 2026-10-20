@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -38,9 +37,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.taskbridge.app.ui.components.AppDropdownField
 import com.taskbridge.app.ui.components.AppDynamicStatusText
 import com.taskbridge.app.ui.components.AppHeader
+import com.taskbridge.app.ui.components.AppHelpTooltip
 import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
+import com.taskbridge.app.ui.components.AppPopconfirm
 import com.taskbridge.app.ui.components.AppUiOption
+import com.taskbridge.app.ui.components.PopconfirmAnchor
+import com.taskbridge.app.ui.components.popconfirmAnchor
+import com.taskbridge.app.ui.components.rememberPopconfirmAnchor
 import com.taskbridge.app.ui.components.repeatRuleOptions
 import com.taskbridge.app.ui.components.glass.GlassStyle
 import com.taskbridge.app.ui.components.glass.LiquidGlassSurface
@@ -83,6 +87,8 @@ fun EditorScreen(
     var priorityMenuOpen by remember { mutableStateOf(false) }
     var repeatMenuOpen by remember { mutableStateOf(false) }
     var confirmDiscardChanges by remember { mutableStateOf(false) }
+    var saveAttempt by remember { mutableStateOf(0) }
+    val discardAnchor = rememberPopconfirmAnchor()
     val priorityOptions = remember(language) {
         getTaskPriorityOptions(language.code).map { (value, label) -> AppUiOption(value, label) }
     }
@@ -151,8 +157,10 @@ fun EditorScreen(
     }
 
     if (confirmDiscardChanges) {
-        AlertDialog(
+        AppPopconfirm(
             onDismissRequest = { confirmDiscardChanges = false },
+            anchor = discardAnchor,
+            danger = true,
             title = { Text(if (isEnglish) "Discard changes?" else "放弃未保存的修改？") },
             text = {
                 Text(
@@ -195,12 +203,15 @@ fun EditorScreen(
                     isLoadingTask = state.isLoadingTask,
                     isSaving = state.isSaving,
                     onSave = {
+                        viewModel.clearFeedback()
+                        saveAttempt += 1
                         if (shouldRequestReminderPermission(state.remindTime, state.dueTime)) {
                             onRequestNotificationPermission()
                         }
                         viewModel.save(onSaved)
                     },
                     onCancel = { requestCancel() },
+                    cancelAnchor = discardAnchor,
                 )
             },
         ) { contentPadding ->
@@ -214,7 +225,6 @@ fun EditorScreen(
             ) {
                 AppHeader(
                     title = if (state.editingLocalId == null) strings.addTask else strings.edit,
-                    subtitle = strings.autoFillHint,
                 )
 
                 AppPanel {
@@ -225,6 +235,10 @@ fun EditorScreen(
                         placeholder = { Text(strings.quickAddPlaceholder) },
                         isError = state.error != null,
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                    AppHelpTooltip(
+                        text = strings.autoFillHint,
+                        label = if (isEnglish) "Quick entry help" else "快速输入说明",
                     )
                     QuickAddPreviewChips(chips = quickPreviewChips)
                 }
@@ -296,6 +310,7 @@ fun EditorScreen(
                     AppDynamicStatusText(
                         text = localizeEditorError(it, strings),
                         isError = true,
+                        eventKey = saveAttempt to it,
                     )
                 }
             }
@@ -311,6 +326,7 @@ private fun EditorBottomActions(
     isSaving: Boolean,
     onSave: () -> Unit,
     onCancel: () -> Unit,
+    cancelAnchor: PopconfirmAnchor,
 ) {
     LiquidGlassSurface(
         modifier = Modifier
@@ -326,7 +342,10 @@ private fun EditorBottomActions(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
+            TextButton(
+                onClick = onCancel,
+                modifier = Modifier.weight(1f).popconfirmAnchor(cancelAnchor),
+            ) {
                 Text(strings.cancel)
             }
             Button(
@@ -461,10 +480,9 @@ private fun ArrangementTaskFieldsPanel(
             onPick = onPickReminder,
             onClear = onClearReminder,
         )
-        Text(
+        AppHelpTooltip(
             text = scheduleHelpText,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
+            label = if (isEnglish) "Schedule help" else "时间安排说明",
         )
     }
 }

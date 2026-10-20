@@ -2,10 +2,72 @@ package com.taskbridge.app.ui.login
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RegistrationAvailabilityTest {
+    @Test
+    fun registrationChecksNeverReportConnectionSuccessAsTheRegistrationResult() {
+        assertNull(
+            authConnectionFeedback(
+                message = "connection_ready",
+                isError = false,
+                manualTestRequested = false,
+                isAuthenticating = false,
+                authError = null,
+            ),
+        )
+    }
+
+    @Test
+    fun unknownAndDisabledRegistrationErrorsTakePriorityOverConnectionSuccess() {
+        listOf("registration_status_unknown", "Registration is disabled on this server.").forEach { error ->
+            assertNull(
+                authConnectionFeedback(
+                    message = "connection_ready",
+                    isError = false,
+                    manualTestRequested = true,
+                    isAuthenticating = false,
+                    authError = error,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun anInFlightRegistrationDoesNotShowAnEarlierManualConnectionSuccess() {
+        assertNull(
+            authConnectionFeedback(
+                message = "connection_ready",
+                isError = false,
+                manualTestRequested = true,
+                isAuthenticating = true,
+                authError = null,
+            ),
+        )
+    }
+
+    @Test
+    fun aManualConnectionRetryCanReportSuccessAfterThePreviousErrorIsCleared() {
+        assertNull(
+            authConnectionFeedback("connection_ready", false, true, false, "Registration failed."),
+        )
+        assertEquals(
+            "connection_ready",
+            authConnectionFeedback("connection_ready", false, true, false, null),
+        )
+    }
+
+    @Test
+    fun connectionFailuresRemainVisibleDuringAutomaticRegistrationChecks() {
+        assertEquals(
+            "connection_unavailable",
+            authConnectionFeedback("connection_unavailable", true, false, true, null),
+        )
+        assertNull(authConnectionFeedback(null, false, true, false, null))
+    }
+
     @Test
     fun unknownRegistrationStatusShowsCheckActionBeforeAccountCreation() {
         val ui = registrationAvailabilityUi(

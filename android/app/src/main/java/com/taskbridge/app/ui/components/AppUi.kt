@@ -46,7 +46,10 @@ fun AppDynamicStatusText(
     text: String,
     isError: Boolean,
     modifier: Modifier = Modifier,
+    eventKey: Any = text,
 ) {
+    AppToast(text = text, isError = isError, eventKey = eventKey)
+    if (!isError) return
     Text(
         text = text,
         modifier = modifier.semantics {

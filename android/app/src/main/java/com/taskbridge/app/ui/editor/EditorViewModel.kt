@@ -135,6 +135,10 @@ class EditorViewModel(
     val displayTimeZone: StateFlow<String> = tokenDataStore.displayTimeZone
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ShanghaiTime.DEFAULT_ZONE_ID)
 
+    fun clearFeedback() {
+        _uiState.update { it.copy(error = null) }
+    }
+
     fun updateTitle(value: String) = updateDraft {
         it.copy(title = value, error = null)
     }

@@ -29,10 +29,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.taskbridge.app.BuildConfig
 import com.taskbridge.app.ui.components.AppDropdownField
+import com.taskbridge.app.ui.components.AppDrawer
 import com.taskbridge.app.ui.components.AppDynamicStatusText
 import com.taskbridge.app.ui.components.AppHeader
+import com.taskbridge.app.ui.components.AppHelpTooltip
 import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
+import com.taskbridge.app.ui.components.AppToast
 import com.taskbridge.app.ui.components.tryOpenExternalUri
 import com.taskbridge.app.ui.components.registrationDisabledMessageKey
 import com.taskbridge.app.ui.components.registrationFailureMessageKey
@@ -63,6 +66,9 @@ fun RegisterScreen(
     val language = LocalAppLanguage.current
     var languageMenuOpen by remember { mutableStateOf(false) }
     var advancedConnectionOpen by remember { mutableStateOf(false) }
+    var registerAttempt by remember { mutableStateOf(0) }
+    var connectionAttempt by remember { mutableStateOf(0) }
+    var manualConnectionTestRequested by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
     val isEnglish = language == AppLanguage.English
@@ -104,10 +110,9 @@ fun RegisterScreen(
                     style = MaterialTheme.typography.titleMedium,
                 )
                 registrationAvailability.helperText?.let {
-                    Text(
+                    AppHelpTooltip(
                         text = it,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
+                        label = if (isEnglish) "Registration help" else "注册说明",
                     )
                 }
                 OutlinedTextField(
@@ -141,18 +146,31 @@ fun RegisterScreen(
                     AppDynamicStatusText(
                         text = localizeRegisterError(it, strings),
                         isError = true,
+                        eventKey = registerAttempt to it,
                     )
                 }
                 Button(
-                    onClick = { viewModel.register(onRegisterSuccess) },
-                    enabled = registrationAvailability.canSubmitRegistration,
+                    onClick = {
+                        viewModel.clearFeedback()
+                        manualConnectionTestRequested = false
+                        registerAttempt += 1
+                        viewModel.register(onRegisterSuccess)
+                    },
+                    enabled = registrationAvailability.canSubmitRegistration && !state.isTestingConnection,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(if (state.isLoading) strings.creating else registrationAvailability.actionText ?: strings.createAccount)
                 }
                 RegistrationConnectionFeedbackNearSubmit(
-                    connectionMessage = state.connectionMessage,
+                    connectionMessage = authConnectionFeedback(
+                        message = state.connectionMessage,
+                        isError = state.connectionMessageIsError,
+                        manualTestRequested = manualConnectionTestRequested,
+                        isAuthenticating = state.isLoading,
+                        authError = state.error,
+                    ),
                     connectionMessageIsError = state.connectionMessageIsError,
+                    eventKey = Triple(connectionAttempt, registerAttempt, state.connectionMessage),
                     isEnglish = isEnglish,
                     strings = strings,
                     onChangeServerAddress = {
@@ -179,40 +197,36 @@ fun RegisterScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
+                AppHelpTooltip(
                     text = strings.serverUrlHint,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
+                    label = if (isEnglish) "Server address help" else "服务器地址说明",
                 )
                 localhostWarningText(state.serverBaseUrl, isEnglish)?.let { warning ->
-                    Text(
+                    AppHelpTooltip(
                         text = warning,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
+                        label = if (isEnglish) "Local address help" else "本机地址说明",
                     )
                 }
                 OutlinedButton(
-                    onClick = { viewModel.testConnection() },
-                    enabled = !state.isTestingConnection,
+                    onClick = {
+                        viewModel.clearFeedback()
+                        manualConnectionTestRequested = true
+                        connectionAttempt += 1
+                        viewModel.testConnection()
+                    },
+                    enabled = !state.isTestingConnection && !state.isLoading,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
                         if (state.isTestingConnection) strings.testingConnection else strings.saveAndTestConnection,
                     )
                 }
-                state.connectionMessage?.let {
-                    AppDynamicStatusText(
-                        text = localizeConnectionMessage(it, isEnglish),
-                        isError = state.connectionMessageIsError,
-                    )
-                }
                 TextButton(onClick = { advancedConnectionOpen = !advancedConnectionOpen }) {
                     Text(strings.advancedConnectionSettings)
                 }
-                Text(
+                AppHelpTooltip(
                     text = strings.advancedConnectionSecondaryHint,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
+                    label = if (isEnglish) "Advanced connection help" else "高级连接说明",
                 )
                 if (advancedConnectionOpen) {
                     OutlinedTextField(
@@ -235,10 +249,9 @@ fun RegisterScreen(
                         Text(strings.regenerateFromServerUrl)
                     }
                 }
-                Text(
+                AppHelpTooltip(
                     text = strings.savedBeforeRegistration,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
+                    label = if (isEnglish) "Connection saving help" else "连接保存说明",
                 )
             }
         }
@@ -249,16 +262,18 @@ fun RegisterScreen(
 private fun RegistrationConnectionFeedbackNearSubmit(
     connectionMessage: String?,
     connectionMessageIsError: Boolean,
+    eventKey: Any,
     isEnglish: Boolean,
     strings: TaskBridgeStrings,
     onChangeServerAddress: () -> Unit,
 ) {
-    if (connectionMessage.isNullOrBlank() || !connectionMessageIsError) return
+    if (connectionMessage.isNullOrBlank()) return
     AppDynamicStatusText(
         text = localizeConnectionMessage(connectionMessage, isEnglish),
-        isError = true,
+        isError = connectionMessageIsError,
+        eventKey = eventKey,
     )
-    if (BuildConfig.DEBUG) {
+    if (BuildConfig.DEBUG && connectionMessageIsError) {
         TextButton(onClick = onChangeServerAddress, modifier = Modifier.fillMaxWidth()) {
             Text(strings.changeServerAddress)
         }
@@ -269,67 +284,49 @@ private fun RegistrationConnectionFeedbackNearSubmit(
 private fun FirstUseGuide(strings: com.taskbridge.app.ui.i18n.TaskBridgeStrings) {
     var detailsOpen by remember { mutableStateOf(false) }
     var externalLinkError by remember { mutableStateOf("") }
+    var externalLinkAttempt by remember { mutableStateOf(0) }
     val uriHandler = LocalUriHandler.current
-    AppPanel {
-        Text(
-            text = strings.registerFirstUseTitle,
-            style = MaterialTheme.typography.titleSmall,
-        )
-        Text(
-            text = strings.registerFirstUseBody,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-        )
-        TextButton(onClick = { detailsOpen = !detailsOpen }) {
-            Text(if (detailsOpen) strings.hideSetupChoices else strings.setupHelpSummary)
-        }
-        if (detailsOpen) {
-            Text(
-                text = strings.localTrialHelp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = strings.localTrialGuide,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = strings.selfHostGuide,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            OutlinedButton(
-                onClick = {
-                    externalLinkError = if (tryOpenExternalUri(uriHandler, LOCAL_TRIAL_GUIDE_URL)) {
-                        ""
-                    } else {
-                        strings.externalLinkFailed
+    fun openGuide(url: String) {
+        externalLinkError = ""
+        externalLinkAttempt += 1
+        if (!tryOpenExternalUri(uriHandler, url)) externalLinkError = strings.externalLinkFailed
+    }
+    TextButton(onClick = { detailsOpen = true }, modifier = Modifier.fillMaxWidth()) {
+        Text(strings.setupHelpSummary)
+    }
+    if (detailsOpen) {
+        AppDrawer(
+            onDismissRequest = { detailsOpen = false },
+            title = { Text(strings.registerFirstUseTitle) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(strings.registerFirstUseBody)
+                    Text(strings.localTrialHelp)
+                    Text(strings.localTrialGuide)
+                    Text(strings.selfHostGuide)
+                    OutlinedButton(
+                        onClick = { openGuide(LOCAL_TRIAL_GUIDE_URL) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(strings.openLocalTrialGuide)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(strings.openLocalTrialGuide)
-            }
-            TextButton(
-                onClick = {
-                    externalLinkError = if (tryOpenExternalUri(uriHandler, SELF_HOST_GUIDE_URL)) {
-                        ""
-                    } else {
-                        strings.externalLinkFailed
+                    TextButton(
+                        onClick = { openGuide(SELF_HOST_GUIDE_URL) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(strings.openSelfHostGuide)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(strings.openSelfHostGuide)
-            }
-            if (externalLinkError.isNotBlank()) {
-                AppDynamicStatusText(
-                    text = externalLinkError,
-                    isError = true,
-                )
-            }
-        }
+                }
+            },
+        )
+    }
+    if (externalLinkError.isNotBlank()) {
+        AppToast(
+            text = externalLinkError,
+            isError = true,
+            eventKey = externalLinkAttempt,
+            onDismiss = { externalLinkError = "" },
+        )
     }
 }
 
