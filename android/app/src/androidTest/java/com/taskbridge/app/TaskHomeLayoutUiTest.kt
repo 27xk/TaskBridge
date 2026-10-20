@@ -1,6 +1,9 @@
 package com.taskbridge.app
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.material3.MaterialTheme
@@ -93,7 +96,10 @@ class TaskHomeLayoutUiTest {
             compose.setContent {
                 val density = LocalDensity.current
                 keyboard = LocalSoftwareKeyboardController.current
-                Box(Modifier.requiredSize(width = 360.dp, height = 480.dp)) {
+                // This fixture represents an already cropped viewport, not the entire window.
+                // Full-window IME behavior is checked separately by TaskHomeNavigationUiTest.
+                Box(Modifier.requiredSize(width = 360.dp, height = 480.dp)
+                    .consumeWindowInsets(WindowInsets.safeDrawing)) {
                     CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = 1.6f)) {
                         MaterialTheme {
                             TaskBridgeLanguageProvider(AppLanguage.Chinese) {

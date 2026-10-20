@@ -10,6 +10,9 @@ import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
@@ -491,6 +494,8 @@ private fun TaskBridgeNavHost(
 
         composable(
             route = Routes.TasksPattern,
+            enterTransition = { fadeIn(tween(220)) },
+            exitTransition = { fadeOut(tween(140)) },
             arguments = listOf(navArgument("filter") {
                 type = NavType.StringType
                 defaultValue = ""
@@ -512,7 +517,7 @@ private fun TaskBridgeNavHost(
                 onAddClick = { navController.navigate(Routes.Editor) },
                 onTaskClick = { navController.navigate(Routes.taskDetail(it)) },
                 onEditClick = { navController.navigate(Routes.editTask(it)) },
-                onSettingsClick = { navController.navigate(Routes.Settings) },
+                onSettingsClick = { navController.navigateTopLevel(Routes.Settings, preserveSource = true) },
                 onSyncDetailsClick = { navController.navigate(Routes.settings("sync-recovery")) },
                 onSignInToSync = onSignInToSync,
                 onTodayClick = { navController.navigateTopLevel(Routes.Today) },
@@ -520,7 +525,11 @@ private fun TaskBridgeNavHost(
             )
         }
 
-        composable(Routes.Today) {
+        composable(
+            route = Routes.Today,
+            enterTransition = { fadeIn(tween(220)) },
+            exitTransition = { fadeOut(tween(140)) },
+        ) {
             val viewModel = viewModel<com.taskbridge.app.ui.task.TaskListViewModel>(
                 factory = TaskListViewModelFactory(
                     context.applicationContext,
@@ -536,7 +545,7 @@ private fun TaskBridgeNavHost(
                 onAddClick = { navController.navigate(Routes.EditorToday) },
                 onTaskClick = { navController.navigate(Routes.taskDetail(it)) },
                 onEditClick = { navController.navigate(Routes.editTask(it)) },
-                onSettingsClick = { navController.navigate(Routes.Settings) },
+                onSettingsClick = { navController.navigateTopLevel(Routes.Settings, preserveSource = true) },
                 onSyncDetailsClick = { navController.navigate(Routes.settings("sync-recovery")) },
                 onSignInToSync = onSignInToSync,
                 onTodayClick = { },
@@ -629,6 +638,8 @@ private fun TaskBridgeNavHost(
 
         composable(
             route = Routes.SettingsPattern,
+            enterTransition = { fadeIn(tween(220)) },
+            exitTransition = { fadeOut(tween(140)) },
             arguments = listOf(navArgument("section") {
                 type = NavType.StringType
                 defaultValue = ""
@@ -648,6 +659,8 @@ private fun TaskBridgeNavHost(
                 },
                 onBack = { navController.popBackStack() },
                 onOpenConflictTasks = { navController.navigate(Routes.tasks("conflict")) },
+                onTodayClick = { navController.navigateTopLevel(Routes.Today) },
+                onAllClick = { navController.navigateTopLevel(Routes.tasks()) },
                 onLogout = {
                     scope.launch {
                         container.authRepository.logout()
@@ -659,11 +672,21 @@ private fun TaskBridgeNavHost(
     }
 }
 
-private fun NavHostController.navigateTopLevel(route: String) {
-    navigate(route) {
-        popUpTo(Routes.Today) {
-            saveState = true
+private fun NavHostController.navigateTopLevel(route: String, preserveSource: Boolean = false) {
+    val destination = graph.firstOrNull {
+        it.route?.substringBefore('?') == route.substringBefore('?')
+    } ?: return
+    val targetInStack = runCatching { getBackStackEntry(destination.id) }.isSuccess
+    if (targetInStack || !preserveSource) {
+        // Save each home page independently. A detail link may have pushed settings
+        // above tasks; saving that whole stack would restore the wrong selected tab.
+        while (currentDestination?.id != destination.id && currentDestination?.route != Routes.Today) {
+            val currentId = currentDestination?.id ?: break
+            if (!popBackStack(currentId, inclusive = true, saveState = true)) break
         }
+    }
+    if (currentDestination?.id == destination.id) return
+    navigate(route) {
         launchSingleTop = true
         restoreState = true
     }

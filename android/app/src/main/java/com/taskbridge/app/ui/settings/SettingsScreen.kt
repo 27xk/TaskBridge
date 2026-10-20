@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -52,8 +53,6 @@ import com.taskbridge.app.sync.SyncManager
 import com.taskbridge.app.sync.SyncRunState
 import com.taskbridge.app.ui.components.AppDropdownField
 import com.taskbridge.app.ui.components.AppDynamicStatusText
-import com.taskbridge.app.ui.components.AppHeader
-import com.taskbridge.app.ui.components.AppPage
 import com.taskbridge.app.ui.components.AppPanel
 import com.taskbridge.app.ui.components.AppSection
 import com.taskbridge.app.ui.components.AppUiOption
@@ -62,6 +61,8 @@ import com.taskbridge.app.ui.components.tryOpenExternalUri
 import com.taskbridge.app.ui.components.userFacingConnectionErrorMessage
 import com.taskbridge.app.ui.i18n.AppLanguage
 import com.taskbridge.app.ui.i18n.LocalTaskBridgeStrings
+import com.taskbridge.app.ui.task.TaskHomeHeader
+import com.taskbridge.app.ui.task.TaskHomeScaffold
 import com.taskbridge.app.ui.login.PasswordTextField
 import com.taskbridge.app.utils.ShanghaiTime
 import com.taskbridge.app.widget.TodayTaskWidgetUpdateWorker
@@ -154,6 +155,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenConflictTasks: () -> Unit,
     onLogout: () -> Unit,
+    onTodayClick: () -> Unit,
+    onAllClick: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val uriHandler = LocalUriHandler.current
@@ -205,7 +208,7 @@ fun SettingsScreen(
     var externalLinkError by remember { mutableStateOf("") }
     var testConnection by remember { mutableStateOf(false) }
     var advancedConnectionOpen by remember { mutableStateOf(false) }
-    var supportToolsOpen by remember(initialSection) { mutableStateOf(initialSection == "sync-recovery") }
+    var supportToolsOpen by rememberSaveable(initialSection) { mutableStateOf(initialSection == "sync-recovery") }
     var showTechnicalDiagnostics by remember { mutableStateOf(false) }
     var confirmLogoutWithPendingSync by remember { mutableStateOf(false) }
     var confirmExportBackup by remember { mutableStateOf(false) }
@@ -222,7 +225,7 @@ fun SettingsScreen(
     var sessionsLoaded by remember { mutableStateOf(false) }
     var sessionNote by remember { mutableStateOf("") }
     var sessionNoteIsError by remember { mutableStateOf(false) }
-    var selectedSection by remember(initialSection) { mutableStateOf(initialSettingsSection(initialSection)) }
+    var selectedSection by rememberSaveable(initialSection) { mutableStateOf(initialSettingsSection(initialSection)) }
     var settingsSectionMenuOpen by remember { mutableStateOf(false) }
     val isEnglish = language == AppLanguage.English
 
@@ -323,12 +326,6 @@ fun SettingsScreen(
             } finally {
                 sessionsLoading = false
             }
-        }
-    }
-    LaunchedEffect(initialSection) {
-        selectedSection = initialSettingsSection(initialSection)
-        if (initialSection == "sync-recovery") {
-            supportToolsOpen = true
         }
     }
     LaunchedEffect(selectedSection) {
@@ -752,23 +749,32 @@ fun SettingsScreen(
         )
     }
 
-    AppPage(modifier = Modifier.fillMaxSize()) {
+    TaskHomeScaffold(
+        todaySelected = false,
+        settingsSelected = true,
+        strings = strings,
+        onTodayClick = onTodayClick,
+        onAllClick = onAllClick,
+        onSettingsClick = {},
+        topBar = {
+            TaskHomeHeader(
+                title = strings.settings,
+                dateLabel = "",
+                subtitle = settingsSectionOptions(isEnglish).first { it.value == selectedSection }.label,
+                actions = {
+                    TextButton(onClick = onBack) { Text(strings.back) }
+                },
+            )
+        },
+    ) { contentPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(contentPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 20.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            AppHeader(
-                title = strings.settings,
-                trailing = {
-                    TextButton(onClick = onBack) {
-                        Text(strings.back)
-                    }
-                },
-            )
-
             val sectionOptions = settingsSectionOptions(isEnglish)
             AppDropdownField(
                 label = if (isEnglish) "Settings category" else "设置分类",

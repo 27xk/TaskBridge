@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -53,6 +54,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.taskbridge.app.ui.components.glass.GlassStyle
+import com.taskbridge.app.ui.components.glass.LiquidGlassBackdrop
+import com.taskbridge.app.ui.components.glass.LiquidGlassSurface
 import com.taskbridge.app.ui.i18n.LocalAppLanguage
 import com.taskbridge.app.ui.i18n.TaskBridgeStrings
 import kotlin.math.PI
@@ -66,103 +70,119 @@ internal fun TaskHomeScaffold(
     onTodayClick: () -> Unit,
     onAllClick: () -> Unit,
     onSettingsClick: () -> Unit,
-    onAddClick: () -> Unit,
+    onAddClick: (() -> Unit)? = null,
+    settingsSelected: Boolean = false,
     topBar: @Composable () -> Unit,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val isEnglish = LocalAppLanguage.current.code == "en-US"
-    // Own the safe area here; child bars and the list receive no duplicate system insets.
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .imePadding(),
-    ) {
-        val useRail = maxWidth >= 600.dp
-        Row(Modifier.fillMaxSize()) {
-            if (useRail) {
-                NavigationRail(
-                    modifier = Modifier.fillMaxHeight(),
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    windowInsets = WindowInsets(0, 0, 0, 0),
-                ) {
-                    HomeRailItem(
-                        selected = todaySelected,
-                        label = strings.today,
-                        icon = TaskHomeIcon.Today,
-                        tag = "home-nav-today",
-                        onClick = onTodayClick,
-                    )
-                    HomeRailItem(
-                        selected = !todaySelected,
-                        label = strings.all,
-                        icon = TaskHomeIcon.All,
-                        tag = "home-nav-all",
-                        onClick = onAllClick,
-                    )
-                    HomeRailItem(
-                        selected = false,
-                        label = strings.settings,
-                        icon = TaskHomeIcon.Settings,
-                        tag = "home-nav-settings",
-                        onClick = onSettingsClick,
-                    )
-                }
-            }
-            Scaffold(
-                modifier = Modifier.weight(1f),
-                containerColor = MaterialTheme.colorScheme.background,
-                contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                topBar = topBar,
-                bottomBar = {
-                    if (!useRail) {
-                        NavigationBar(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            tonalElevation = 0.dp,
+    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    LiquidGlassBackdrop(Modifier.fillMaxSize()) {
+        // Own the safe area here; child bars and the list receive no duplicate system insets.
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .imePadding(),
+        ) {
+            val useRail = maxWidth >= 600.dp
+            Row(Modifier.fillMaxSize()) {
+                if (useRail) {
+                    LiquidGlassSurface(
+                        modifier = Modifier.padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp)
+                            .fillMaxHeight().testTag("home-navigation"),
+                        cornerRadius = 28.dp,
+                        style = GlassStyle.Elevated,
+                    ) {
+                        NavigationRail(
+                            modifier = Modifier.fillMaxHeight(),
+                            containerColor = Color.Transparent,
                             windowInsets = WindowInsets(0, 0, 0, 0),
                         ) {
-                            NavigationBarItem(
-                                selected = todaySelected,
-                                onClick = onTodayClick,
-                                colors = homeNavigationColors(),
-                                icon = { TaskHomeIcon(TaskHomeIcon.Today, null) },
-                                label = { Text(strings.today) },
-                                modifier = Modifier.testTag("home-nav-today"),
+                            HomeRailItem(
+                                selected = todaySelected && !settingsSelected,
+                                label = strings.today, icon = TaskHomeIcon.Today,
+                                tag = "home-nav-today", onClick = onTodayClick,
                             )
-                            NavigationBarItem(
-                                selected = !todaySelected,
-                                onClick = onAllClick,
-                                colors = homeNavigationColors(),
-                                icon = { TaskHomeIcon(TaskHomeIcon.All, null) },
-                                label = { Text(strings.all) },
-                                modifier = Modifier.testTag("home-nav-all"),
+                            HomeRailItem(
+                                selected = !todaySelected && !settingsSelected,
+                                label = strings.all, icon = TaskHomeIcon.All,
+                                tag = "home-nav-all", onClick = onAllClick,
                             )
-                            NavigationBarItem(
-                                selected = false,
-                                onClick = onSettingsClick,
-                                colors = homeNavigationColors(),
-                                icon = { TaskHomeIcon(TaskHomeIcon.Settings, null) },
-                                label = { Text(strings.settings) },
-                                modifier = Modifier.testTag("home-nav-settings"),
+                            HomeRailItem(
+                                selected = settingsSelected,
+                                label = strings.settings, icon = TaskHomeIcon.Settings,
+                                tag = "home-nav-settings", onClick = onSettingsClick,
                             )
                         }
                     }
-                },
-                floatingActionButton = {
-                    ExtendedFloatingActionButton(
-                        onClick = onAddClick,
-                        icon = { TaskHomeIcon(TaskHomeIcon.Add, null) },
-                        text = { Text(if (isEnglish) "New task" else "新建待办") },
-                        modifier = Modifier.testTag("home-add-task").semantics {
-                            contentDescription = if (isEnglish) "New task" else "新建待办"
-                        },
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                },
-                content = content,
-            )
+                }
+                Scaffold(
+                    modifier = Modifier.weight(1f),
+                    containerColor = Color.Transparent,
+                    contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                    topBar = topBar,
+                    bottomBar = {
+                        if (!useRail && !keyboardVisible) {
+                            LiquidGlassSurface(
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)
+                                    .fillMaxWidth().testTag("home-navigation"),
+                                cornerRadius = 28.dp,
+                                style = GlassStyle.Elevated,
+                            ) {
+                                NavigationBar(
+                                    containerColor = Color.Transparent,
+                                    tonalElevation = 0.dp,
+                                    windowInsets = WindowInsets(0, 0, 0, 0),
+                                ) {
+                                    NavigationBarItem(
+                                        selected = todaySelected && !settingsSelected,
+                                        onClick = onTodayClick,
+                                        colors = homeNavigationColors(),
+                                        icon = { TaskHomeIcon(TaskHomeIcon.Today, null) },
+                                        label = { Text(strings.today, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                                        alwaysShowLabel = true,
+                                        modifier = Modifier.testTag("home-nav-today"),
+                                    )
+                                    NavigationBarItem(
+                                        selected = !todaySelected && !settingsSelected,
+                                        onClick = onAllClick,
+                                        colors = homeNavigationColors(),
+                                        icon = { TaskHomeIcon(TaskHomeIcon.All, null) },
+                                        label = { Text(strings.all, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                                        alwaysShowLabel = true,
+                                        modifier = Modifier.testTag("home-nav-all"),
+                                    )
+                                    NavigationBarItem(
+                                        selected = settingsSelected,
+                                        onClick = onSettingsClick,
+                                        colors = homeNavigationColors(),
+                                        icon = { TaskHomeIcon(TaskHomeIcon.Settings, null) },
+                                        label = { Text(strings.settings, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                                        alwaysShowLabel = true,
+                                        modifier = Modifier.testTag("home-nav-settings"),
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    floatingActionButton = {
+                        if (onAddClick != null && !keyboardVisible) {
+                            ExtendedFloatingActionButton(
+                                onClick = onAddClick,
+                                icon = { TaskHomeIcon(TaskHomeIcon.Add, null) },
+                                text = { Text(if (isEnglish) "New task" else "新建待办") },
+                                modifier = Modifier.testTag("home-add-task").semantics {
+                                    contentDescription = if (isEnglish) "New task" else "新建待办"
+                                },
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
+                    },
+                    content = content,
+                )
+            }
         }
     }
 }
@@ -210,7 +230,8 @@ internal fun TaskHomeHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp)
+            .testTag("home-header"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -225,11 +246,12 @@ internal fun TaskHomeHeader(
                     fontWeight = FontWeight.Bold,
                 ),
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = listOf(dateLabel, subtitle).filter(String::isNotBlank).joinToString(" · "),
+                minLines = 2,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,

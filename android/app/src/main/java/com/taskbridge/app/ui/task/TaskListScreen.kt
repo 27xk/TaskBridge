@@ -134,7 +134,6 @@ fun TaskListScreen(
     val completedTasks = remember(tasks) { tasks.filter { it.status == TaskStatus.Completed } }
     var filterMenuExpanded by remember { mutableStateOf(false) }
     var listToolsOpen by rememberSaveable { mutableStateOf(false) }
-    var headerActionsExpanded by remember { mutableStateOf(false) }
     var pendingDeleteTask by remember { mutableStateOf<Task?>(null) }
     var pendingDeleteSelectedTasks by remember { mutableStateOf<List<Task>>(emptyList()) }
     var pendingPurgeTask by remember { mutableStateOf<Task?>(null) }
@@ -315,10 +314,7 @@ fun TaskListScreen(
                         if (!localWorkspaceMode) {
                             TaskListHeaderActions(
                                 strings = strings,
-                                expanded = headerActionsExpanded,
-                                onExpandedChange = { headerActionsExpanded = it },
                                 onSyncNow = { viewModel.refresh() },
-                                languageCode = appLanguage.code,
                             )
                         }
                     },
@@ -725,29 +721,15 @@ private fun TaskSectionHeader(title: String, count: Int, isWarning: Boolean = fa
 @Composable
 private fun TaskListHeaderActions(
     strings: TaskBridgeStrings,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
     onSyncNow: () -> Unit,
-    languageCode: String,
 ) {
-    val moreLabel = if (languageCode == "en-US") "More" else "更多"
-    Box {
-        IconButton(onClick = { onExpandedChange(true) }) {
-            TaskHomeIcon(TaskHomeIcon.More, contentDescription = moreLabel)
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { onExpandedChange(false) },
-        ) {
-            DropdownMenuItem(
-                text = { Text(strings.syncNow) },
-                leadingIcon = { TaskHomeIcon(TaskHomeIcon.Sync, contentDescription = null) },
-                onClick = {
-                    onExpandedChange(false)
-                    onSyncNow()
-                },
-            )
-        }
+    TextButton(
+        onClick = onSyncNow,
+        modifier = Modifier.heightIn(min = 48.dp).testTag("home-sync-now"),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+    ) {
+        TaskHomeIcon(TaskHomeIcon.Sync, contentDescription = null)
+        Text(strings.syncNow, modifier = Modifier.padding(start = 6.dp), maxLines = 1)
     }
 }
 

@@ -10,7 +10,7 @@ class SettingsCategoryNavigationContractTest {
     fun settingsUsesOneScannableCategoryDropdownInsteadOfAButtonWall() {
         val source = androidSource("src/main/java/com/taskbridge/app/ui/settings/SettingsScreen.kt")
         val categoryNavigation = source
-            .substringAfter("AppHeader(")
+            .substringAfter("TaskHomeHeader(")
             .substringBefore("if (selectedSection == SettingsSection.Preferences)")
 
         assertTrue(categoryNavigation.contains("AppDropdownField("))
