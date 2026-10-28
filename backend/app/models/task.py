@@ -4,6 +4,7 @@ from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.sql_types import precise_datetime
 from app.utils.time import utc_now
 
 
@@ -51,10 +52,11 @@ class Task(Base):
     template_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    __mapper_args__ = {"version_id_col": version, "version_id_generator": False}
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False),
+        precise_datetime(),
         default=utc_now,
         onupdate=utc_now,
     )

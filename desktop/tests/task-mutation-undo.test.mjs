@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 const ts = require("typescript");
 const { createPinia } = require("pinia");
 const desktopRoot = resolve(import.meta.dirname, "..");
-const clock = await loadTsModule("shared/quick-add-parser.ts");
+const clock = await loadTsModule("common/quick-add-parser.ts");
 
 const fixedNow = "2026-05-20T08:00:00.000Z";
 class FixedDate extends Date {
@@ -36,9 +36,10 @@ async function loadModule(path, dependencies = {}, globals = {}) {
   return module.exports;
 }
 
-const taskOrder = await loadModule("src/utils/task-order.ts", { "../../shared/quick-add-parser": clock });
+const taskOrder = await loadModule("renderer/utils/task-order.ts", { "../../common/quick-add-parser": clock });
 
-const policy = await loadModule("shared/task-mutation-policy.ts", { "./quick-add-parser": clock });
+const policy = await loadModule("common/task-mutation-policy.ts", { "./quick-add-parser": clock });
+const summary = await loadModule("common/task-summary.ts");
 
 function task(localId, overrides = {}) {
   return {
@@ -151,16 +152,17 @@ async function harness(initial, options = {}) {
     incrementQueueAttempt: async () => {},
   };
   const api = { deleteTask: async () => {}, purgeTask: async () => {}, createNextOccurrence: async () => {} };
-  const mapper = await loadModule("src/sync/task-mapper.ts", { "../db/sqlite": { nowIso } });
+  const mapper = await loadModule("renderer/sync/task-mapper.ts", { "../db/sqlite": { nowIso } });
   const dependencies = {
     "../api/task": api, "../db/sqlite": { nowIso, createEmptyTask: (title) => task(`local-${++sequence}`, { title, serverId: null }) },
     "../db/sync-queue.dao": queue, "../db/task.dao": db,
     "../sync/task-mapper": mapper, "../utils/task-order": taskOrder,
-    "../../shared/quick-add-parser": clock, "../../shared/task-mutation-policy": policy,
+    "../../common/quick-add-parser": clock, "../../common/task-mutation-policy": policy,
+    "../../common/task-summary": summary,
     "./auth": { useAuthStore: () => auth }, "./settings": { useSettingsStore: () => settings },
     "./sync": { useSyncStore: () => ({ syncNow: async () => { stats.syncs++; } }) },
   };
-  const { useTaskStore } = await loadModule("src/stores/task.ts", dependencies, {
+  const { useTaskStore } = await loadModule("renderer/stores/task.ts", dependencies, {
     window: { setInterval: () => 1, clearInterval: () => {} },
   });
   const store = useTaskStore(createPinia());
@@ -173,9 +175,9 @@ async function harness(initial, options = {}) {
     } }) }, "../db/sync-queue.dao": queue, "../db/task.dao": db,
     "./task-mapper": mapper, "./WebSocketClient": {},
     "../stores/auth": { useAuthStore: () => auth },
-    "../../shared/task-mutation-policy": policy,
+    "../../common/task-mutation-policy": policy,
   };
-  const { SyncManager } = await loadModule("src/sync/SyncManager.ts", syncDependencies, {
+  const { SyncManager } = await loadModule("renderer/sync/SyncManager.ts", syncDependencies, {
     window: { setTimeout: () => 1, clearTimeout: () => {} },
   });
   const manager = new SyncManager(() => {}, async () => {});
@@ -209,6 +211,37 @@ function conflictedTask() {
   const original = task("conflicted", { title: "Local edit", version: 5, syncStatus: "conflict" });
   return { ...original, conflictServerJson: JSON.stringify(remoteTask(original, { title: "Cloud edit" })), conflictLocalJson: JSON.stringify(original) };
 }
+
+test("an unchanged conflict with an emoji body resolves from its SQLite-style summary", async (t) => {
+  const original = { ...conflictedTask(), content: "😀".repeat(200) };
+  const h = await harness([original]);
+  t.after(() => h.store.$dispose());
+  const projected = { ...summary.toTaskListSummary(original), contentPreview: Array.from(original.content).slice(0, 240).join("") };
+  await h.store.forceOverwriteServer(projected);
+  assert.equal(h.read(original.localId).content, original.content);
+  assert.equal(h.read(original.localId).syncStatus, "pending_update");
+});
+
+test("summary actions and template copies preserve bodies and checklist data outside the resident list", async (t) => {
+  const original = task("summary", { content: "Long body ".repeat(2000), isTemplate: true,
+    checklistJson: JSON.stringify([{ id: "one", title: "Preserve this", done: true }]) });
+  const h = await harness([original]);
+  t.after(() => h.store.$dispose());
+  await h.store.load();
+  assert.equal(Object.hasOwn(h.store.tasks[0], "content"), false);
+  assert.ok(h.store.tasks[0].contentPreview.length <= 240);
+  await h.store.renameProject("project", "renamed");
+  assert.equal(h.read(original.localId).content, original.content);
+  assert.equal(h.read(original.localId).checklistJson, original.checklistJson);
+  const copied = await h.store.instantiateTemplate(h.store.tasks[0]);
+  assert.equal(copied.content, original.content);
+  assert.equal(JSON.parse(copied.checklistJson)[0].done, false);
+  await h.store.completeTask(h.store.tasks.find(item => item.localId === original.localId));
+  await h.store.undoLastAction();
+  assert.equal(h.read(original.localId).content, original.content);
+  assert.equal(h.read(original.localId).checklistJson, original.checklistJson);
+  assert.ok(h.store.tasks.every(item => !Object.hasOwn(item, "content")));
+});
 
 test("keeping a local conflict preserves the complete conflict when queue persistence fails", async (t) => {
   const original = conflictedTask();
@@ -247,7 +280,7 @@ for (const action of ["resolveConflictUseServer", "forceOverwriteServer"]) {
     h.faults.reload = true;
     await h.store[action](original);
     assert.equal(h.read(original.localId).conflictServerJson, null);
-    assert.equal(h.store.tasks[0].conflictServerJson, null);
+    assert.equal(h.store.tasks[0].hasServerConflict, false);
     assert.equal(h.store.tasks[0].title, action === "resolveConflictUseServer" ? "Cloud edit" : "Local edit");
     assert.equal(h.queues.size, action === "resolveConflictUseServer" ? 0 : 1);
   });
@@ -782,10 +815,10 @@ test("switching a failed quick capture to the full editor never creates a duplic
 
 
 test("main-process task commits compare both records and queue identity and roll back queue failures", async () => {
-  const source = await readFile(resolve(desktopRoot, "electron/db.ts"), "utf8");
+  const source = await readFile(resolve(desktopRoot, "main/db.ts"), "utf8");
   const ast = ts.createSourceFile("db.ts", source, ts.ScriptTarget.Latest, true);
   const names = new Set([
-    "getTask", "getTaskByServerId", "upsertTask", "upsertTasks", "saveTaskRecord", "taskFromRow", "toSyncStatus",
+    "getTask", "getTaskByServerId", "upsertTask", "upsertTasks", "saveTaskRecord", "taskFromRow", "taskScalarFields", "toSyncStatus",
     "readTaskMutationState", "commitTaskChange", "enqueueTaskChange", "enqueueChange", "removeQueueByLocalId",
   ]);
   const selected = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && names.has(node.name?.text));
@@ -805,6 +838,7 @@ test("main-process task commits compare both records and queue identity and roll
       const Database = require("better-sqlite3");
       const connection = new Database(":memory:");
       connection.exec(${JSON.stringify(schema)});
+      connection.exec("CREATE TABLE task_change_versions (local_id TEXT PRIMARY KEY, revision INTEGER NOT NULL)");
       const database = () => connection;
       let workspace = "workspace-a";
       const getActiveWorkspaceKey = () => workspace;

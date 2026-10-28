@@ -27,9 +27,9 @@ function sourceSection(value, startMarker, endMarker) {
 }
 
 test("desktop app composes the focus workspace shell", async () => {
-  const app = await source("desktop/src/App.vue");
+  const app = await source("desktop/renderer/App.vue");
 
-  assert.match(app, /import \{ deriveWorkspaceStatus \} from "\.\.\/shared\/workspace-ui-policy"/);
+  assert.match(app, /import \{ deriveWorkspaceStatus \} from "\.\.\/common\/workspace-ui-policy"/);
   assert.match(app, /import AppSidebar from "\.\/components\/AppSidebar\.vue"/);
   assert.match(app, /import WorkspaceStatusBanner from "\.\/components\/WorkspaceStatusBanner\.vue"/);
   assert.match(app, /const workspaceStatus = computed\(\(\) =>[\s\S]{0,120}deriveWorkspaceStatus\(syncStore\.status, syncStore\.diagnostics\)/);
@@ -40,7 +40,7 @@ test("desktop app composes the focus workspace shell", async () => {
 });
 
 test("desktop services follow authenticated workspace state instead of a disappearing login event", async () => {
-  const app = await source("desktop/src/App.vue");
+  const app = await source("desktop/renderer/App.vue");
 
   assert.match(app, /import \{[^}]*\bwatch\b[^}]*\} from "vue"/);
   assert.match(app, /watch\(\s*\(\) => \[auth\.isAuthenticated, auth\.workspaceKey\] as const/);
@@ -72,7 +72,7 @@ test("desktop services follow authenticated workspace state instead of a disappe
 });
 
 test("desktop sidebar exposes three accessible navigation entries and one account menu", async () => {
-  const sidebar = await source("desktop/src/components/AppSidebar.vue");
+  const sidebar = await source("desktop/renderer/components/AppSidebar.vue");
 
   assert.match(sidebar, /from "lucide-vue-next"/);
   assert.match(sidebar, /CalendarDays/);
@@ -90,7 +90,7 @@ test("desktop sidebar exposes three accessible navigation entries and one accoun
 });
 
 test("desktop account menu closes through its own interaction boundary", async () => {
-  const sidebar = await source("desktop/src/components/AppSidebar.vue");
+  const sidebar = await source("desktop/renderer/components/AppSidebar.vue");
 
   assert.match(sidebar, /const accountMenuRoot = useTemplateRef<HTMLElement>\("accountMenuRoot"\)/);
   assert.match(sidebar, /<div ref="accountMenuRoot" class="sidebar-footer account-menu">/);
@@ -109,7 +109,7 @@ test("desktop account menu closes through its own interaction boundary", async (
 });
 
 test("desktop account menu implements the ARIA menu button keyboard model", async () => {
-  const sidebar = await source("desktop/src/components/AppSidebar.vue");
+  const sidebar = await source("desktop/renderer/components/AppSidebar.vue");
 
   assert.match(sidebar, /nextTick/);
   assert.match(sidebar, /id="account-menu-trigger"/);
@@ -133,7 +133,7 @@ test("desktop account menu implements the ARIA menu button keyboard model", asyn
 });
 
 test("desktop account trigger announces sync state once and shows attention count visually", async () => {
-  const sidebar = await source("desktop/src/components/AppSidebar.vue");
+  const sidebar = await source("desktop/renderer/components/AppSidebar.vue");
 
   assert.match(sidebar, /const attentionBadge = computed/);
   assert.match(sidebar, /props\.status\.indicator !== "attention" \|\| props\.status\.issueCount <= 0/);
@@ -148,7 +148,7 @@ test("desktop account trigger announces sync state once and shows attention coun
 });
 
 test("desktop workspace banner exposes polite retry and details actions", async () => {
-  const banner = await source("desktop/src/components/WorkspaceStatusBanner.vue");
+  const banner = await source("desktop/renderer/components/WorkspaceStatusBanner.vue");
 
   assert.match(banner, /aria-live="polite"/);
   assert.match(banner, /aria-atomic="true"/);
@@ -160,7 +160,7 @@ test("desktop workspace banner exposes polite retry and details actions", async 
 });
 
 test("desktop toast teleports an accessible status message", async () => {
-  const toast = await source("desktop/src/components/AppToast.vue");
+  const toast = await source("desktop/renderer/components/AppToast.vue");
 
   assert.match(toast, /<Teleport to="body">/);
   assert.match(toast, /<Transition/);
@@ -171,7 +171,7 @@ test("desktop toast teleports an accessible status message", async () => {
 });
 
 test("desktop focus workspace copy is complete in Chinese and English", async () => {
-  const i18n = await source("desktop/src/i18n.ts");
+  const i18n = await source("desktop/renderer/i18n.ts");
   const keys = [
     "nav.accountMenu",
     "sync.details",
@@ -191,13 +191,13 @@ test("desktop focus workspace copy is complete in Chinese and English", async ()
 });
 
 test("today view integrates reliable quick add and save error feedback", async () => {
-  const today = await source("desktop/src/views/TodayView.vue");
+  const today = await source("desktop/renderer/views/TodayView.vue");
   const quickAddMatch = today.match(/async function quickAddTask\(title: string\): Promise<void> \{([\s\S]*?)\n\}/);
   const saveMatch = today.match(/async function save\(draft: TaskDraft\): Promise<void> \{([\s\S]*?)\n\}/);
 
   assert.match(today, /import AppToast from "\.\.\/components\/AppToast\.vue"/);
   assert.match(today, /import WorkspaceQuickAdd from "\.\.\/components\/WorkspaceQuickAdd\.vue"/);
-  assert.match(today, /import \{[^}]*\btodayLocalDate\b[^}]*\} from "\.\.\/\.\.\/shared\/quick-add-parser"/);
+  assert.match(today, /import \{[^}]*\btodayLocalDate\b[^}]*\} from "\.\.\/\.\.\/common\/quick-add-parser"/);
   assert.match(today, /interface WorkspaceQuickAddHandle \{\s*clear\(submittedTitle: string\): boolean;\s*focus\(\): void;\s*\}/);
   assert.match(today, /const quickAddRef = useTemplateRef<WorkspaceQuickAddHandle>\("quickAdd"\)/);
   assert.ok(today.indexOf("<WorkspaceQuickAdd") < today.indexOf('class="task-list today-task-list"'));
@@ -221,7 +221,7 @@ test("today view integrates reliable quick add and save error feedback", async (
   assert.doesNotMatch(today, /<p v-if="editorSaveError"/);
   assert.match(today, /<AppToast :message="notice" \/>/);
   assert.match(today, /import \{ computed, nextTick, onBeforeUnmount, ref, useTemplateRef \} from "vue"/);
-  assert.match(today, /onBeforeUnmount\(\(\) => \{\s*cancelRequestedAction\(\);\s*if \(noticeTimer !== undefined\) window\.clearTimeout\(noticeTimer\);\s*\}\)/);
+  assert.match(today, /onBeforeUnmount\(\(\) => \{\s*editorRequestGeneration\+\+;\s*cancelRequestedAction\(\);\s*if \(noticeTimer !== undefined\) window\.clearTimeout\(noticeTimer\);\s*\}\)/);
 
   assert.ok(saveMatch, "save must be declared");
   assert.match(saveMatch[1], /editorSaveError\.value = "";/);
@@ -229,14 +229,14 @@ test("today view integrates reliable quick add and save error feedback", async (
   assert.match(saveMatch[1], /catch \{[\s\S]{0,100}editorSaveError\.value = settingsStore\.t\("task\.saveFailed"\);\s*\}/);
   assert.doesNotMatch(saveMatch[1].match(/catch \{([\s\S]*?)\n\s*\}/)?.[1] ?? "", /editorOpen\.value = false|editingTask\.value = null|setEditorDirty\(false\)/);
   assert.match(today, /async function openCreate\(\): Promise<void> \{[\s\S]{0,280}editorSaveError\.value = "";/);
-  assert.match(today, /async function openEdit\(task: TaskRecord\): Promise<void> \{[\s\S]{0,280}editorSaveError\.value = "";/);
+  assert.match(today, /async function openEdit\(task: TaskListItem\): Promise<void> \{[\s\S]{0,500}editorSaveError\.value = "";/);
 });
 
 test("all-tasks view centralizes save feedback and drops inline sync diagnostics", async () => {
   const [app, today, tasks] = await Promise.all([
-    source("desktop/src/App.vue"),
-    source("desktop/src/views/TodayView.vue"),
-    source("desktop/src/views/TaskView.vue"),
+    source("desktop/renderer/App.vue"),
+    source("desktop/renderer/views/TodayView.vue"),
+    source("desktop/renderer/views/TaskView.vue"),
   ]);
   const saveMatch = tasks.match(/async function save\(draft: TaskDraft\): Promise<void> \{([\s\S]*?)\n\}/);
   const taskViewMount = app.match(/<TaskView[\s\S]*?\/>/);
@@ -287,11 +287,11 @@ test("all-tasks view centralizes save feedback and drops inline sync diagnostics
 
 test("all tasks keeps common filters visible and moves secondary filters into menus", async () => {
   const [taskView, taskItem, taskEditor, filterPanel, workspace] = await Promise.all([
-    source("desktop/src/views/TaskView.vue"),
-    source("desktop/src/components/TaskItem.vue"),
-    source("desktop/src/components/TaskEditor.vue"),
-    source("desktop/src/components/TaskFilterPanel.vue"),
-    source("desktop/src/stores/workspace.ts"),
+    source("desktop/renderer/views/TaskView.vue"),
+    source("desktop/renderer/components/TaskItem.vue"),
+    source("desktop/renderer/components/TaskEditor.vue"),
+    source("desktop/renderer/components/TaskFilterPanel.vue"),
+    source("desktop/renderer/stores/workspace.ts"),
   ]);
 
   assert.match(taskView, /class="task-command-bar"/);
@@ -339,8 +339,8 @@ test("all tasks keeps common filters visible and moves secondary filters into me
 
 test("settings displays one persistent category panel at a time", async () => {
   const [settings, recovery] = await Promise.all([
-    source("desktop/src/views/SettingsView.vue"),
-    source("desktop/src/components/settings/SettingsSyncRecoveryPanel.vue"),
+    source("desktop/renderer/views/SettingsView.vue"),
+    source("desktop/renderer/components/settings/SettingsSyncRecoveryPanel.vue"),
   ]);
 
   assert.match(settings, /type SettingsSectionId\s*=/);
@@ -390,8 +390,8 @@ test("settings displays one persistent category panel at a time", async () => {
 
 test("metadata rename feedback stays in the metadata category", async () => {
   const [settings, metadata] = await Promise.all([
-    source("desktop/src/views/SettingsView.vue"),
-    source("desktop/src/components/settings/SettingsMetadataPanel.vue"),
+    source("desktop/renderer/views/SettingsView.vue"),
+    source("desktop/renderer/components/settings/SettingsMetadataPanel.vue"),
   ]);
 
   assert.match(settings, /const metadataNote = ref\(""\)/);
@@ -459,9 +459,9 @@ test("desktop visual verifier rejects runtime errors and covers narrow interacti
 
 test("workspace stylesheet defines stable desktop and narrow layouts", async () => {
   const [main, css, baseCss] = await Promise.all([
-    source("desktop/src/main.ts"),
-    source("desktop/src/assets/workspace.css"),
-    source("desktop/src/assets/base.css"),
+    source("desktop/renderer/main.ts"),
+    source("desktop/renderer/assets/workspace.css"),
+    source("desktop/renderer/assets/base.css"),
   ]);
 
   const baseImportIndex = main.indexOf('import "./assets/base.css"');
@@ -506,7 +506,7 @@ test("workspace stylesheet defines stable desktop and narrow layouts", async () 
 });
 
 test("task editor associates save errors with its form and submit action", async () => {
-  const editor = await source("desktop/src/components/TaskEditor.vue");
+  const editor = await source("desktop/renderer/components/TaskEditor.vue");
   const formMatch = editor.match(/<form class="task-editor"[\s\S]*?<\/form>/);
   const headerMatch = editor.match(/<header class="panel-header">([\s\S]*?)<\/header>/);
   const fieldsetMatch = editor.match(/<fieldset class="task-editor-fields" :disabled="isSaving">([\s\S]*?)<\/fieldset>/);
@@ -531,7 +531,7 @@ test("task editor associates save errors with its form and submit action", async
 });
 
 test("workspace quick add preserves input until parent confirms success", async () => {
-  const quickAdd = await source("desktop/src/components/WorkspaceQuickAdd.vue");
+  const quickAdd = await source("desktop/renderer/components/WorkspaceQuickAdd.vue");
   const submitMatch = quickAdd.match(
     /function submit\(\): void \{([\s\S]*?)\n\}(?=\n\nfunction clear\()/,
   );
@@ -581,13 +581,13 @@ test("workspace quick add preserves input until parent confirms success", async 
 
 test("expired desktop sessions keep the real workspace and offer an explicit local mode", async () => {
   const [app, login, authStore, state, http, ipc, banner] = await Promise.all([
-    source("desktop/src/App.vue"),
-    source("desktop/src/views/LoginView.vue"),
-    source("desktop/src/stores/auth.ts"),
-    source("desktop/electron/state.ts"),
-    source("desktop/electron/http.ts"),
-    source("desktop/electron/ipc.ts"),
-    source("desktop/src/components/ReauthenticationBanner.vue"),
+    source("desktop/renderer/App.vue"),
+    source("desktop/renderer/views/LoginView.vue"),
+    source("desktop/renderer/stores/auth.ts"),
+    source("desktop/main/state.ts"),
+    source("desktop/main/http.ts"),
+    source("desktop/main/ipc.ts"),
+    source("desktop/renderer/components/ReauthenticationBanner.vue"),
   ]);
 
   assert.match(state, /export function expireTokens\(\): void/);
@@ -613,9 +613,9 @@ test("expired desktop sessions keep the real workspace and offer an explicit loc
 
 test("desktop batch actions use an explicit selection mode without competing completion controls", async () => {
   const [taskView, taskItem, taskListSection] = await Promise.all([
-    source("desktop/src/views/TaskView.vue"),
-    source("desktop/src/components/TaskItem.vue"),
-    source("desktop/src/components/TaskListSection.vue"),
+    source("desktop/renderer/views/TaskView.vue"),
+    source("desktop/renderer/components/TaskItem.vue"),
+    source("desktop/renderer/components/TaskListSection.vue"),
   ]);
 
   assert.match(taskView, /const selectionMode = ref\(false\)/);

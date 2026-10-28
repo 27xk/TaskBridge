@@ -1,5 +1,5 @@
-const WEB_VERSION = "0.2.0";
-const SHELL_REVISION = "20261010-drafts-menus";
+const WEB_VERSION = "0.2.1";
+const SHELL_REVISION = "20261026-incremental-lists";
 const CACHE_NAME = `taskbridge-web-shell-v${WEB_VERSION}-${SHELL_REVISION}`;
 const SHELL_ASSETS = [
   "./",
@@ -11,6 +11,9 @@ const SHELL_ASSETS = [
   `./startup.js?v=${WEB_VERSION}`,
   `./guide-language.js?v=${WEB_VERSION}`,
   `./offline-core.js?v=${WEB_VERSION}`,
+  `./offline-repository.js?v=${WEB_VERSION}`,
+  `./task-list.js?v=${WEB_VERSION}`,
+  `./session-coordinator.js?v=${WEB_VERSION}`,
   "./icon.svg",
   "./icon-192.png",
   "./icon-512.png",
@@ -104,7 +107,7 @@ function isVersionedShellAssetRequest(request) {
   const url = new URL(request.url);
   return (
     url.searchParams.get("v") === WEB_VERSION &&
-    ["/app.js", "/startup.js", "/guide-language.js", "/offline-core.js"].some((path) =>
+    ["/app.js", "/startup.js", "/guide-language.js", "/offline-core.js", "/offline-repository.js", "/task-list.js", "/session-coordinator.js"].some((path) =>
       url.pathname.endsWith(path),
     )
   );

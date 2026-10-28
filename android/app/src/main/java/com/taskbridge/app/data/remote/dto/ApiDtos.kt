@@ -8,6 +8,17 @@ data class ApiEnvelope<T>(
     val data: T?,
 )
 
+data class SyncHealthReportDto(
+    val source: String = "android",
+    @SerializedName("device_id") val deviceId: String,
+    @SerializedName("pending_count") val pendingCount: Int,
+    @SerializedName("conflict_count") val conflictCount: Int,
+    @SerializedName("oldest_pending_seconds") val oldestPendingSeconds: Long,
+    @SerializedName("last_success_age_seconds") val lastSuccessAgeSeconds: Long?,
+)
+
+data class SyncHealthAcceptedDto(val accepted: Boolean)
+
 data class UserDto(
     val id: Int,
     val username: String,

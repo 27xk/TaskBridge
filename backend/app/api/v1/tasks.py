@@ -11,6 +11,15 @@ from app.api.deps import get_current_user, get_db
 from app.core.rate_limit import check_rate_limit
 from app.core.response import api_success
 from app.models.user import User
+from app.schemas.responses import (
+    ApiResponse,
+    ProjectRenameResult,
+    TagRenameResult,
+    TaskBatchResult,
+    TaskExportResult,
+    TaskImportResult,
+    TaskMetadata,
+)
 from app.schemas.task import (
     ChecklistItem,
     ChecklistItemUpdate,
@@ -86,7 +95,7 @@ def _check_task_rate_limit(
     )
 
 
-@router.get("")
+@router.get("", response_model=ApiResponse[list[TaskRead]])
 def read_tasks(
     request: Request,
     q: str | None = None,
@@ -138,7 +147,7 @@ def read_tasks(
     return api_success([TaskRead.model_validate(task) for task in tasks])
 
 
-@router.get("/meta")
+@router.get("/meta", response_model=ApiResponse[TaskMetadata])
 def meta(
     request: Request,
     timezone: str = Query(default=DEFAULT_TIMEZONE, min_length=1, max_length=64),
@@ -150,7 +159,11 @@ def meta(
     return api_success(get_task_meta(db, current_user, timezone_name=timezone, now=now))
 
 
-@router.get("/export")
+@router.get(
+    "/export",
+    response_model=ApiResponse[TaskExportResult],
+    responses={200: {"content": {"text/csv": {"schema": {"type": "string"}}}}},
+)
 def export(
     request: Request,
     format: str = Query(default="json", pattern="^(json|csv)$"),
@@ -201,7 +214,7 @@ def _escape_csv_cell(value: Any) -> Any:
     return value
 
 
-@router.post("")
+@router.post("", response_model=ApiResponse[TaskRead], status_code=201)
 def create(
     request: Request,
     payload: TaskCreate,
@@ -213,7 +226,7 @@ def create(
     return api_success(TaskRead.model_validate(task), status_code=201)
 
 
-@router.post("/batch")
+@router.post("/batch", response_model=ApiResponse[TaskBatchResult])
 def batch(
     request: Request,
     payload: TaskBatchRequest,
@@ -232,7 +245,7 @@ def batch(
     )
 
 
-@router.post("/import")
+@router.post("/import", response_model=ApiResponse[TaskImportResult])
 def import_backup(
     request: Request,
     payload: TaskImportRequest,
@@ -252,7 +265,7 @@ def import_backup(
     )
 
 
-@router.post("/import/preview")
+@router.post("/import/preview", response_model=ApiResponse[TaskImportPreviewResult])
 def preview_import_backup(
     request: Request,
     payload: TaskImportRequest,
@@ -266,7 +279,7 @@ def preview_import_backup(
     return api_success(TaskImportPreviewResult.model_validate(result))
 
 
-@router.post("/projects/rename")
+@router.post("/projects/rename", response_model=ApiResponse[ProjectRenameResult])
 def rename_project(
     request: Request,
     payload: TaskRenameMetaRequest,
@@ -287,7 +300,7 @@ def rename_project(
     )
 
 
-@router.post("/tags/rename")
+@router.post("/tags/rename", response_model=ApiResponse[TagRenameResult])
 def rename_tag(
     request: Request,
     payload: TaskRenameMetaRequest,
@@ -308,7 +321,7 @@ def rename_tag(
     )
 
 
-@router.get("/trash")
+@router.get("/trash", response_model=ApiResponse[list[TaskRead]])
 def read_trash(
     request: Request,
     offset: int = Query(default=0, ge=0, le=100_000),
@@ -321,7 +334,7 @@ def read_trash(
     return api_success([TaskRead.model_validate(task) for task in tasks])
 
 
-@router.post("/templates/{template_id}/instantiate")
+@router.post("/templates/{template_id}/instantiate", response_model=ApiResponse[TaskRead], status_code=201)
 def instantiate(
     request: Request,
     template_id: int,
@@ -334,7 +347,7 @@ def instantiate(
     return api_success(TaskRead.model_validate(task), status_code=201)
 
 
-@router.get("/{task_id}")
+@router.get("/{task_id}", response_model=ApiResponse[TaskRead])
 def read_task(
     request: Request,
     task_id: int,
@@ -346,7 +359,7 @@ def read_task(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.get("/{task_id}/history")
+@router.get("/{task_id}/history", response_model=ApiResponse[list[TaskHistoryRead]])
 def history(
     request: Request,
     task_id: int,
@@ -362,7 +375,7 @@ def history(
     return api_success(items)
 
 
-@router.post("/{task_id}/resolve-conflict")
+@router.post("/{task_id}/resolve-conflict", response_model=ApiResponse[TaskRead])
 def resolve_conflict(
     request: Request,
     task_id: int,
@@ -375,7 +388,7 @@ def resolve_conflict(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.put("/{task_id}")
+@router.put("/{task_id}", response_model=ApiResponse[TaskRead])
 def update(
     request: Request,
     task_id: int,
@@ -388,7 +401,7 @@ def update(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.post("/{task_id}/checklist")
+@router.post("/{task_id}/checklist", response_model=ApiResponse[TaskRead])
 def add_checklist(
     request: Request,
     task_id: int,
@@ -401,7 +414,7 @@ def add_checklist(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.put("/{task_id}/checklist/{item_id}")
+@router.put("/{task_id}/checklist/{item_id}", response_model=ApiResponse[TaskRead])
 def update_checklist(
     request: Request,
     task_id: int,
@@ -415,7 +428,7 @@ def update_checklist(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.delete("/{task_id}/checklist/{item_id}")
+@router.delete("/{task_id}/checklist/{item_id}", response_model=ApiResponse[TaskRead])
 def delete_checklist(
     request: Request,
     task_id: int,
@@ -428,7 +441,7 @@ def delete_checklist(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.delete("/{task_id}")
+@router.delete("/{task_id}", response_model=ApiResponse[TaskRead])
 def delete(
     request: Request,
     task_id: int,
@@ -441,7 +454,7 @@ def delete(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.delete("/{task_id}/purge")
+@router.delete("/{task_id}/purge", response_model=ApiResponse[TaskRead])
 def purge(
     request: Request,
     task_id: int,
@@ -455,7 +468,7 @@ def purge(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.post("/{task_id}/complete")
+@router.post("/{task_id}/complete", response_model=ApiResponse[TaskRead])
 def complete(
     request: Request,
     task_id: int,
@@ -468,7 +481,7 @@ def complete(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.post("/{task_id}/next-occurrence")
+@router.post("/{task_id}/next-occurrence", response_model=ApiResponse[TaskRead], status_code=201)
 def next_occurrence(
     request: Request,
     task_id: int,
@@ -480,7 +493,7 @@ def next_occurrence(
     return api_success(TaskRead.model_validate(task), status_code=201)
 
 
-@router.post("/{task_id}/undo-complete")
+@router.post("/{task_id}/undo-complete", response_model=ApiResponse[TaskRead])
 def undo_complete(
     request: Request,
     task_id: int,
@@ -493,7 +506,7 @@ def undo_complete(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.post("/{task_id}/postpone")
+@router.post("/{task_id}/postpone", response_model=ApiResponse[TaskRead])
 def postpone(
     request: Request,
     task_id: int,
@@ -506,7 +519,7 @@ def postpone(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.post("/{task_id}/snooze")
+@router.post("/{task_id}/snooze", response_model=ApiResponse[TaskRead])
 def snooze(
     request: Request,
     task_id: int,
@@ -519,7 +532,7 @@ def snooze(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.post("/{task_id}/plan")
+@router.post("/{task_id}/plan", response_model=ApiResponse[TaskRead])
 def plan(
     request: Request,
     task_id: int,
@@ -532,7 +545,7 @@ def plan(
     return api_success(TaskRead.model_validate(task))
 
 
-@router.post("/{task_id}/restore")
+@router.post("/{task_id}/restore", response_model=ApiResponse[TaskRead])
 def restore(
     request: Request,
     task_id: int,

@@ -1,7 +1,5 @@
 package com.taskbridge.app.domain.model
 
-import com.taskbridge.app.data.local.TaskEntity
-
 enum class TaskStatus(val wireName: String) {
     Todo("todo"),
     Completed("completed");
@@ -61,36 +59,3 @@ data class Task(
     val updatedAt: String,
     val lastSyncAt: String?,
 )
-
-fun TaskEntity.toDomain(): Task {
-    return Task(
-        localId = localId,
-        serverId = serverId,
-        title = title,
-        content = content,
-        status = TaskStatus.fromWire(status),
-        priority = priority,
-        tag = tag,
-        project = project,
-        listType = listType,
-        dueTime = dueTime,
-        remindTime = remindTime,
-        repeatRule = repeatRule,
-        plannedDate = plannedDate,
-        completedAt = completedAt,
-        snoozedUntil = snoozedUntil,
-        parentServerId = parentServerId,
-        checklistJson = checklistJson,
-        isTemplate = isTemplate,
-        templateName = templateName,
-        sortOrder = sortOrder,
-        version = version,
-        isDeleted = isDeleted,
-        syncStatus = SyncStatus.fromWire(syncStatus),
-        conflictServerJson = conflictServerJson,
-        conflictLocalJson = conflictLocalJson,
-        createdAt = createdAt,
-        updatedAt = updatedAt,
-        lastSyncAt = lastSyncAt,
-    )
-}

@@ -1,5 +1,4 @@
 import json
-from copy import deepcopy
 from datetime import date, datetime, timedelta
 from hashlib import sha256
 from typing import Any
@@ -28,7 +27,9 @@ from app.schemas.task import (
     TaskTemplateInstantiateRequest,
     TaskUpdate,
 )
-from app.services.sync_service import append_sync_log
+from app.services.sync_log_service import append_sync_log
+from app.services.tasks import recurrence
+from app.services.tasks.serialization import task_snapshot
 from app.utils.time import (
     DEFAULT_TIMEZONE,
     day_utc_bounds,
@@ -99,18 +100,6 @@ def _owned_parent_task_id_or_none(
     return parent_id
 
 
-def _snapshot(task: Task) -> dict[str, Any]:
-    return {
-        "id": task.id,
-        "title": task.title,
-        "status": task.status,
-        "version": task.version,
-        "is_deleted": task.is_deleted,
-        "list_type": task.list_type,
-        "project": task.project,
-    }
-
-
 def _task_to_export_dict(task: Task) -> dict[str, Any]:
     return {
         "id": task.id,
@@ -177,7 +166,9 @@ def list_tasks(
         search_terms = search_query["terms"]
         conditions.append(_build_search_condition(search_terms))
     if status:
-        conditions.append(_completed_status_condition() if _is_completed_status(status) else Task.status == status)
+        conditions.append(
+            _completed_status_condition() if _is_completed_status(status) else Task.status == status
+        )
     if tag:
         conditions.append(Task.tag == tag)
     if project:
@@ -547,7 +538,9 @@ def get_task_meta(
             ).label("overdue"),
             _count_tasks_expression(active + [Task.is_template.is_(True)]).label("templates"),
             _count_tasks_expression(base + [Task.is_deleted.is_(True)]).label("trash"),
-        ).select_from(Task),
+        )
+        .select_from(Task)
+        .where(Task.user_id == current_user.id),
     ).one()
     count_names = ("open", "completed", "inbox", "today", "overdue", "templates", "trash")
     counts = {name: int(counts_row._mapping[name] or 0) for name in count_names}
@@ -601,7 +594,7 @@ def batch_update_tasks(
             task_id=task.id,
             operation=f"batch_{payload.action}",
             version=task.version,
-            payload=_snapshot(task),
+            payload=task_snapshot(task),
         )
         db.add(task)
     db.commit()
@@ -642,7 +635,7 @@ def rename_task_meta(
             task_id=task.id,
             operation=f"{field}_renamed",
             version=task.version,
-            payload=_snapshot(task) | {field: getattr(task, field)},
+            payload=task_snapshot(task) | {field: getattr(task, field)},
         )
         db.add(task)
     db.commit()
@@ -682,7 +675,7 @@ def import_tasks(db: Session, current_user: User, payload: TaskImportRequest) ->
             task_id=task.id,
             operation=operation,
             version=task.version,
-            payload=_snapshot(task),
+            payload=task_snapshot(task),
         )
     db.commit()
     for task in imported_tasks:
@@ -756,7 +749,7 @@ def resolve_task_conflict(
         task_id=task.id,
         operation="conflict_overwritten",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     db.add(task)
     db.commit()
@@ -808,7 +801,9 @@ def _apply_view_conditions(
             ),
         )
     elif normalized == "overdue":
-        conditions.extend([_open_status_condition(), Task.due_time.is_not(None), Task.due_time < current])
+        conditions.extend(
+            [_open_status_condition(), Task.due_time.is_not(None), Task.due_time < current]
+        )
     elif normalized == "week":
         end_date = today + timedelta(days=7)
         week_start = today_start
@@ -867,7 +862,7 @@ def create_task(db: Session, current_user: User, payload: TaskCreate) -> Task:
         task_id=task.id,
         operation="created",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     db.commit()
     db.refresh(task)
@@ -931,7 +926,7 @@ def update_task(db: Session, current_user: User, task_id: int, payload: TaskUpda
         task_id=task.id,
         operation="updated",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     db.add(task)
     db.commit()
@@ -957,7 +952,7 @@ def soft_delete_task(
         task_id=task.id,
         operation="deleted",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     db.add(task)
     db.commit()
@@ -984,10 +979,10 @@ def complete_task(
         task_id=task.id,
         operation="completed",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     if not was_completed:
-        _create_repeat_occurrence_if_needed(db, current_user, task)
+        recurrence.create_repeat_occurrence_if_needed(db, current_user.id, task)
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -1012,7 +1007,7 @@ def undo_complete_task(
         task_id=task.id,
         operation="undo_completed",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     db.add(task)
     db.commit()
@@ -1045,7 +1040,7 @@ def postpone_task(
         task_id=task.id,
         operation="postponed",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     db.add(task)
     db.commit()
@@ -1069,7 +1064,7 @@ def snooze_task(
         task_id=task.id,
         operation="snoozed",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     db.add(task)
     db.commit()
@@ -1094,7 +1089,7 @@ def plan_task(
         task_id=task.id,
         operation="planned",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     db.add(task)
     db.commit()
@@ -1121,7 +1116,7 @@ def restore_task(
         task_id=task.id,
         operation="restored",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     db.add(task)
     db.commit()
@@ -1212,7 +1207,7 @@ def instantiate_template(
         if payload.planned_date is not None
         else template.planned_date,
         parent_task_id=parent_task_id,
-        checklist=_reset_checklist(template.checklist or []),
+        checklist=recurrence.reset_checklist(template.checklist or []),
         is_template=False,
         template_name=None,
         sort_order=template.sort_order,
@@ -1225,7 +1220,7 @@ def instantiate_template(
         task_id=task.id,
         operation="template_instantiated",
         version=task.version,
-        payload={**_snapshot(task), "template_id": template.id},
+        payload={**task_snapshot(task), "template_id": template.id},
     )
     db.commit()
     db.refresh(task)
@@ -1234,100 +1229,7 @@ def instantiate_template(
 
 def create_next_occurrence(db: Session, current_user: User, task_id: int) -> Task:
     task = _get_owned_task(db, current_user, task_id)
-    if _repeat_delta(task.repeat_rule) is None:
-        raise AppException(status_code=400, message="unsupported repeat_rule")
-    existing = _find_existing_repeat_occurrence(db, current_user.id, task)
-    if existing is not None:
-        db.commit()
-        db.refresh(existing)
-        return existing
-    next_task = _build_repeat_occurrence(task, current_user.id)
-    assert next_task is not None
-    db.add(next_task)
-    db.flush()
-    append_sync_log(
-        db,
-        user_id=current_user.id,
-        task_id=next_task.id,
-        operation="repeat_created",
-        version=next_task.version,
-        payload={**_snapshot(next_task), "source_task_id": task.id},
-    )
-    db.commit()
-    db.refresh(next_task)
-    return next_task
-
-
-def _create_repeat_occurrence_if_needed(db: Session, current_user: User, task: Task) -> Task | None:
-    if not task.repeat_rule:
-        return None
-    if _find_existing_repeat_occurrence(db, current_user.id, task) is not None:
-        return None
-
-    next_task = _build_repeat_occurrence(task, current_user.id)
-    if next_task is None:
-        return None
-    db.add(next_task)
-    db.flush()
-    append_sync_log(
-        db,
-        user_id=current_user.id,
-        task_id=next_task.id,
-        operation="repeat_created",
-        version=next_task.version,
-        payload={**_snapshot(next_task), "source_task_id": task.id},
-    )
-    return next_task
-
-
-def _find_existing_repeat_occurrence(db: Session, user_id: int, task: Task) -> Task | None:
-    db.flush()
-    # Serialize all generators on the parent, including SQLite where FOR UPDATE
-    # is ignored. Keep the timestamp unchanged: acquiring a lock is not an edit.
-    db.execute(
-        update(Task)
-        .where(Task.id == task.id, Task.user_id == user_id)
-        .values(updated_at=Task.updated_at)
-        .execution_options(synchronize_session=False),
-    )
-    # A locking read also sees children committed after a MySQL repeatable-read
-    # transaction started (for example during sync's initial context preload).
-    return db.scalar(
-        select(Task)
-        .where(
-            Task.user_id == user_id,
-            Task.parent_task_id == task.id,
-            Task.is_deleted.is_(False),
-        )
-        .order_by(Task.id.asc())
-        .limit(1)
-        .with_for_update(),
-    )
-
-
-def _build_repeat_occurrence(task: Task, user_id: int) -> Task | None:
-    delta = _repeat_delta(task.repeat_rule)
-    if delta is None:
-        return None
-    return Task(
-        user_id=user_id,
-        title=task.title,
-        content=task.content,
-        status="todo",
-        priority=task.priority,
-        tag=task.tag,
-        project=task.project,
-        list_type=task.list_type,
-        due_time=_shift_datetime(task.due_time, delta),
-        remind_time=_shift_datetime(task.remind_time, delta),
-        repeat_rule=task.repeat_rule,
-        planned_date=_shift_date(task.planned_date, delta),
-        parent_task_id=task.id,
-        checklist=_reset_checklist(task.checklist or []),
-        is_template=False,
-        template_name=None,
-        sort_order=task.sort_order,
-    )
+    return recurrence.create_next_occurrence(db, current_user.id, task)
 
 
 def list_trash(db: Session, current_user: User, *, offset: int = 0, limit: int = 100) -> list[Task]:
@@ -1352,11 +1254,19 @@ def purge_task(db: Session, current_user: User, task_id: int) -> Task:
         task_id=task.id,
         operation="purged",
         version=task.version,
-        payload=_snapshot(task),
+        payload=task_snapshot(task),
     )
     db.flush()
     db.execute(update(SyncLog).where(SyncLog.task_id == task.id).values(task_id=None))
-    db.execute(update(Task).where(Task.parent_task_id == task.id).values(parent_task_id=None))
+    children = db.scalars(
+        select(Task).where(
+            Task.user_id == current_user.id,
+            Task.parent_task_id == task.id,
+        )
+    )
+    for child in children:
+        child.parent_task_id = None
+        child.version += 1
     db.delete(task)
     db.commit()
     return task
@@ -1477,58 +1387,9 @@ def _save_checklist(
         task_id=task.id,
         operation=operation,
         version=task.version,
-        payload=_snapshot(task) | {"checklist": checklist},
+        payload=task_snapshot(task) | {"checklist": checklist},
     )
     db.add(task)
     db.commit()
     db.refresh(task)
     return task
-
-
-def _repeat_delta(repeat_rule: str | None) -> timedelta | str | None:
-    if repeat_rule is None:
-        return None
-    normalized = repeat_rule.strip().lower()
-    if normalized in {"daily", "every_day", "every day"}:
-        return timedelta(days=1)
-    if normalized in {"weekly", "every_week", "every week"}:
-        return timedelta(days=7)
-    if normalized in {"monthly", "every_month", "every month"}:
-        return "monthly"
-    return None
-
-
-def _shift_datetime(value: datetime | None, delta: timedelta | str) -> datetime | None:
-    if value is None:
-        return None
-    if delta == "monthly":
-        return _add_month(value)
-    return value + delta
-
-
-def _shift_date(value: date | None, delta: timedelta | str) -> date | None:
-    if value is None:
-        return None
-    if delta == "monthly":
-        shifted = _add_month(datetime.combine(value, datetime.min.time()))
-        return shifted.date()
-    return value + delta
-
-
-def _add_month(value: datetime) -> datetime:
-    month = value.month + 1
-    year = value.year + (month - 1) // 12
-    month = ((month - 1) % 12) + 1
-    day = min(value.day, _last_day_of_month(year, month))
-    return value.replace(year=year, month=month, day=day)
-
-
-def _reset_checklist(checklist: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{**item, "done": False} for item in deepcopy(checklist)]
-
-
-def _last_day_of_month(year: int, month: int) -> int:
-    if month == 12:
-        return 31
-    first_next_month = date(year, month + 1, 1)
-    return (first_next_month - timedelta(days=1)).day

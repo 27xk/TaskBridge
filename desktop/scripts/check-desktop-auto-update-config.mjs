@@ -7,8 +7,8 @@ import { workspacePaths } from "./script-helpers.mjs";
 
 const { desktopRoot, repoRoot } = workspacePaths(import.meta.url);
 
-const updaterPath = resolve(desktopRoot, "electron/updater.ts");
-assert.ok(existsSync(updaterPath), "desktop/electron/updater.ts must exist");
+const updaterPath = resolve(desktopRoot, "main/updater.ts");
+assert.ok(existsSync(updaterPath), "desktop/main/updater.ts must exist");
 
 const [
   packageSource,
@@ -16,7 +16,7 @@ const [
   mainSource,
   ipcSource,
   preloadSource,
-  envSource,
+  updateTypesSource,
   settingsSource,
   updaterSource,
   releaseSource,
@@ -24,11 +24,11 @@ const [
 ] = await Promise.all([
   readFile(resolve(desktopRoot, "package.json"), "utf8"),
   readFile(resolve(desktopRoot, "electron-builder.json"), "utf8"),
-  readFile(resolve(desktopRoot, "electron/main.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "electron/ipc.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "electron/preload.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/env.d.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/views/SettingsView.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "main/main.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "main/ipc.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "preload/index.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "common/update.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/views/SettingsView.vue"), "utf8"),
   readFile(updaterPath, "utf8"),
   readFile(resolve(repoRoot, ".github/workflows/release.yml"), "utf8"),
   readFile(resolve(repoRoot, "scripts/check-local.ps1"), "utf8"),
@@ -68,7 +68,7 @@ assert.match(mainSource, /initializeAutoUpdater\(mainWindow\)/, "main process mu
 assert.match(ipcSource, /app:check-for-updates/, "IPC must expose a manual update check");
 assert.match(preloadSource, /checkForUpdates/, "preload bridge must expose manual update checks");
 assert.match(preloadSource, /onUpdateStatus/, "preload bridge must expose update status events");
-assert.match(envSource, /UpdateStatus/, "renderer typings must define update status");
+assert.match(updateTypesSource, /UpdateStatus/, "common update contract must define update status");
 assert.match(settingsSource, /checkForUpdates/, "settings UI must offer a manual update check");
 
 for (const token of [

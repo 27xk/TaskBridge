@@ -6,7 +6,7 @@ import { loadTsModule } from "./helpers/load-ts-module.mjs";
 const {
   formatConnectionFailureMessage,
   getUserFacingConnectionErrorDetail,
-} = await loadTsModule("shared/user-facing-errors.ts");
+} = await loadTsModule("common/user-facing-errors.ts");
 
 test("connection failures hide raw network exception details", () => {
   const raw = new Error("API request failed: http://127.0.0.1:8000/api/v1/sync/status (connect ECONNREFUSED 127.0.0.1:8000)");

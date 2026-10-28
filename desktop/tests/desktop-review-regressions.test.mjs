@@ -4,9 +4,9 @@ import test from "node:test";
 import { loadTsFunctions } from "./helpers/load-ts-functions.mjs";
 import { loadTsModule } from "./helpers/load-ts-module.mjs";
 
-const clock = await loadTsModule("shared/quick-add-parser.ts");
-const endpoints = await loadTsModule("shared/connection-endpoints.ts");
-const errors = await loadTsModule("shared/user-facing-errors.ts");
+const clock = await loadTsModule("common/quick-add-parser.ts");
+const endpoints = await loadTsModule("common/connection-endpoints.ts");
+const errors = await loadTsModule("common/user-facing-errors.ts");
 const fixedNow = "2026-05-20T08:00:00.000Z";
 class FixedDate extends Date {
   constructor(...args) { super(...(args.length ? args : [fixedNow])); }
@@ -14,7 +14,7 @@ class FixedDate extends Date {
 }
 
 test("postponing tomorrow keeps 09:00, shifts reminder offsets and clears snooze", async () => {
-  const mutationPolicy = await loadTsFunctions("shared/task-mutation-policy.ts", ["rescheduleTask", "shiftedTaskReminder", "validateTaskScheduleDate"], {
+  const mutationPolicy = await loadTsFunctions("common/task-mutation-policy.ts", ["rescheduleTask", "shiftedTaskReminder", "validateTaskScheduleDate"], {
     ...clock, Date: FixedDate,
   });
   const cases = [
@@ -25,7 +25,7 @@ test("postponing tomorrow keeps 09:00, shifts reminder offsets and clears snooze
   ];
   for (const [remindTime, expectedReminder] of cases) {
     let saved;
-    const { postponeTomorrow } = await loadTsFunctions("src/stores/task.ts", ["postponeTomorrow"], {
+    const { postponeTomorrow } = await loadTsFunctions("renderer/stores/task.ts", ["postponeTomorrow"], {
       ...clock, ...mutationPolicy, Date: FixedDate,
       settingsStore: { displayTimeZone: "UTC" },
       mutateOne: async (kind, task, patch) => {
@@ -63,7 +63,7 @@ async function loginHarness(serverUrl, { saveError, authError } = {}) {
     },
     register: async () => { calls.push("register"); },
   };
-  const functions = await loadTsFunctions("src/views/LoginView.vue", ["submit", "saveConnection"], {
+  const functions = await loadTsFunctions("renderer/views/LoginView.vue", ["submit", "saveConnection"], {
     ...endpoints, ...errors, ...state,
     settingsStore: { t: (key) => key, language: "en-US" },
     bridge: () => ({ app: { setConnection: async (baseUrl, wsUrl) => {
@@ -118,7 +118,7 @@ test("late successful API replies and queued requests cannot cross workspaces", 
   let release;
   let sent = 0;
   class ApiHttpError extends Error {}
-  const { performApiRequest, sendApiRequest } = await loadTsFunctions("electron/http.ts", ["performApiRequest", "sendApiRequest"], {
+  const { performApiRequest, sendApiRequest } = await loadTsFunctions("main/http.ts", ["performApiRequest", "sendApiRequest"], {
     getActiveWorkspaceKey: () => workspace,
     getTokens: () => ({ accessToken: "token-a" }),
     getSettings: () => ({ baseUrl: "http://localhost/api/v1", deviceId: "device" }),
@@ -141,10 +141,10 @@ test("next occurrence sends its originating workspace to both HTTP and SQLite", 
   const authStore = { workspaceKey: "workspace-a" };
   const requests = [];
   const writes = [];
-  const { saveRemoteTask } = await loadTsFunctions("src/db/task.dao.ts", ["saveRemoteTask"], {
+  const { saveRemoteTask } = await loadTsFunctions("renderer/db/task.dao.ts", ["saveRemoteTask"], {
     bridge: () => ({ db: { upsertTask: async (...args) => { writes.push(args); return args[0]; } } }),
   });
-  const { createNextOccurrence } = await loadTsFunctions("src/stores/task.ts", ["createNextOccurrence"], {
+  const { createNextOccurrence } = await loadTsFunctions("renderer/stores/task.ts", ["createNextOccurrence"], {
     authStore,
     createRemoteNextOccurrence: async (...args) => { requests.push(args); return { id: 42, title: "Child" }; },
     serverTaskToLocal: (remote) => ({ serverId: remote.id, title: remote.title }),
@@ -160,7 +160,7 @@ test("a next occurrence response is ignored when its renderer workspace changes"
   const authStore = { workspaceKey: "workspace-a" };
   let release;
   let writes = 0;
-  const { createNextOccurrence } = await loadTsFunctions("src/stores/task.ts", ["createNextOccurrence"], {
+  const { createNextOccurrence } = await loadTsFunctions("renderer/stores/task.ts", ["createNextOccurrence"], {
     authStore,
     createRemoteNextOccurrence: async () => new Promise((resolve) => { release = resolve; }),
     serverTaskToLocal: (remote) => remote,

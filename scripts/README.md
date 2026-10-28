@@ -1,6 +1,8 @@
 # 脚本目录
 
-`scripts/` 用于放置 TaskBridge 项目的通用开发脚本，例如本地清理、构建辅助、检查脚本和发布辅助脚本。
+`scripts/` 负责仓库级开发工具和跨端检查。`checks/` 放置跨端契约、后端和 Android 配置、CI、发布与安全治理检查；`lib/` 放置共用源码解析和路径工具。桌面专用构建、运行时检查和 Electron 辅助脚本保留在 `desktop/scripts/`。
+
+仓库检查从根目录运行 `npm run check:<名称>`。桌面包保留同名代理，已有 `npm --prefix desktop run check:<名称>` 和 CI 命令继续可用。脚本根据自身位置解析仓库路径，不依赖调用时所在目录。
 
 ## 当前脚本
 
@@ -16,6 +18,10 @@
 | `check-web-offline-core.mjs` | 执行 Web/PWA 离线核心行为回归，覆盖本地任务、视图过滤、冲突状态和本地统计 |
 | `smoke-web-client.mjs` | 启动随机端口本地 HTTP 服务，检查 Web/PWA shell 和静态资源能被真实 HTTP 访问 |
 | `clean-local.ps1` | 清理本地生成文件和缓存，支持 `-DryRun` 和 `-All` |
+| `checks/` | 仓库与跨端守门脚本，根 `package.json` 提供正式 npm 入口 |
+| `lib/script-helpers.mjs` | 共用源码解析、换行规范化、日志检查和仓库路径工具 |
+| `npm run check:architecture` | 检查桌面、后端和 Android 的依赖边界 |
+| `npm run test:tooling` | 运行仓库工具与架构守门的行为测试 |
 
 示例：
 
@@ -25,6 +31,12 @@
 
 # 运行后端和桌面端主要守门检查；缺失依赖会标记为 blocked 并让脚本失败
 .\scripts\check-local.ps1
+
+# 直接从根目录检查跨端契约、用户体验和架构边界
+npm run check:contract-drift
+npm run check:user-experience
+npm run check:architecture
+npm run test:tooling
 
 # 只生成报告，blocked 不会影响退出码
 .\scripts\check-local.ps1 -ReportOnly
@@ -59,7 +71,7 @@ python -m tools.openapi_contract --check
 
 `check-local.ps1` 会自动执行 `python -m tools.openapi_contract --check`，防止客户端继续对着旧接口开发。
 
-桌面端专用脚本位于 `desktop/scripts/`：
+以下命令按职责分属两个目录：跨端、后端、Android、CI、发布和安全治理检查由 `scripts/checks/` 实现，从仓库根目录运行；桌面专用检查及桌面行为验证由 `desktop/scripts/` 实现，需在 `desktop/` 中运行或使用 `npm --prefix desktop run ...`。跨端检查的旧桌面 npm 入口保留为兼容代理。
 
 | 命令 | 说明 |
 | --- | --- |

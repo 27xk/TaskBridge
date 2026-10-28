@@ -5,15 +5,29 @@ from fastapi import APIRouter, Depends, Request, status
 
 from app.api.deps import get_current_user
 from app.core.observability import record_client_error_report, request_id_context
+from app.core.rate_limit import check_rate_limit
 from app.core.response import api_success
+from app.core.sync_health import record_sync_health
 from app.models.user import User
-from app.schemas.observability import ClientErrorReport
+from app.schemas.observability import ClientErrorReport, SyncHealthAcknowledgement, SyncHealthReport
+from app.schemas.responses import ApiResponse, ClientErrorAcknowledgement
 
 router = APIRouter(prefix="/observability", tags=["observability"])
 logger = logging.getLogger("taskbridge.client_error")
 
 
-@router.post("/client-error", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/sync-health", status_code=202, response_model=ApiResponse[SyncHealthAcknowledgement])
+def report_sync_health(payload: SyncHealthReport, request: Request,
+                       current_user: User = Depends(get_current_user)):
+    check_rate_limit(request, scope="sync-health", identifier=str(current_user.id),
+                     limit=120, window_seconds=300)
+    record_sync_health(current_user.id, payload.source, payload.device_id,
+                       payload.pending_count, payload.conflict_count,
+                       payload.oldest_pending_seconds, payload.last_success_age_seconds)
+    return api_success(SyncHealthAcknowledgement(), status_code=202)
+
+
+@router.post("/client-error", status_code=status.HTTP_202_ACCEPTED, response_model=ApiResponse[ClientErrorAcknowledgement])
 def report_client_error(
     payload: ClientErrorReport,
     request: Request,

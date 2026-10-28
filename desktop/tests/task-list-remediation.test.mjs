@@ -22,7 +22,7 @@ test("today conflict actions are connected for overdue and upcoming sections, wi
     forceOverwriteServer: async task => actions.push(["local", task.localId]),
   });
   const row = { setup: (_, { attrs }) => { bindings.push(attrs); return () => null; } };
-  const component = loadVueComponent("src/views/TodayView.vue", {
+  const component = loadVueComponent("renderer/views/TodayView.vue", {
     "../components/AppToast.vue": empty, "../components/ConfirmDialog.vue": empty,
     "../components/EditorDrawer.vue": empty, "../components/TaskEditor.vue": empty,
     "../components/WorkspaceQuickAdd.vue": empty, "../components/TaskItem.vue": row, "../components/TaskListSection.vue": row,
@@ -50,7 +50,7 @@ test("today conflict confirmation cannot apply an old workspace task after switc
   const auth = { workspaceKey: "workspace-a" };
   const task = { localId: "conflict", title: "Conflict", status: "todo", syncStatus: "conflict" };
   const row = { setup: (_, { attrs }) => { bindings.push(attrs); return () => null; } };
-  const component = loadVueComponent("src/views/TodayView.vue", {
+  const component = loadVueComponent("renderer/views/TodayView.vue", {
     "../components/AppToast.vue": empty, "../components/ConfirmDialog.vue": empty,
     "../components/EditorDrawer.vue": empty, "../components/TaskEditor.vue": empty,
     "../components/WorkspaceQuickAdd.vue": empty, "../components/TaskListSection.vue": row,
@@ -77,7 +77,7 @@ test("a large task section mounts only a visible window while exposing its compl
   const tasks = Array.from({ length: 2500 }, (_, index) => ({ localId: `row-${index}`, title: `Task ${index}`, status: "todo" }));
   let rows = 0;
   const row = { props: ["task"], setup: props => { rows++; return () => h("article", { class: "test-task" }, props.task.title); } };
-  const component = loadVueComponent("src/components/TaskListSection.vue", {
+  const component = loadVueComponent("renderer/components/TaskListSection.vue", {
     "./TaskItem.vue": row,
     "../stores/settings": { useSettingsStore: () => settings },
   }, { window: { innerHeight: 800 } });
@@ -88,7 +88,7 @@ test("a large task section mounts only a visible window while exposing its compl
 
 test("closed task menus do not mount their secondary action controls", async () => {
   const task = { localId: "task-a", title: "A task", status: "todo", syncStatus: "synced", checklistJson: "[]", priority: 0 };
-  const component = loadVueComponent("src/components/TaskItem.vue", {
+  const component = loadVueComponent("renderer/components/TaskItem.vue", {
     "../stores/settings": { useSettingsStore: () => settings },
     "../stores/task": { useTaskStore: () => ({ timelineNow: new Date() }) },
     "lucide-vue-next": { MoreHorizontal: empty },

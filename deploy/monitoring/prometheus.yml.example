@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 30s
+rule_files:
+  - /etc/prometheus/taskbridge-alerts.yml
+scrape_configs:
+  - job_name: taskbridge
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/taskbridge_metrics_token
+    static_configs:
+      # List each backend instance directly when using multiple workers/replicas.
+      - targets: [backend:8000]

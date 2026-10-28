@@ -13,6 +13,7 @@ from app.models.user import User
 from app.schemas.sync import SyncChange, SyncPushRequest
 from app.services import task_service
 from app.services.sync_service import push_changes
+from app.services.tasks import recurrence
 
 
 @pytest.mark.parametrize("competing_action", ["manual", "complete", "sync"])
@@ -48,7 +49,7 @@ def test_concurrent_repeat_requests_create_one_child_and_one_log(
     release_build = Event()
     build_lock = Lock()
     build_count = 0
-    original_build = task_service._build_repeat_occurrence
+    original_build = recurrence.build_repeat_occurrence
 
     def delayed_build(task, owner_id):
         nonlocal build_count
@@ -58,7 +59,7 @@ def test_concurrent_repeat_requests_create_one_child_and_one_log(
         assert release_build.wait(5), "repeat request did not get released"
         return original_build(task, owner_id)
 
-    monkeypatch.setattr(task_service, "_build_repeat_occurrence", delayed_build)
+    monkeypatch.setattr(recurrence, "build_repeat_occurrence", delayed_build)
 
     def request(action, *, second=False):
         with Session(engine, autoflush=False) as db:

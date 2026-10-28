@@ -3,7 +3,7 @@ package com.taskbridge.app.data
 import com.taskbridge.app.data.local.TaskEntity
 import com.taskbridge.app.domain.model.SyncStatus
 import com.taskbridge.app.domain.model.TaskStatus
-import com.taskbridge.app.domain.model.toDomain
+import com.taskbridge.app.data.repository.toDomain
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

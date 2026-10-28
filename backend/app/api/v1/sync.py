@@ -8,21 +8,23 @@ from app.api.deps import get_current_user, get_db
 from app.core.redis import redis_health_status
 from app.core.response import api_success
 from app.models.user import User
+from app.schemas.responses import ApiResponse, SyncStatus
 from app.schemas.sync import (
     SYNC_PULL_DEFAULT_LIMIT,
     SYNC_PULL_MAX_LIMIT,
     SYNC_PUSH_MAX_CHANGES,
+    SyncPullResponse,
     SyncPushRequest,
+    SyncPushResponse,
 )
 from app.services.device_service import ensure_device_registered
 from app.services.sync_service import pull_changes, push_changes
-from app.services.websocket_manager import websocket_manager
 from app.utils.time import utc_iso
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
 
-@router.get("/status")
+@router.get("/status", response_model=ApiResponse[SyncStatus])
 def read_sync_status(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
     redis_status = redis_health_status()
@@ -42,7 +44,7 @@ def read_sync_status(db: Session = Depends(get_db)):
     )
 
 
-@router.get("/pull")
+@router.get("/pull", response_model=ApiResponse[SyncPullResponse])
 def pull(
     last_sync_time: datetime = Query(...),
     limit: int = Query(SYNC_PULL_DEFAULT_LIMIT, ge=1, le=SYNC_PULL_MAX_LIMIT),
@@ -63,18 +65,12 @@ def pull(
     )
 
 
-@router.post("/push")
-async def push(
+@router.post("/push", response_model=ApiResponse[SyncPushResponse])
+def push(
     payload: SyncPushRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     ensure_device_registered(db, current_user, payload.device_id)
-    result, notifications = push_changes(db, current_user, payload)
-    for notification in notifications:
-        await websocket_manager.notify_user_except_device(
-            current_user.id,
-            payload.device_id,
-            notification,
-        )
+    result, _notifications = push_changes(db, current_user, payload)
     return api_success(result)

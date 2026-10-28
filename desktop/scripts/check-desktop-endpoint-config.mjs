@@ -4,14 +4,14 @@ import { resolve } from "node:path";
 import { workspaceRoot } from "./script-helpers.mjs";
 
 const root = workspaceRoot(import.meta.url);
-const stateSource = await readFile(resolve(root, "electron/state.ts"), "utf8");
-const httpSource = await readFile(resolve(root, "electron/http.ts"), "utf8");
-const settingsViewSource = await readFile(resolve(root, "src/views/SettingsView.vue"), "utf8");
+const stateSource = await readFile(resolve(root, "main/state.ts"), "utf8");
+const httpSource = await readFile(resolve(root, "main/http.ts"), "utf8");
+const settingsViewSource = await readFile(resolve(root, "renderer/views/SettingsView.vue"), "utf8");
 const settingsConnectionPanelSource = await readFile(
-  resolve(root, "src/components/settings/SettingsConnectionPanel.vue"),
+  resolve(root, "renderer/components/settings/SettingsConnectionPanel.vue"),
   "utf8",
 );
-const i18nSource = await readFile(resolve(root, "src/i18n.ts"), "utf8");
+const i18nSource = await readFile(resolve(root, "renderer/i18n.ts"), "utf8");
 const electronViteSource = await readFile(resolve(root, "electron.vite.config.ts"), "utf8");
 const settingsSurfaceSource = `${settingsViewSource}\n${settingsConnectionPanelSource}`;
 

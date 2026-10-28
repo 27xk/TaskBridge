@@ -42,7 +42,10 @@ import {
   shouldShowConnectionBadge,
   withRefreshLease,
   withClientRequestId,
-} from "./offline-core.js?v=0.2.0";
+} from "./offline-core.js?v=0.2.1";
+import { createOfflineRepository, createOfflineDatabaseManager, createTaskWindow } from "./offline-repository.js?v=0.2.1";
+import { createTaskListRenderer } from "./task-list.js?v=0.2.1";
+import { createSessionCoordinator, createSyncHealthReporter } from "./session-coordinator.js?v=0.2.1";
 
 const LOCAL_FALLBACK_SERVER_BASE_URL = "http://127.0.0.1:8080";
 const DEFAULT_SERVER_BASE_URL = supportsHttpOrigin() ? location.origin : LOCAL_FALLBACK_SERVER_BASE_URL;
@@ -68,8 +71,8 @@ const TASK_LIMIT = 100;
 const OFFLINE_TASK_RENDER_STEP = TASK_LIMIT;
 const MAX_TASK_PAGES = 50;
 const APP_VERSION_META_SELECTOR = 'meta[name="taskbridge-version"]';
-const WEB_APP_VERSION = document.querySelector(APP_VERSION_META_SELECTOR)?.content?.trim() || "0.2.0";
-const WEB_OFFLINE_DB_VERSION = 1;
+const WEB_APP_VERSION = document.querySelector(APP_VERSION_META_SELECTOR)?.content?.trim() || "0.2.1";
+const WEB_OFFLINE_DB_VERSION = 2;
 const OFFLINE_TASK_STORE = "tasks";
 const OFFLINE_QUEUE_STORE = "offline_mutations";
 const OFFLINE_META_STORE = "meta";
@@ -411,8 +414,8 @@ const I18N = {
     "task.summaryQueue": " · 等待同步 {count}",
     "task.offlineCachedSyncLater": "当前为离线缓存数据，恢复网络后会自动同步",
     "task.offlineCached": "当前为离线缓存数据",
-    "task.offlineLimitNotice": "离线缓存中当前筛选共有 {total} 条任务，列表先显示前 {visible} 条。可继续显示更多，或清空搜索、切换筛选缩小范围。",
-    "task.offlineLimitLoadMore": "显示更多离线任务",
+    "task.offlineLimitNotice": "当前筛选共有 {total} 条任务，列表先显示前 {visible} 条。可继续显示更多，或清空搜索、切换筛选缩小范围。",
+    "task.offlineLimitLoadMore": "显示更多任务",
     "task.savedPendingSync": "已保存到本机，等待同步",
     "task.savedSignInToSync": "已保存到本机，登录后同步",
     "task.projectPreview": "项目 {value}",
@@ -829,8 +832,8 @@ const I18N = {
     "task.summaryQueue": " · {count} pending",
     "task.offlineCachedSyncLater": "Showing offline cached data. Changes will sync when the network returns.",
     "task.offlineCached": "Showing offline cached data",
-    "task.offlineLimitNotice": "The offline cache has {total} matching tasks. The list is showing the first {visible}. Show more, or clear search and change filters to narrow the list.",
-    "task.offlineLimitLoadMore": "Show more offline tasks",
+    "task.offlineLimitNotice": "There are {total} matching tasks. The list is showing the first {visible}. Show more, or clear search and change filters to narrow the list.",
+    "task.offlineLimitLoadMore": "Show more tasks",
     "task.savedPendingSync": "Saved on this device, waiting to sync",
     "task.savedSignInToSync": "Saved on this device. Sign in to sync",
     "task.projectPreview": "Project {value}",
@@ -1009,17 +1012,28 @@ Object.assign(I18N["en-US"], {
 
 const nodes = {};
 let searchTimer = 0;
-let refreshSessionPromise = null;
-let sessionRefreshGeneration = 0;
-let sessionActivationPromise = null;
-let sessionActivationContext = null;
+const sessionCoordinator = createSessionCoordinator({
+  getIdentity: () => ({ apiBaseUrl: state.apiBaseUrl, deviceId: state.deviceId, userId: getCurrentUserId() }),
+});
 let sessionChannel = null;
 const sessionCoordinatorId = crypto.randomUUID();
-let offlineDbPromise = null;
-let offlineDbNameInUse = "";
+const offlineDatabaseManager = createOfflineDatabaseManager({
+  getName: offlineDbName,
+  openDatabase: (name) => openOfflineDatabase(name),
+  isBlocked: () => localDataClearInProgress,
+});
+const offlineRepository = createOfflineRepository({ openDatabase: () => openOfflineDb() });
+const syncHealthReporter = createSyncHealthReporter({
+  canReport: (context) => isSessionContextCurrent(context) && hasSession() && !state.offlineMode && navigator.onLine && supportsIndexedDb(),
+  getKey: (context) => JSON.stringify(context),
+  readHealth: () => offlineRepository.readQueueHealth({ lastSuccessAt: state.offlineLastSyncedAt || null }),
+  send: (health) => apiRequest("/observability/sync-health", {
+    method: "POST", retryAuth: false, body: { source: "web", device_id: state.deviceId, ...health },
+  }),
+});
+let taskListRenderer = null;
+let onlineTaskSnapshot = null;
 let localDataClearInProgress = false;
-let offlineQueueFlushPromise = null;
-let offlineQueueFlushContext = null;
 let offlineResumeCheckSequence = 0;
 let installPromptEvent = null;
 let activeConfirm = null;
@@ -2371,24 +2385,28 @@ async function scheduleTaskNotifications() {
     return;
   }
 
-  let tasks = state.tasks;
-  if (supportsIndexedDb() && getCurrentUserId()) {
-    try {
-      tasks = await listCachedTasks();
-    } catch {
-      tasks = state.tasks;
-    }
-  }
-  if (scheduleSequence !== notificationScheduleSequence) return;
-
   const now = Date.now();
-  for (const task of tasks) {
+  const schedule = (task) => {
+    if (scheduleSequence !== notificationScheduleSequence) return;
     const reminderAt = getTaskReminderAt(task);
     const reminderTime = reminderAt ? new Date(reminderAt).getTime() : Number.NaN;
-    if (!Number.isFinite(reminderTime) || reminderTime <= now) continue;
+    if (!Number.isFinite(reminderTime) || reminderTime <= now) return;
     scheduleTaskNotificationTimer(task, reminderTime, scheduleSequence);
     state.notificationScheduledCount += 1;
+  };
+  if (supportsIndexedDb() && getCurrentUserId()) {
+    try {
+      await offlineRepository.visitTasks(schedule);
+    } catch {
+      if (scheduleSequence !== notificationScheduleSequence) return;
+      cancelTaskNotificationTimers();
+      state.notificationScheduledCount = 0;
+      state.tasks.forEach(schedule);
+    }
+  } else {
+    state.tasks.forEach(schedule);
   }
+  if (scheduleSequence !== notificationScheduleSequence) return;
   renderNotificationSettings();
 }
 
@@ -3480,20 +3498,21 @@ function renderTasks() {
   reconcileTaskSelection();
   reconcileSelectedTrashTaskIds();
   renderTaskSelectionToolbar();
-  nodes.taskList.replaceChildren();
-  if (!state.tasks.length) {
-    nodes.taskList.appendChild(renderEmptyTaskState());
-    return;
+  if (!taskListRenderer) {
+    taskListRenderer = createTaskListRenderer({
+      container: nodes.taskList,
+      renderItem: renderTaskItem,
+      getActiveElement: () => document.activeElement,
+      getSignature: (task) => JSON.stringify([
+        task, state.language, state.editingTaskId === task.id, state.taskSelectionMode,
+        state.selectedTaskIds.has(String(task.id)), state.selectedTrashTaskIds.has(String(task.id)),
+      ]),
+    });
   }
-
-  const fragment = document.createDocumentFragment();
-  if (state.view === "trash") {
-    fragment.appendChild(renderTrashBulkActions());
-  }
-  for (const task of state.tasks) {
-    fragment.appendChild(renderTaskItem(task));
-  }
-  nodes.taskList.appendChild(fragment);
+  taskListRenderer.render(state.tasks, {
+    prefix: state.tasks.length && state.view === "trash" ? renderTrashBulkActions() : null,
+    empty: state.tasks.length ? null : renderEmptyTaskState(),
+  });
   if (menuHadFocus) {
     const trigger = document.getElementById(`task-menu-trigger-${menuTaskId}`);
     (trigger || nodes.openTaskCreateButton)?.focus();
@@ -4432,7 +4451,42 @@ function resetOfflineTaskRenderLimit() {
 async function increaseOfflineTaskRenderLimit() {
   const nextLimit = state.offlineTaskRenderLimit + OFFLINE_TASK_RENDER_STEP;
   state.offlineTaskRenderLimit = state.cachedTaskTotalCount > 0 ? Math.min(nextLimit, state.cachedTaskTotalCount) : nextLimit;
-  await hydrateCachedTasks();
+  if (onlineTaskSnapshot && onlineTaskSnapshot.key === taskViewKey()) {
+    applyTaskWindow(readTaskWindow(onlineTaskSnapshot.tasks, onlineTaskSnapshot.viewContext));
+    render();
+  } else if (!state.offlineMode && mapTaskViewForServer(state.view) !== null) {
+    const sessionContext = captureSessionContext();
+    const requestSequence = taskRequestGate.begin();
+    const viewContext = {
+      view: state.view, search: state.search, project: state.projectFilter, tag: state.tagFilter,
+      now: new Date(), timeZone: DISPLAY_TIME_ZONE,
+    };
+    const result = await readCachedTaskView(viewContext, false);
+    if (!isSessionContextCurrent(sessionContext) || !taskRequestGate.isCurrent(requestSequence)) return;
+    applyTaskWindow(result);
+    render();
+  } else {
+    await hydrateCachedTasks();
+  }
+}
+
+function taskViewKey(context = null) {
+  return JSON.stringify([currentOfflineWorkspaceKey(), context?.view ?? state.view, context?.search ?? state.search,
+    context?.project ?? state.projectFilter, context?.tag ?? state.tagFilter]);
+}
+
+function readTaskWindow(tasks, viewContext, includeMeta = false) {
+  const window = createTaskWindow({ viewContext, limit: state.offlineTaskRenderLimit,
+    linkedTaskId: state.notificationTaskId, includeMeta });
+  for (const task of tasks) window.add(task);
+  return window.result();
+}
+
+function applyTaskWindow(result) {
+  state.tasks = result.tasks;
+  state.cachedTaskTotalCount = result.total;
+  state.cachedTaskVisibleCount = result.tasks.length;
+  state.cachedTaskListLimited = result.total > result.tasks.length;
 }
 
 function getActiveTaskFilterLabels() {
@@ -4478,20 +4532,11 @@ function resetTaskListFilters() {
 }
 
 function captureSessionContext() {
-  return {
-    generation: sessionRefreshGeneration,
-    apiBaseUrl: state.apiBaseUrl,
-    deviceId: state.deviceId,
-    userId: getCurrentUserId(),
-  };
+  return sessionCoordinator.capture();
 }
 
 function isSessionContextCurrent(context) {
-  return Boolean(context) &&
-    context.generation === sessionRefreshGeneration &&
-    context.apiBaseUrl === state.apiBaseUrl &&
-    context.deviceId === state.deviceId &&
-    (context.userId === null || context.userId === getCurrentUserId());
+  return sessionCoordinator.isCurrent(context);
 }
 
 async function activateSession(sessionContext) {
@@ -4518,7 +4563,6 @@ async function activateSession(sessionContext) {
     if (isOfflineCapableError(error) && state.user) {
       await hydrateCachedTasks({ sessionContext });
       if (!isSessionContextCurrent(sessionContext)) return false;
-      state.meta = buildLocalMeta(state.tasks, new Date(), { timeZone: DISPLAY_TIME_ZONE });
       setStatus(nodes.taskMessage, t("task.offlineCachedSyncLater"));
       if (!restoreTaskDraft()) {
         applyTaskCreatePresetForCurrentView();
@@ -4537,17 +4581,7 @@ async function activateSession(sessionContext) {
 
 async function activateSessionSingleflight(sessionContext = captureSessionContext()) {
   if (!isSessionContextCurrent(sessionContext) || !hasSession()) return false;
-  if (!sessionActivationPromise || !isSessionContextCurrent(sessionActivationContext)) {
-    sessionActivationContext = sessionContext;
-    const request = activateSession(sessionContext).finally(() => {
-      if (sessionActivationPromise === request) {
-        sessionActivationPromise = null;
-        sessionActivationContext = null;
-      }
-    });
-    sessionActivationPromise = request;
-  }
-  return sessionActivationPromise;
+  return sessionCoordinator.run("activation", sessionContext, () => activateSession(sessionContext));
 }
 
 async function refreshAll(sessionContext = captureSessionContext()) {
@@ -4678,20 +4712,21 @@ async function refreshTasks(sessionContext = captureSessionContext()) {
   try {
     const remoteTasks =
       viewContext.view === "trash"
-        ? await apiRequest(`/tasks/trash?${params.toString()}`)
+        ? await fetchTrashTaskPages(params, sessionContext)
         : await fetchTaskListPages(params, sessionContext);
     if (!isCurrent()) return;
-    const reconciledTasks = await cacheTasksForOffline(remoteTasks, viewContext, {
-      isCurrent,
-    });
-    if (!reconciledTasks || !isCurrent()) return;
-    state.tasks = reconciledTasks
-      .filter((task) => matchesTaskView(task, viewContext))
-      .sort((left, right) => compareCachedTasks(left, right, viewContext));
-    state.cachedTaskTotalCount = 0;
-    state.cachedTaskVisibleCount = 0;
-    state.cachedTaskListLimited = false;
-    resetOfflineTaskRenderLimit();
+    const cached = await cacheTasksForOffline(remoteTasks, viewContext, { isCurrent });
+    if (!cached || !isCurrent()) return;
+    const result = supportsIndexedDb() && getCurrentUserId()
+      ? await readCachedTaskView(viewContext, false)
+      : readTaskWindow(remoteTasks.map(normalizeRemoteTaskForOffline), viewContext);
+    if (!isCurrent()) return;
+    // The server's complete cursor snapshot has been reconciled before enabling continuation.
+    // Database-backed continuation re-reads the bounded window; memory is only a no-IDB fallback.
+    onlineTaskSnapshot = supportsIndexedDb() ? null : {
+      key: taskViewKey(viewContext), viewContext, tasks: remoteTasks.map(normalizeRemoteTaskForOffline),
+    };
+    applyTaskWindow(result);
     scheduleTaskNotifications();
   } catch (error) {
     if (!isCurrent()) return;
@@ -4704,6 +4739,21 @@ async function refreshTasks(sessionContext = captureSessionContext()) {
     throw error;
   }
   render();
+}
+
+async function fetchTrashTaskPages(baseParams, sessionContext = captureSessionContext()) {
+  const tasks = [];
+  for (let page = 0; page < MAX_TASK_PAGES; page += 1) {
+    if (!isSessionContextCurrent(sessionContext)) return [];
+    const params = new URLSearchParams(baseParams);
+    params.set("offset", String(page * TASK_LIMIT));
+    const pageTasks = await apiRequest(`/tasks/trash?${params.toString()}`);
+    if (!isSessionContextCurrent(sessionContext)) return [];
+    tasks.push(...pageTasks);
+    if (pageTasks.length < TASK_LIMIT) return tasks;
+  }
+  // A full final page cannot prove the snapshot is complete; never reconcile deletions from it.
+  throw new Error("Trash task pagination exceeded the safety limit.");
 }
 
 async function fetchTaskListPages(baseParams, sessionContext = captureSessionContext()) {
@@ -5340,7 +5390,7 @@ async function refreshSession(expectedRefreshToken, expectedGeneration) {
   });
   if (!canApplySessionRefreshResult({
     expectedGeneration,
-    currentGeneration: sessionRefreshGeneration,
+    currentGeneration: sessionCoordinator.generation,
     expectedRefreshToken,
     currentRefreshToken: state.refreshToken,
     sessionAllowed: shouldRestorePersistentSession(),
@@ -5357,7 +5407,7 @@ async function refreshSession(expectedRefreshToken, expectedGeneration) {
 async function restorePersistentSession() {
   const sessionContext = captureSessionContext();
   const expectedRefreshToken = state.refreshToken;
-  const expectedGeneration = sessionRefreshGeneration;
+  const expectedGeneration = sessionCoordinator.generation;
   const expectedUserId = state.user?.id ?? null;
   try {
     await coordinateSessionRefresh(expectedRefreshToken, async () => {
@@ -5372,7 +5422,7 @@ async function restorePersistentSession() {
       });
       if (!canApplySessionRefreshResult({
         expectedGeneration,
-        currentGeneration: sessionRefreshGeneration,
+        currentGeneration: sessionCoordinator.generation,
         expectedRefreshToken,
         currentRefreshToken: state.refreshToken,
         sessionAllowed: shouldRestorePersistentSession(),
@@ -5397,43 +5447,25 @@ async function restorePersistentSession() {
 }
 
 async function refreshSessionSingleflight() {
-  if (!refreshSessionPromise) {
-    const expectedRefreshToken = state.refreshToken;
-    const expectedGeneration = sessionRefreshGeneration;
-    const request = coordinateSessionRefresh(
-      expectedRefreshToken,
-      () => refreshSession(expectedRefreshToken, expectedGeneration),
-      expectedGeneration,
-    );
-    refreshSessionPromise = request;
-    void request.then(
-      () => clearCompletedSessionRefresh(request),
-      () => clearCompletedSessionRefresh(request),
-    );
-  }
-  return refreshSessionPromise;
-}
-
-function clearCompletedSessionRefresh(request) {
-  if (refreshSessionPromise === request) {
-    refreshSessionPromise = null;
-  }
+  const expectedRefreshToken = state.refreshToken;
+  const expectedGeneration = sessionCoordinator.generation;
+  return sessionCoordinator.run("refresh", captureSessionContext(), () => coordinateSessionRefresh(
+    expectedRefreshToken,
+    () => refreshSession(expectedRefreshToken, expectedGeneration),
+    expectedGeneration,
+  ));
 }
 
 function invalidateSessionRefreshes() {
-  sessionRefreshGeneration += 1;
-  refreshSessionPromise = null;
-  sessionActivationPromise = null;
-  sessionActivationContext = null;
-  offlineQueueFlushPromise = null;
-  offlineQueueFlushContext = null;
+  sessionCoordinator.invalidate();
+  onlineTaskSnapshot = null;
   if (state.loading) setBusy(false);
 }
 
 async function coordinateSessionRefresh(
   expectedRefreshToken,
   refreshAction,
-  expectedGeneration = sessionRefreshGeneration,
+  expectedGeneration = sessionCoordinator.generation,
 ) {
   const withLock = navigator.locks && typeof navigator.locks.request === "function"
     ? (callback) => navigator.locks.request(sessionRefreshLockName(), callback)
@@ -5442,7 +5474,7 @@ async function coordinateSessionRefresh(
     expectedRefreshToken,
     getCurrentRefreshToken: () => state.refreshToken,
     refresh: () => (
-      sessionRefreshGeneration === expectedGeneration
+      sessionCoordinator.generation === expectedGeneration
         ? refreshAction()
         : false
     ),
@@ -7079,31 +7111,18 @@ async function mutateTaskOffline(task, action) {
 
 async function cacheTasksForOffline(tasks, viewContext, options = {}) {
   const isCurrent = typeof options.isCurrent === "function" ? options.isCurrent : () => true;
-  const remoteTasks = tasks.map(normalizeRemoteTaskForOffline);
-  if (!supportsIndexedDb() || !getCurrentUserId()) return remoteTasks;
-  const cachedTasks = await listCachedTasks();
-  if (!isCurrent()) return null;
-  const reconciledTasks = reconcileCachedTaskSnapshot(cachedTasks, tasks, viewContext);
-  if (!isCurrent()) return null;
-  const db = await openOfflineDb();
-  if (!isCurrent()) return null;
-  const tx = db.transaction([OFFLINE_TASK_STORE, OFFLINE_META_STORE], "readwrite");
-  const done = transactionDone(tx);
-  const store = tx.objectStore(OFFLINE_TASK_STORE);
-  store.clear();
-  for (const task of reconciledTasks) {
-    store.put(task);
-  }
-  tx.objectStore(OFFLINE_META_STORE).put({
-    key: OFFLINE_CACHE_READY_META_KEY,
-    value: true,
-    updated_at: new Date().toISOString(),
-  });
-  await done;
-  if (!isCurrent()) return null;
+  if (!supportsIndexedDb() || !getCurrentUserId()) return isCurrent();
+  // reconcileCachedTaskSnapshot semantics live in the repository's transactional cursor reconciliation.
+  if (!await offlineRepository.reconcileSnapshot(tasks, viewContext, { isCurrent })) return false;
   state.offlineCacheReady = true;
   state.offlineLastSyncedAt = new Date().toISOString();
-  return reconciledTasks;
+  return true;
+}
+
+async function readCachedTaskView(viewContext, includeMeta = true) {
+  if (!supportsIndexedDb() || !getCurrentUserId()) return readTaskWindow([], viewContext, includeMeta);
+  return offlineRepository.readView({ viewContext, includeMeta,
+    limit: Math.max(TASK_LIMIT, state.offlineTaskRenderLimit || TASK_LIMIT), linkedTaskId: state.notificationTaskId });
 }
 
 async function hydrateCachedTasks({ viewContext = null, requestSequence = null, sessionContext = captureSessionContext() } = {}) {
@@ -7120,41 +7139,21 @@ async function hydrateCachedTasks({ viewContext = null, requestSequence = null, 
     render();
     return true;
   }
-  const tasks = await listCachedTasks();
+  const activeViewContext = viewContext || {
+    view: state.view, search: state.search, project: state.projectFilter, tag: state.tagFilter,
+    now: new Date(), timeZone: DISPLAY_TIME_ZONE,
+  };
+  const result = await readCachedTaskView(activeViewContext);
   if (!isCurrent()) return false;
   const [cacheReady, queueCount] = await Promise.all([
-    readOfflineMeta(OFFLINE_CACHE_READY_META_KEY),
-    countOfflineQueue(),
+    readOfflineMeta(OFFLINE_CACHE_READY_META_KEY), countOfflineQueue(),
   ]);
   if (!isCurrent()) return false;
-  const activeViewContext = viewContext || {
-    view: state.view,
-    search: state.search,
-    project: state.projectFilter,
-    tag: state.tagFilter,
-    now: new Date(),
-    timeZone: DISPLAY_TIME_ZONE,
-  };
-  const visibleCachedTasks = tasks
-    .filter((task) => matchesTaskView(task, activeViewContext))
-    .sort((left, right) => compareCachedTasks(left, right, activeViewContext));
-  const renderLimit = Math.max(TASK_LIMIT, state.offlineTaskRenderLimit || TASK_LIMIT);
-  const renderedTasks = visibleCachedTasks.slice(0, renderLimit);
-  if (state.notificationTaskId !== null) {
-    const linkedTask = visibleCachedTasks.find(
-      (task) => Number(task.id) === Number(state.notificationTaskId),
-    );
-    if (linkedTask && !renderedTasks.includes(linkedTask)) {
-      renderedTasks.splice(Math.max(0, renderedTasks.length - 1), 1, linkedTask);
-    }
-  }
   state.offlineCacheReady = cacheReady === true;
   state.offlineQueueCount = queueCount;
-  state.cachedTaskTotalCount = visibleCachedTasks.length;
-  state.tasks = renderedTasks;
-  state.cachedTaskVisibleCount = state.tasks.length;
-  state.cachedTaskListLimited = visibleCachedTasks.length > state.tasks.length;
-  state.meta = buildLocalMeta(tasks, new Date(), { timeZone: DISPLAY_TIME_ZONE });
+  onlineTaskSnapshot = null;
+  applyTaskWindow(result);
+  state.meta = result.meta;
   void scheduleTaskNotifications();
   render();
   return true;
@@ -7191,17 +7190,7 @@ async function flushOfflineQueue(sessionContext = captureSessionContext()) {
     await refreshOfflineQueueCount(sessionContext);
     return;
   }
-  if (!offlineQueueFlushPromise || !isSessionContextCurrent(offlineQueueFlushContext)) {
-    offlineQueueFlushContext = sessionContext;
-    const request = flushOfflineQueueInternal(sessionContext).finally(() => {
-      if (offlineQueueFlushPromise === request) {
-        offlineQueueFlushPromise = null;
-        offlineQueueFlushContext = null;
-      }
-    });
-    offlineQueueFlushPromise = request;
-  }
-  return offlineQueueFlushPromise;
+  return sessionCoordinator.run("offline-queue", sessionContext, () => flushOfflineQueueInternal(sessionContext));
 }
 
 async function flushOfflineQueueInternal(sessionContext) {
@@ -7391,6 +7380,7 @@ async function refreshOfflineQueueCount(sessionContext = captureSessionContext()
     renderSummary();
   }
   renderTaskSyncHealthBar();
+  void syncHealthReporter.report(sessionContext);
 }
 
 async function countOfflineQueue() {
@@ -7471,9 +7461,7 @@ async function getCachedTask(taskId) {
 
 async function listCachedTasks() {
   if (!supportsIndexedDb() || !getCurrentUserId()) return [];
-  const db = await openOfflineDb();
-  const tx = db.transaction(OFFLINE_TASK_STORE, "readonly");
-  return requestToPromise(tx.objectStore(OFFLINE_TASK_STORE).getAll());
+  return offlineRepository.listTasks();
 }
 
 async function writeOfflineMeta(key, value, sessionContext = captureSessionContext()) {
@@ -7539,25 +7527,11 @@ function currentOfflineWorkspaceKey() {
 }
 
 function closeOfflineDb() {
-  const pendingDb = offlineDbPromise;
-  offlineDbPromise = null;
-  offlineDbNameInUse = "";
-  if (!pendingDb) return Promise.resolve();
-  return pendingDb.then((db) => db.close()).catch(() => {});
+  return offlineDatabaseManager.close();
 }
 
 function openOfflineDb() {
-  if (localDataClearInProgress) {
-    return Promise.reject(new Error("Local data clear is in progress"));
-  }
-  const dbName = offlineDbName();
-  if (offlineDbPromise && offlineDbNameInUse === dbName) {
-    return offlineDbPromise;
-  }
-  closeOfflineDb();
-  offlineDbNameInUse = dbName;
-  offlineDbPromise = openOfflineDatabase(dbName);
-  return offlineDbPromise;
+  return offlineDatabaseManager.open();
 }
 
 function openOfflineDatabase(dbName) {
@@ -7579,6 +7553,9 @@ function openOfflineDatabase(dbName) {
         tasks.createIndex("updated_at", "updated_at", { unique: false });
         tasks.createIndex("offline_status", "offline_status", { unique: false });
       }
+      const tasks = request.transaction.objectStore(OFFLINE_TASK_STORE);
+      if (!tasks.indexNames.contains("project")) tasks.createIndex("project", "project", { unique: false });
+      if (!tasks.indexNames.contains("tag")) tasks.createIndex("tag", "tag", { unique: false });
       if (!db.objectStoreNames.contains(OFFLINE_QUEUE_STORE)) {
         const queue = db.createObjectStore(OFFLINE_QUEUE_STORE, {
           keyPath: "offline_queue_id",

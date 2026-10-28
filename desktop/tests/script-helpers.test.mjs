@@ -11,7 +11,7 @@ import {
 } from "../scripts/script-helpers.mjs";
 
 const userExperienceCheckerSource = await readFile(
-  new URL("../scripts/check-user-experience-optimizations.mjs", import.meta.url),
+  new URL("../../scripts/checks/check-user-experience-optimizations.mjs", import.meta.url),
   "utf8",
 );
 

@@ -1,0 +1,14 @@
+{
+  "title": "TaskBridge 同步健康",
+  "uid": "taskbridge-sync",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {"id": 1, "type": "timeseries", "title": "同步请求 / 秒", "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}, "targets": [{"refId": "A", "expr": "sum by (direction, outcome) (rate(taskbridge_sync_operations_total[5m]))", "legendFormat": "{{direction}} {{outcome}}"}]},
+    {"id": 2, "type": "timeseries", "title": "同步耗时 P95（毫秒）", "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8}, "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, direction) (rate(taskbridge_sync_duration_ms_bucket[5m])))", "legendFormat": "{{direction}}"}]},
+    {"id": 3, "type": "timeseries", "title": "活跃上报工作区的待同步任务（按实例）", "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8}, "targets": [{"refId": "A", "expr": "taskbridge_client_pending_tasks", "legendFormat": "{{instance}} {{source}}"}]},
+    {"id": 4, "type": "timeseries", "title": "最老待同步时间（秒）", "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8}, "targets": [{"refId": "A", "expr": "taskbridge_client_oldest_pending_seconds", "legendFormat": "{{instance}} {{source}}"}]}
+  ]
+}

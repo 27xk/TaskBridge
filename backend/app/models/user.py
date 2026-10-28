@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.sql_types import precise_datetime
 from app.utils.time import utc_now
 
 
@@ -15,6 +16,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    task_sync_time: Mapped[datetime | None] = mapped_column(precise_datetime(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),

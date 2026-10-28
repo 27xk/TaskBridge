@@ -3,11 +3,11 @@ import { resolve } from "node:path";
 import { extractBalancedBlock, workspaceRoot } from "./script-helpers.mjs";
 
 const rootDir = workspaceRoot(import.meta.url);
-const source = readFileSync(resolve(rootDir, "src/sync/SyncManager.ts"), "utf8");
-const taskStoreSource = readFileSync(resolve(rootDir, "src/stores/task.ts"), "utf8");
-const dbSource = readFileSync(resolve(rootDir, "electron/db.ts"), "utf8");
-const taskItemSource = readFileSync(resolve(rootDir, "src/components/TaskItem.vue"), "utf8");
-const i18nSource = readFileSync(resolve(rootDir, "src/i18n.ts"), "utf8");
+const source = readFileSync(resolve(rootDir, "renderer/sync/SyncManager.ts"), "utf8");
+const taskStoreSource = readFileSync(resolve(rootDir, "renderer/stores/task.ts"), "utf8");
+const dbSource = readFileSync(resolve(rootDir, "main/db.ts"), "utf8");
+const taskItemSource = readFileSync(resolve(rootDir, "renderer/components/TaskItem.vue"), "utf8");
+const i18nSource = readFileSync(resolve(rootDir, "renderer/i18n.ts"), "utf8");
 const failures = [];
 
 function sliceBetween(haystack, startMarker, endMarker) {
@@ -88,7 +88,20 @@ const conflictCommitIndex = resolveConflictHandler.indexOf("await commitTaskChan
 if (conflictCommitIndex === -1 || missingSnapshotGuardIndex > conflictCommitIndex) {
   failures.push("cloud conflict resolution must validate its snapshot before committing the task and queue atomically");
 }
-for (const contract of ["assertCurrentScope(scope)", "sameTaskRecord(current, task)", "expectedWorkspaceKey: scope.workspaceKey", "expectedQueueId: state.queueId", "queueAction: useServer ? null : taskMutationAction(current, next)"]) {
+const conflictStateGuard = sliceBetween(resolveConflictHandler, 'if (!current || current.syncStatus !== "conflict"', "const serverTask =");
+for (const contract of [
+  '!("content" in task) && task.changeRevision !== null && state.changeRevision !== task.changeRevision',
+  '!sameTaskRecord("content" in task ? current : toTaskListSummary(current, task.changeRevision), task)',
+  'throw new Error("The task conflict changed before it could be resolved")',
+]) {
+  if (!conflictStateGuard.includes(contract)) failures.push(`conflict resolution must reject stale full records and summaries with ${contract}`);
+}
+const conflictStateGuardIndex = resolveConflictHandler.indexOf(conflictStateGuard);
+const conflictStateReadIndex = resolveConflictHandler.indexOf("await readTaskMutationState(task.localId, scope.workspaceKey)");
+if (!conflictStateGuard || conflictStateReadIndex === -1 || conflictStateGuardIndex < conflictStateReadIndex || conflictStateGuardIndex > conflictCommitIndex) {
+  failures.push("conflict resolution must validate the current conflict fields and summary revision after reading and before committing");
+}
+for (const contract of ["assertCurrentScope(scope)", "expectedWorkspaceKey: scope.workspaceKey", "expected: current", "expectedQueueId: state.queueId", "queueAction: useServer ? null : taskMutationAction(current, next)"]) {
   if (!resolveConflictHandler.includes(contract)) failures.push(`conflict resolution must preserve ${contract}`);
 }
 if (resolveConflictHandler.includes("await saveTask(") || resolveConflictHandler.includes("removeQueueByLocalId(")) {

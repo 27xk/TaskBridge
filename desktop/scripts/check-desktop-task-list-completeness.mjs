@@ -15,14 +15,14 @@ const [
   floatingTaskItemSource,
   taskUiPolicySource,
 ] = await Promise.all([
-  readFile(resolve(desktopRoot, "src/db/task.dao.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/stores/task.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/views/TaskView.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "src/views/TodayView.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "src/components/TaskEditor.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "src/components/TaskItem.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "src/components/FloatingTaskItem.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "shared/task-ui-policy.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/db/task.dao.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/stores/task.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/views/TaskView.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/views/TodayView.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/components/TaskEditor.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/components/TaskItem.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/components/FloatingTaskItem.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "common/task-ui-policy.ts"), "utf8"),
 ]);
 
 // Exercise SQLite pagination and the rendered list contract; a larger hard limit is not completeness.
@@ -38,7 +38,7 @@ for (const [viewName, source] of [
     /getTaskActionConfirmationMessage/,
     `${viewName} must use the shared delete confirmation policy`,
   );
-  assert.match(source, /async function deleteTask\(task: TaskRecord\): Promise<void>/, `${viewName} must wrap task deletion`);
+  assert.match(source, /async function deleteTask\(task: TaskListItem\): Promise<void>/, `${viewName} must wrap task deletion`);
   assert.match(source, /@delete="deleteTask"/, `${viewName} task rows must call the delete wrapper`);
   assert.doesNotMatch(
     source,

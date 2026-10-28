@@ -4,10 +4,10 @@ import test from "node:test";
 import { loadTsFunctions } from "./helpers/load-ts-functions.mjs";
 import { validateReleaseEndpoints } from "../scripts/validate-release-endpoints.mjs";
 
-const state = await readFile(new URL("../electron/state.ts", import.meta.url), "utf8");
-const ipc = await readFile(new URL("../electron/ipc.ts", import.meta.url), "utf8");
-const login = await readFile(new URL("../src/views/LoginView.vue", import.meta.url), "utf8");
-const settings = await readFile(new URL("../src/components/settings/SettingsConnectionPanel.vue", import.meta.url), "utf8");
+const state = await readFile(new URL("../main/state.ts", import.meta.url), "utf8");
+const ipc = await readFile(new URL("../main/ipc.ts", import.meta.url), "utf8");
+const login = await readFile(new URL("../renderer/views/LoginView.vue", import.meta.url), "utf8");
+const settings = await readFile(new URL("../renderer/components/settings/SettingsConnectionPanel.vue", import.meta.url), "utf8");
 
 test("configured desktop releases reject endpoint edits and hide address inputs", () => {
   assert.match(state, /const CONNECTION_LOCKED = app\.isPackaged \|\| Boolean\(DEFAULT_BASE_URL && DEFAULT_WS_URL\)/);
@@ -26,7 +26,7 @@ test("release migration switches endpoints, invalidates old tokens and preserves
     legacyGlobalDatabaseWorkspaceKey: "https://old.test|7",
     lastSyncTimeByWorkspace: { "https://old.test|7": "2026-10-01T00:00:00Z" },
   }));
-  const { migrateNetworkSettings } = await loadTsFunctions("electron/state.ts", ["migrateNetworkSettings"], {
+  const { migrateNetworkSettings } = await loadTsFunctions("main/state.ts", ["migrateNetworkSettings"], {
     CONNECTION_LOCKED: true,
     DEFAULT_BASE_URL: "https://new.test/api/v1",
     DEFAULT_WS_URL: "wss://new.test/ws/sync",
@@ -48,7 +48,7 @@ test("release migration switches endpoints, invalidates old tokens and preserves
 });
 
 test("locked endpoint IPC rejects writes before validating or persisting an override", async () => {
-  const { setConnectionSettings } = await loadTsFunctions("electron/ipc.ts", ["setConnectionSettings"], {
+  const { setConnectionSettings } = await loadTsFunctions("main/ipc.ts", ["setConnectionSettings"], {
     getSettings: () => ({ connectionLocked: true }),
     setSetting: () => assert.fail("a configured release must not persist endpoint overrides"),
   });
@@ -66,7 +66,7 @@ test("desktop packaging requires a usable API and sync endpoint pair", () => {
 
 test("a configured client reports registration-check failures beside the sign-in form", async () => {
   const auth = { registrationStatusKnown: false, registrationEnabled: false, error: null, loadRegistrationStatus: async () => {} };
-  const { ensureRegistrationModeAvailable } = await loadTsFunctions("src/views/LoginView.vue", ["ensureRegistrationModeAvailable"], {
+  const { ensureRegistrationModeAvailable } = await loadTsFunctions("renderer/views/LoginView.vue", ["ensureRegistrationModeAvailable"], {
     auth,
     settings: { connectionLocked: true },
     registrationBlocked: { value: false },

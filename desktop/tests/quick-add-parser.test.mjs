@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { loadTsModule } from "./helpers/load-ts-module.mjs";
 
-const { localDateAfterDays, parseQuickTask } = await loadTsModule("shared/quick-add-parser.ts");
+const { localDateAfterDays, parseQuickTask } = await loadTsModule("common/quick-add-parser.ts");
 
 test("quick add parser extracts project shorthand without polluting title", () => {
   const parsed = parseQuickTask(

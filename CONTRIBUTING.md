@@ -26,6 +26,14 @@
 
 提交前请至少运行与你改动相关的验证命令。
 
+仓库与跨端检查在根目录执行，无需先进入桌面目录：
+
+```powershell
+npm run check:security-config
+npm run check:contract-drift
+npm run check:user-experience
+```
+
 后端：
 
 ```powershell
@@ -73,5 +81,8 @@ cd android
 
 - 后端遵循现有 FastAPI、Service 和 Schema 分层。
 - Android 遵循现有 Compose、Repository 和 ViewModel 结构。
-- 桌面端遵循现有 Electron 主进程、Vue 视图和 Pinia store 结构。
+- 桌面端按 `main/`、`preload/`、`renderer/`、`common/` 区分运行边界；公共类型和纯策略不反向依赖界面。
+- 后端任务与同步模块通过公共重复任务、同步日志模块协作，不相互导入私有实现。
+- Android 的领域模型不依赖 Room 实体，实体映射放在 data 层。
+- 仓库治理与跨端检查放在根 `scripts/checks/`，桌面专用工具留在 `desktop/scripts/`。
 - UI 调整应同时考虑 Android、Windows 主窗口、小组件和悬浮窗之间的体验差异。

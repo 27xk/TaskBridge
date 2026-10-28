@@ -23,7 +23,7 @@ for (const [filter, field] of [["projectFilter", "project"], ["tagFilter", "tag"
     Object.assign(harness.state, { user: { id: 1 }, offlineMode: true, view: "", [filter]: "Work" });
     harness.context.cachedTasks = [{ id: 1, title: "Move this task", status: "pending", [field]: "Work" }];
     harness.run(`
-      listCachedTasks = async () => cachedTasks;
+      readCachedTaskView = async (viewContext, includeMeta = true) => readTaskWindow(cachedTasks, viewContext, includeMeta);
       readOfflineMeta = async () => true;
       countOfflineQueue = async () => 0;
       scheduleTaskNotifications = async () => {};

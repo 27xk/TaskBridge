@@ -23,7 +23,7 @@ test("SQLite today pagination reaches every task beyond 200, including the last 
       import { createRequire } from "node:module";
       import { loadElectronModule } from ${JSON.stringify(pathToFileURL(resolve(import.meta.dirname, "helpers/mock-electron-windows.mjs")).href)};
       const require = createRequire(${JSON.stringify(resolve(desktopRoot, "package.json"))});
-      const store = loadElectronModule("electron/db.ts", {
+      const store = loadElectronModule("main/db.ts", {
         electron: { app: { getPath: () => ${JSON.stringify(directory)} } },
         "better-sqlite3": require("better-sqlite3"),
         "./state": { getSettings: () => ({ currentUserId: 1, baseUrl: "http://localhost:18080", displayTimeZone: "UTC" }),
@@ -43,7 +43,7 @@ test("SQLite today pagination reaches every task beyond 200, including the last 
       assert.equal(new Set(found.map(task => task.localId)).size, tasks.length);
       assert.equal(found.length, tasks.length);
       assert.equal(store.listTodayTasks(100, tasks.length).length, 0);
-      const dao = loadElectronModule("src/db/task.dao.ts", {
+      const dao = loadElectronModule("renderer/db/task.dao.ts", {
         "./sqlite": { bridge: () => ({ db: {
           listTodayTasks: (...args) => store.listTodayTasks(...args),
           listTaskSnapshotPage: (...args) => store.listTaskSnapshotPage(...args),
@@ -53,6 +53,19 @@ test("SQLite today pagination reaches every task beyond 200, including the last 
       assert.equal((await dao.listTodayTasks()).length, tasks.length, "the renderer DAO follows every today page");
       assert.equal(typeof store.listTaskSnapshotPage, "function", "the index needs a stable initial snapshot");
       const initial = store.listTaskSnapshotPage(null, 500);
+      assert.equal(Object.hasOwn(initial.tasks[0], "content"), false, "list snapshots must not materialize full bodies");
+      assert.equal(initial.tasks[0].contentPreview, tasks[0].content);
+      assert.equal(Object.hasOwn(initial.tasks[0], "checklistJson"), false);
+      assert.equal(Object.hasOwn(initial.tasks[0], "conflictServerJson"), false);
+      assert.equal(store.getTask(tasks[0].localId).content, tasks[0].content, "detail reads retain the full record");
+      const projection = loadElectronModule("common/task-summary.ts");
+      const unicode = { ...tasks[0], content: "😀".repeat(200) + " suffix", syncStatus: "conflict", conflictServerJson: '{"title":"cloud"}' };
+      store.upsertTask(unicode);
+      const unicodeSummary = store.listTaskSnapshotPage(null, 1).tasks[0];
+      assert.equal(projection.toTaskListSummary(unicode).contentPreview, unicodeSummary.contentPreview,
+        "SQL and JS must project the same Unicode preview for conflict comparison");
+      store.upsertTask(tasks[0]);
+      initial.cursor = store.listTaskSnapshotPage(null, 1).cursor;
       const indexed = [...initial.tasks];
       let page = initial;
       while (page.nextLocalId !== null) {
@@ -71,6 +84,14 @@ test("SQLite today pagination reaches every task beyond 200, including the last 
       const deleted = store.listTaskChanges(changed.cursor, 1);
       assert.deepEqual(deleted.removedIds, [tasks[1].localId]);
       assert.equal(deleted.hasMore, false);
+      store.database().prepare("UPDATE tasks SET checklist_json = ?, sync_status = 'conflict' WHERE local_id = ?")
+        .run('[null,"legacy",{"done":true},{"done":1},{"done":false}]', tasks[0].localId);
+      const checklistSummary = store.listTaskChanges(deleted.cursor, 500).tasks[0];
+      assert.equal(checklistSummary.checklistTotal, 5);
+      assert.equal(checklistSummary.checklistDone, 1, "legacy scalar values and numeric truthiness do not count as completed checklist objects");
+      assert.ok(checklistSummary.changeRevision > initial.tasks[0].changeRevision);
+      assert.equal(store.getSyncHealthSummary().conflictCount, 1);
+      assert.equal(store.getSyncHealthSummary().pendingCount, 0);
       const captureA = store.createLocalTask("One capture submission", "capture-regression");
       const captureB = store.createLocalTask("One capture submission", "capture-regression");
       assert.equal(captureA.localId, captureB.localId, "retrying after renderer destruction must not create a second task");
@@ -97,7 +118,7 @@ test("SQLite today pagination reaches every task beyond 200, including the last 
 });
 
 test("formatter caching evicts old locales and time zones instead of retaining an unbounded map", () => {
-  const parser = loadElectronModule("shared/quick-add-parser.ts");
+  const parser = loadElectronModule("common/quick-add-parser.ts");
   const first = parser.getDateTimeFormatter("en-US", { timeZone: "UTC", year: "numeric" });
   assert.strictEqual(parser.getDateTimeFormatter("en-US", { year: "numeric", timeZone: "UTC" }), first);
   for (const timeZone of Intl.supportedValuesOf("timeZone").slice(0, 40)) {
@@ -119,7 +140,7 @@ test("incremental index refresh retains unchanged task references and same-times
     { tasks: [{ ...original, title: "Corrected" }], removedIds: [], cursor: { ...cursor, revision: 2 }, reset: false },
     { tasks: [], removedIds: ["a"], cursor: { ...cursor, revision: 3 }, reset: false },
   ];
-  const { useTaskStore } = loadElectronModule("src/stores/task.ts", {
+  const { useTaskStore } = loadElectronModule("renderer/stores/task.ts", {
     vue: require("vue"), pinia: require("pinia"),
     "../api/task": {}, "../db/sqlite": {}, "../db/sync-queue.dao": {}, "../sync/task-mapper": {},
     "../db/task.dao": {
@@ -139,7 +160,8 @@ test("incremental index refresh retains unchanged task references and same-times
   assert.strictEqual(store.tasks[0], record);
   await store.load();
   assert.equal(store.tasks[0].title, "Corrected");
-  assert.equal(store.tasks[0].content, original.content);
+  assert.equal(store.tasks[0].contentPreview, original.content);
+  assert.equal(Object.hasOwn(store.tasks[0], "content"), false);
   assert.notStrictEqual(store.tasks[0], record);
   await store.load();
   assert.equal(store.tasks.length, 0);
@@ -150,7 +172,7 @@ test("incremental index refresh retains unchanged task references and same-times
 test("timeline sorting reuses date formatters across a batch while preserving task order", () => {
   let constructions = 0;
   const DateTimeFormat = function (...args) { constructions++; return new Intl.DateTimeFormat(...args); };
-  const order = loadElectronModule("src/utils/task-order.ts", {}, { Intl: { ...Intl, DateTimeFormat } });
+  const order = loadElectronModule("renderer/utils/task-order.ts", {}, { Intl: { ...Intl, DateTimeFormat } });
   const tasks = Array.from({ length: 1000 }, (_, i) => ({
     localId: String(i), status: "todo", dueTime: new Date(Date.UTC(2026, 9, 10, 0, i)).toISOString(),
     plannedDate: "2026-10-10", priority: 0, sortOrder: 0, updatedAt: "2026-10-10T00:00:00Z", completedAt: null,
@@ -162,7 +184,7 @@ test("timeline sorting reuses date formatters across a batch while preserving ta
 
 test("a synchronization without persisted task changes does not reload the task index", async () => {
   let refreshed = 0;
-  const { SyncManager } = loadElectronModule("src/sync/SyncManager.ts", {
+  const { SyncManager } = loadElectronModule("renderer/sync/SyncManager.ts", {
     "../api/sync": { pullSync: async () => ({ changed_tasks: [], deleted_tasks: [], has_more: false, server_time: "2026-10-10T08:00:00Z" }) },
     "../api/auth": {}, "../api/device": { registerDevice: async () => {} },
     "../stores/auth": { useAuthStore: () => ({ workspaceKey: "workspace-a" }) },

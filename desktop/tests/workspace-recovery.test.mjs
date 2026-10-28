@@ -7,7 +7,7 @@ test("a page switch during loading restores its position and resumes tracking wh
   const taskStore = { loading: true };
   const workspaceStore = { taskView: { scrollTop: 800 }, todayScrollTop: 0,
     rememberScroll(view, value) { if (view === "all") this.taskView.scrollTop = value; } };
-  const api = await loadTsFunctions("src/App.vue", ["restoreCurrentScroll", "rememberCurrentScroll", "onTaskLoadingChanged"], {
+  const api = await loadTsFunctions("renderer/App.vue", ["restoreCurrentScroll", "rememberCurrentScroll", "onTaskLoadingChanged"], {
     main, taskStore, workspaceStore, workspaceMain: { value: main }, activeView: { value: "tasks" },
     auth: { workspaceKey: "a" }, scrollRestorePending: true, restoringScroll: false, isFloating: false,
     nextTick: async () => {}, window: { requestAnimationFrame: (callback) => { callback(); return 1; } },
@@ -26,7 +26,7 @@ test("floating renderer readiness does not wait for a successful initial task fe
   let failInitialization;
   let ready = 0;
   const captureError = { value: "" };
-  const { initializeFloatingView } = await loadTsFunctions("src/views/FloatingView.vue", ["initializeFloatingView"], {
+  const { initializeFloatingView } = await loadTsFunctions("renderer/views/FloatingView.vue", ["initializeFloatingView"], {
     floating: { init: () => new Promise((_, reject) => { failInitialization = reject; }) },
     captureError, settingsStore: { t: (key) => key }, nextTick: async () => {},
     bridge: () => ({ window: { quickAddReady: async () => { ready += 1; return true; } } }),
@@ -44,7 +44,7 @@ test("an undoable task action does not leave a contradictory success toast after
   const notices = [];
   const taskStore = { pendingUndo: null };
   const notice = { value: "old notice" };
-  const { runTaskAction } = await loadTsFunctions("src/views/TaskView.vue", ["runTaskAction"], {
+  const { runTaskAction } = await loadTsFunctions("renderer/views/TaskView.vue", ["runTaskAction"], {
     taskStore, notice, bulkBusy: { value: false }, runningTaskActions: new Set(), workspaceEpoch: 0,
     actionError: { value: "" }, settingsStore: { language: "zh-CN" }, IMPORTANT_NOTICE_MS: 4500,
     showNotice: (message) => notices.push(message), console,

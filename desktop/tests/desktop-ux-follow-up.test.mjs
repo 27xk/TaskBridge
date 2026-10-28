@@ -22,7 +22,7 @@ function sourceBetween(value, startMarker, endMarker) {
 }
 
 test("desktop authentication saves the normalized server and authenticates without a sync-status gate", async () => {
-  const login = await source("desktop/src/views/LoginView.vue");
+  const login = await source("desktop/renderer/views/LoginView.vue");
   const submit = sourceBetween(
     login,
     "async function submit(): Promise<void> {",
@@ -37,8 +37,8 @@ test("desktop authentication saves the normalized server and authenticates witho
 
 test("desktop connection testing lives inside advanced troubleshooting instead of the primary login actions", async () => {
   const [login, i18n] = await Promise.all([
-    source("desktop/src/views/LoginView.vue"),
-    source("desktop/src/i18n.ts"),
+    source("desktop/renderer/views/LoginView.vue"),
+    source("desktop/renderer/i18n.ts"),
   ]);
   const ordinaryActions = sourceBetween(
     login,
@@ -58,14 +58,14 @@ test("desktop connection testing lives inside advanced troubleshooting instead o
 });
 
 test("WorkspaceQuickAdd accepts the same 255-character title contract as the full editor", async () => {
-  const quickAdd = await source("desktop/src/components/WorkspaceQuickAdd.vue");
+  const quickAdd = await source("desktop/renderer/components/WorkspaceQuickAdd.vue");
 
   assert.match(quickAdd, /maxlength="255"/);
   assert.doesNotMatch(quickAdd, /maxlength="120"/);
 });
 
 test("task titles expose a named native edit button while preserving double-click and More", async () => {
-  const taskItem = await source("desktop/src/components/TaskItem.vue");
+  const taskItem = await source("desktop/renderer/components/TaskItem.vue");
   const triggerIndex = taskItem.indexOf('class="task-edit-trigger"');
   assert.ok(triggerIndex >= 0, "task title must expose a dedicated edit trigger");
   const openingTagStart = taskItem.lastIndexOf("<button", triggerIndex);
@@ -87,8 +87,8 @@ test("task titles expose a named native edit button while preserving double-clic
 
 test("pending sync has neutral automatic-sync copy and never uses the attention label", async () => {
   const [sidebar, i18n] = await Promise.all([
-    source("desktop/src/components/AppSidebar.vue"),
-    source("desktop/src/i18n.ts"),
+    source("desktop/renderer/components/AppSidebar.vue"),
+    source("desktop/renderer/i18n.ts"),
   ]);
 
   assert.match(sidebar, /pending:\s*"sync\.pendingAuto"/);
@@ -100,8 +100,8 @@ test("pending sync has neutral automatic-sync copy and never uses the attention 
 
 test("desktop keeps navigation labels at 1024px and collapses only at compact widths", async () => {
   const [sidebar, css, visual] = await Promise.all([
-    source("desktop/src/components/AppSidebar.vue"),
-    source("desktop/src/assets/workspace.css"),
+    source("desktop/renderer/components/AppSidebar.vue"),
+    source("desktop/renderer/assets/workspace.css"),
     source("desktop/scripts/check-desktop-focus-visual.mjs"),
   ]);
   const compactCss = extractBalancedBlock(css, "@media (max-width: 899px)");

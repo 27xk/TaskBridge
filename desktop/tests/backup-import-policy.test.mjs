@@ -7,7 +7,7 @@ const {
   canUndoImportedBackupTask,
   getBackupImportUndoConfirmationMessage,
   getBackupImportUndoResultMessage,
-} = await loadTsModule("shared/backup-import-policy.ts");
+} = await loadTsModule("common/backup-import-policy.ts");
 
 test("backup import undo only allows unchanged imported tasks", () => {
   assert.equal(canUndoImportedBackupTask("2026-06-08T01:00:00.000Z", "2026-06-08T01:00:00.000Z"), true);

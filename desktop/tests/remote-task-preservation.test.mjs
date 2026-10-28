@@ -14,9 +14,9 @@ const desktopRoot = resolve(import.meta.dirname, "..");
 const electronPath = resolve(desktopRoot, "node_modules/electron/dist/electron.exe");
 
 async function databaseFunctions() {
-  const source = await readFile(resolve(desktopRoot, "electron/db.ts"), "utf8");
+  const source = await readFile(resolve(desktopRoot, "main/db.ts"), "utf8");
   const ast = ts.createSourceFile("db.ts", source, ts.ScriptTarget.Latest, true);
-  const names = new Set(["upsertTask", "upsertTasks", "saveTaskRecord", "taskFromRow", "toSyncStatus"]);
+  const names = new Set(["upsertTask", "upsertTasks", "saveTaskRecord", "taskFromRow", "taskScalarFields", "toSyncStatus"]);
   const functions = ast.statements
     .filter((node) => ts.isFunctionDeclaration(node) && names.has(node.name?.text))
     .map((node) => node.getText(ast));

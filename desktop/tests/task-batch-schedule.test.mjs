@@ -3,12 +3,12 @@ import { test } from "node:test";
 import { loadTsFunctions } from "./helpers/load-ts-functions.mjs";
 import { loadTsModule } from "./helpers/load-ts-module.mjs";
 
-const { isValidCalendarDate } = await loadTsModule("shared/workspace-view-state.ts");
+const { isValidCalendarDate } = await loadTsModule("common/workspace-view-state.ts");
 
 async function harness() {
   const globals = { props: { busy: false }, date: { value: "2026-10-10" }, invalidDate: { value: false }, priority: { value: "" }, calls: [], isValidCalendarDate };
   globals.emit = (...args) => globals.calls.push(args);
-  const functions = await loadTsFunctions("src/components/TaskBatchSchedule.vue", ["submitDate", "submitPriority"], globals);
+  const functions = await loadTsFunctions("renderer/components/TaskBatchSchedule.vue", ["submitDate", "submitPriority"], globals);
   return { ...functions, globals };
 }
 

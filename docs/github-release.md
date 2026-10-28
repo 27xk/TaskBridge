@@ -15,8 +15,8 @@ TaskBridge 使用 GitHub Actions 完成持续集成和正式发布。CI 负责�
 
 - 自托管部署包：`TaskBridge-<version>-deployment.zip`
 - 已签名 Android APK：`TaskBridge-<version>-android.apk`
-- 已签名 Windows 安装包：`TaskBridge-<version>-Setup.exe`
-- Windows 自动更新元数据：`latest.yml` 和安装包 `.blockmap`（仅随已签名安装包发布）
+- Windows 安装包：`TaskBridge-<version>-Setup.exe`（配置证书时签名）
+- Windows 自动更新元数据：`latest.yml` 和安装包 `.blockmap`
 - 校验清单：`SHA256SUMS.txt`
 - 后端 GHCR 镜像：`ghcr.io/<owner>/taskbridge:<version>`
 - 后端 GHCR 镜像：`ghcr.io/<owner>/taskbridge:latest`
@@ -25,15 +25,15 @@ TaskBridge 使用 GitHub Actions 完成持续集成和正式发布。CI 负责�
 
 `latest` 默认会在标签发布时生成。手动触发时可以通过 `publish_latest` 控制是否发布 `latest` 标签。
 
-部署包始终生成，包含 `deploy/`、`web/`、`README.md` 和 `VERSION`。构建时会在临时目录把两个 `.env*.example` 和 Compose fallback 的后端镜像固定到当前发布标签，避免部署包以后被 `latest` 指向的新镜像改变。未配置签名时，工作流不会上传 unsigned APK 或 Windows 安装包，但部署包和容器镜像仍可正常发布。历史 Release 中名称带 `unsigned` 的客户端文件只适合开发验证，不应作为普通用户安装包。
+部署包始终生成，包含 `deploy/`、`web/`、`README.md` 和 `VERSION`。构建时会在临时目录把两个 `.env*.example` 和 Compose fallback 的后端镜像固定到当前发布标签，避免部署包以后被 `latest` 指向的新镜像改变。Android 签名配置必须完整，缺失会阻止正式发布；Windows 未配置证书时仍生成安装包，并在日志中明确说明未签名，部分配置缺失会失败。历史 unsigned APK 只适合开发验证，不应作为普通用户安装包。
 
 ## 触发发布
 
 通过标签发布：
 
 ```bash
-git tag v0.1.8
-git push origin v0.1.8
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 手动发布：
@@ -41,7 +41,7 @@ git push origin v0.1.8
 1. 打开 GitHub Actions。
 2. 选择 `TaskBridge Release`。
 3. 点击 `Run workflow`。
-4. 输入版本号，例如 `v0.1.8`。
+4. 输入与 `VERSION` 一致的新版本号，例如 `v0.2.1`，并确认该标签指向待发布提交。
 5. 按需选择是否发布 Docker `latest` 标签。
 
 ## 必需配置
@@ -142,7 +142,7 @@ Release workflow refuses to build public artifacts unless both endpoints are con
 - JDK 是否为 17。
 - `gradlew` 是否有执行权限。
 - 是否关闭了国内镜像：`-PTASKBRIDGE_USE_CHINA_MIRRORS=false`。
-- Android 签名 Secrets 是否完整；四项都缺失时会省略 APK，部分缺失时会失败；已签名 APK 会用 `apksigner verify --verbose --print-certs` 校验。
+- Android 签名 Secrets 是否完整；任一缺失都会阻止正式发布；已签名 APK 会用 `apksigner verify --verbose --print-certs` 校验。
 - `ANDROID_KEYSTORE_BASE64` 解码后是否为空。
 
 ### 桌面端打包失败
@@ -156,7 +156,7 @@ ELECTRON_CACHE=<workspace>/.cache/electron
 ELECTRON_BUILDER_CACHE=<workspace>/.cache/electron-builder
 ```
 
-这样可以避免系统缓存目录权限问题。安装包生成后还会执行 `Get-AuthenticodeSignature`，只有 Authenticode 状态为 `Valid` 的 `.exe` 才会作为发布产物上传。未配置 Windows 签名 Secrets 时，工作流会省略安装包，不会把 unsigned `.exe` 放入公开 Release。
+这样可以避免系统缓存目录权限问题。配置完整证书时，安装包生成后还会执行 `Get-AuthenticodeSignature`，只有 Authenticode 状态为 `Valid` 才通过签名验证。未配置 Windows 签名 Secrets 时仍发布 unsigned `.exe`，并明确输出未签名提示。
 
 ### Docker 发布失败
 
@@ -170,7 +170,7 @@ ELECTRON_BUILDER_CACHE=<workspace>/.cache/electron-builder
 
 ### Release 没有产物
 
-发布工作流会先生成自托管部署包；签名配置存在时，再把 Android APK 和 Windows 安装包上传为 workflow artifacts。最后的 `Publish GitHub Release` job 统一创建 Release 并上传资产。若失败，请先查看 `Build deployment bundle`、`Prepare Android artifact`、`Prepare desktop artifacts` 或 `Download build artifacts` 步骤日志。
+发布工作流会先生成自托管部署包，并把正式签名 Android APK 和 Windows 安装包上传为 workflow artifacts。最后的 `Publish GitHub Release` job 统一创建 Release 并上传资产。若失败，请先查看 `Build deployment bundle`、`Prepare Android artifact`、`Prepare desktop artifacts` 或 `Download build artifacts` 步骤日志。
 
 如果 Android、Desktop 或 Docker 任一 job 失败，最后的 `Publish GitHub Release` job 不会执行，因此 GitHub Releases 页面不会出现新版本。
 最终 Release 一定上传部署包和 `SHA256SUMS.txt`。已签名桌面安装包存在时还会上传 `latest.yml` 和 `.blockmap`，前两者用于桌面端 `latest` channel 自动更新。每次重跑同一标签时，Release job 会先删除旧资产，避免历史 unsigned APK 或 `builder-debug.yml` 残留；上传后会通过 GitHub CLI 反查必需资产并拒绝禁止文件。校验清单用于核对所有下载文件的 SHA-256 摘要。桌面端运行时默认读取 `latest` channel，可用 `TASKBRIDGE_UPDATE_CHANNEL` 指向后续 beta / canary channel，但公开稳定版本必须保持 `latest` channel。

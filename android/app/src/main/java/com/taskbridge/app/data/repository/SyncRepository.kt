@@ -14,6 +14,9 @@ import com.taskbridge.app.data.remote.dto.SyncPushRequestDto
 import com.taskbridge.app.data.remote.dto.WebSocketTicketRequestDto
 import com.taskbridge.app.domain.model.SyncStatus
 import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import java.time.Instant
 
@@ -35,6 +38,15 @@ class SyncRepository(
     ),
     private val onTasksChanged: suspend (workspaceId: String, localIds: Set<String>) -> Unit = { _, _ -> },
 ) {
+    private val syncHealthReporter = SyncHealthReporter(
+        currentWorkspaceId = { tokenDataStore.currentWorkspace.first()?.id },
+        hasAccessToken = { tokenDataStore.hasAccessToken() },
+        readHealth = { syncQueueDao.syncHealthSnapshot(it) },
+        sendHealth = { report, workspaceId ->
+            apiService.reportSyncHealth(report, workspaceId)
+            Unit
+        },
+    )
     private companion object {
         const val PUSH_BATCH_SIZE = 100
         const val MAX_PUSH_BATCHES = 25
@@ -42,18 +54,26 @@ class SyncRepository(
     }
 
     suspend fun syncNow(deviceId: String): Result<SyncChanges> {
-        return runCatching {
-            val workspace = activeWorkspace() ?: return@runCatching SyncChanges(null, emptySet())
+        return try {
+            val workspace = activeWorkspace() ?: return Result.success(SyncChanges(null, emptySet()))
             val changedIds = mutableSetOf<String>()
+            var succeeded = false
             try {
                 ensureDeviceRegistered(deviceId, workspace)
                 pushPendingChanges(deviceId, workspace, changedIds)
                 pullChanges(workspace, changedIds)
-                SyncChanges(workspace.id, changedIds.toSet())
+                succeeded = true
+                Result.success(SyncChanges(workspace.id, changedIds.toSet()))
             } finally {
                 // Earlier committed pages still need effects if a later network request fails.
                 if (changedIds.isNotEmpty()) onTasksChanged(workspace.id, changedIds)
+                currentCoroutineContext().ensureActive()
+                syncHealthReporter.report(workspace.id, deviceId, succeeded)
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Result.failure(failure)
         }
     }
 

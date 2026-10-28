@@ -65,6 +65,7 @@ def get_current_user_session_from_payload(db: Session, payload: dict) -> Current
     )
     if refresh_token is None:
         raise AppException(status_code=401, message="current session not found")
+    db.info["actor_device_id"] = device_id
     return CurrentUserSession(user=user, refresh_token=refresh_token)
 
 

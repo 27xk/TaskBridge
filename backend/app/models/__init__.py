@@ -1,3 +1,4 @@
+from app.core import task_events as _task_events  # noqa: F401
 from app.models.device import Device
 from app.models.product_event import ProductEvent
 from app.models.sync_log import SyncLog

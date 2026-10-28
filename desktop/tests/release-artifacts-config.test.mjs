@@ -8,8 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const files = [
-  "desktop/scripts/check-release-artifacts-config.mjs",
-  "desktop/scripts/script-helpers.mjs",
+  "scripts/checks/check-release-artifacts-config.mjs",
+  "scripts/lib/script-helpers.mjs",
   "desktop/package.json",
   ".github/workflows/release.yml",
   "docs/github-release.md",

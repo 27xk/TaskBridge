@@ -8,7 +8,7 @@ const root = workspaceRoot(import.meta.url);
 const [
   packageSource,
   themeSource,
-  envSource,
+  settingsTypesSource,
   stateSource,
   ipcSource,
   settingsStoreSource,
@@ -17,14 +17,14 @@ const [
   i18nSource,
 ] = await Promise.all([
   readFile(resolve(root, "package.json"), "utf8"),
-  readFile(resolve(root, "shared/desktop-theme.ts"), "utf8"),
-  readFile(resolve(root, "src/env.d.ts"), "utf8"),
-  readFile(resolve(root, "electron/state.ts"), "utf8"),
-  readFile(resolve(root, "electron/ipc.ts"), "utf8"),
-  readFile(resolve(root, "src/stores/settings.ts"), "utf8"),
-  readFile(resolve(root, "src/views/SettingsView.vue"), "utf8"),
-  readFile(resolve(root, "src/assets/base.css"), "utf8"),
-  readFile(resolve(root, "src/i18n.ts"), "utf8"),
+  readFile(resolve(root, "common/desktop-theme.ts"), "utf8"),
+  readFile(resolve(root, "common/settings.ts"), "utf8"),
+  readFile(resolve(root, "main/state.ts"), "utf8"),
+  readFile(resolve(root, "main/ipc.ts"), "utf8"),
+  readFile(resolve(root, "renderer/stores/settings.ts"), "utf8"),
+  readFile(resolve(root, "renderer/views/SettingsView.vue"), "utf8"),
+  readFile(resolve(root, "renderer/assets/base.css"), "utf8"),
+  readFile(resolve(root, "renderer/i18n.ts"), "utf8"),
 ]);
 
 const expectedThemes = ["warm", "mist", "forest", "harbor", "rose"];
@@ -50,9 +50,9 @@ assert.match(
   "theme IDs must be derived from the shared theme metadata",
 );
 assert.match(
-  envSource,
+  settingsTypesSource,
   /desktopTheme/,
-  "renderer settings type must include desktopTheme",
+  "common settings contract must include desktopTheme",
 );
 assert.match(
   stateSource,

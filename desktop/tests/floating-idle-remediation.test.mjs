@@ -19,7 +19,7 @@ function floatingHarness() {
   };
   const windows = { mainWindow: new MockWindow(), floatingWindow: null, isQuitting: false };
   let bounds = { x: 120, y: 130, width: 320, height: 460 };
-  const floating = loadElectronModule("electron/floating-window.ts", {
+  const floating = loadElectronModule("main/floating-window.ts", {
     electron: { app: { isPackaged: false }, BrowserWindow: MockWindow, screen: createScreen() },
     "./state": { windows, getFloatingOpacity: () => 0.96, getFloatingPosition: () => bounds,
       getFloatingSize: () => bounds, saveFloatingBounds: value => { bounds = value; } },
@@ -65,10 +65,10 @@ test("reopening during the idle grace period cancels the old destruction timer",
 });
 
 test("floating drafts and submission identity survive destruction and remain workspace-scoped", () => {
-  assert.ok(existsSync(resolve(import.meta.dirname, "../src/composables/useFloatingCaptureDraft.ts")), "floating capture needs a durable draft");
+  assert.ok(existsSync(resolve(import.meta.dirname, "../renderer/composables/useFloatingCaptureDraft.ts")), "floating capture needs a durable draft");
   const storage = new Map();
   const localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) };
-  const { useFloatingCaptureDraft } = loadElectronModule("src/composables/useFloatingCaptureDraft.ts", { vue }, { window: { localStorage } });
+  const { useFloatingCaptureDraft } = loadElectronModule("renderer/composables/useFloatingCaptureDraft.ts", { vue }, { window: { localStorage } });
   const workspace = vue.ref("workspace-a");
   const mount = () => { const scope = vue.effectScope(); const capture = scope.run(() => useFloatingCaptureDraft(() => workspace.value)); return { scope, capture }; };
   const first = mount();
@@ -102,7 +102,7 @@ test("a storage failure keeps the hidden renderer and its draft until persistenc
     setItem: (key, value) => { if (!available) throw new Error("storage unavailable"); storage.set(key, value); },
     removeItem: key => storage.delete(key),
   };
-  const { useFloatingCaptureDraft } = loadElectronModule("src/composables/useFloatingCaptureDraft.ts", { vue }, { window: { localStorage } });
+  const { useFloatingCaptureDraft } = loadElectronModule("renderer/composables/useFloatingCaptureDraft.ts", { vue }, { window: { localStorage } });
   const workspace = vue.ref("a");
   const scope = vue.effectScope();
   const capture = scope.run(() => useFloatingCaptureDraft(() => workspace.value, safe => h.floating.setFloatingDraftDurable(safe)));
@@ -134,7 +134,7 @@ test("a failed draft deletion stays pending across workspaces and blocks idle re
     setItem: (key, value) => storage.set(key, value),
     removeItem: key => { if (!removeAvailable) throw new Error("storage unavailable"); storage.delete(key); },
   };
-  const { useFloatingCaptureDraft } = loadElectronModule("src/composables/useFloatingCaptureDraft.ts", { vue }, { window: { localStorage } });
+  const { useFloatingCaptureDraft } = loadElectronModule("renderer/composables/useFloatingCaptureDraft.ts", { vue }, { window: { localStorage } });
   const workspace = vue.ref("a");
   const scope = vue.effectScope();
   const capture = scope.run(() => useFloatingCaptureDraft(() => workspace.value, safe => h.floating.setFloatingDraftDurable(safe)));

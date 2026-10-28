@@ -6,12 +6,12 @@ import { escapeRegExp, extractOpeningTag, workspaceRoot } from "./script-helpers
 const desktopRoot = workspaceRoot(import.meta.url);
 
 const [syncStoreSource, settingsViewSource, syncRecoveryPanelSource, i18nSource, cssSource, workspaceCssSource, packageSource, localCheckSource] = await Promise.all([
-  readFile(resolve(desktopRoot, "src/stores/sync.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/views/SettingsView.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "src/components/settings/SettingsSyncRecoveryPanel.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "src/i18n.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/assets/base.css"), "utf8"),
-  readFile(resolve(desktopRoot, "src/assets/workspace.css"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/stores/sync.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/views/SettingsView.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/components/settings/SettingsSyncRecoveryPanel.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/i18n.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/assets/base.css"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/assets/workspace.css"), "utf8"),
   readFile(resolve(desktopRoot, "package.json"), "utf8"),
   readFile(resolve(desktopRoot, "../scripts/check-local.ps1"), "utf8"),
 ]);

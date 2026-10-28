@@ -239,27 +239,19 @@ if (Test-ExternalCommand "node") {
 }
 
 if (-not (Test-ExternalCommand "npm")) {
+    Add-Blocked "repository checks" "npm is not available on PATH"
     Add-Blocked "desktop checks" "npm is not available on PATH"
 } else {
-    $desktopChecks = @(
-        "check:lockfile-registry",
-        "check:desktop-endpoint-config",
+    $repositoryChecks = @(
+        "check:architecture",
+        "test:tooling",
         "check:security-config",
         "check:auth-session-config",
         "check:backend-observability",
-        "check:package-size-config",
-        "check:sync-push",
-        "check:sync-diagnostics",
-        "check:sync-recovery-center",
-        "check:desktop-backup",
-        "check:desktop-theme",
-        "check:desktop-efficiency",
-        "check:desktop-docs",
         "check:local-bootstrap",
         "check:release-readiness",
         "check:release-artifacts",
         "check:production-hardening",
-        "check:desktop-task-list-completeness",
         "check:android-localization",
         "check:android-task-delete-confirmation",
         "check:refresh-singleflight",
@@ -273,11 +265,29 @@ if (-not (Test-ExternalCommand "npm")) {
         "check:contract-drift",
         "check:source-tests-visible",
         "check:supply-chain",
-        "check:desktop-auto-update",
         "check:android-data-extraction",
         "check:security-governance",
         "check:ux-priority-polish",
         "check:user-experience"
+    )
+
+    foreach ($check in $repositoryChecks) {
+        Invoke-Step "repository $check" $root "npm" @("run", $check)
+    }
+
+    $desktopChecks = @(
+        "check:lockfile-registry",
+        "check:desktop-endpoint-config",
+        "check:package-size-config",
+        "check:sync-push",
+        "check:sync-diagnostics",
+        "check:sync-recovery-center",
+        "check:desktop-backup",
+        "check:desktop-theme",
+        "check:desktop-efficiency",
+        "check:desktop-docs",
+        "check:desktop-task-list-completeness",
+        "check:desktop-auto-update"
     )
 
     foreach ($check in $desktopChecks) {

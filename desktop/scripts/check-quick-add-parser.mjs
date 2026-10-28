@@ -5,8 +5,8 @@ import { join } from "node:path";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
 
-const source = readFileSync(new URL("../shared/quick-add-parser.ts", import.meta.url), "utf8");
-const editorSource = readFileSync(new URL("../src/components/TaskEditor.vue", import.meta.url), "utf8");
+const source = readFileSync(new URL("../common/quick-add-parser.ts", import.meta.url), "utf8");
+const editorSource = readFileSync(new URL("../renderer/components/TaskEditor.vue", import.meta.url), "utf8");
 if (!editorSource.includes("parseQuickTask") || !editorSource.includes("quick-preview")) {
   throw new Error("TaskEditor must show a quick-add parsing preview before save");
 }

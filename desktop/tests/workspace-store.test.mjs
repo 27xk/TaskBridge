@@ -6,12 +6,12 @@ import { createPinia } from "pinia";
 import { reactive } from "vue";
 import { compileTsModule } from "./helpers/load-ts-module.mjs";
 
-const stateModule = await compileTsModule("shared/workspace-view-state.ts");
-const storeModule = await compileTsModule("src/stores/workspace.ts", { resolvePackagesFromProject: true });
+const stateModule = await compileTsModule("common/workspace-view-state.ts");
+const storeModule = await compileTsModule("renderer/stores/workspace.ts", { resolvePackagesFromProject: true });
 const compiled = await readFile(storeModule.modulePath, "utf8");
 await writeFile(storeModule.modulePath, compiled
   .replace('import { useAuthStore } from "./auth";', 'const useAuthStore = () => globalThis.__workspaceStoreTestAuth;')
-  .replace('"../../shared/workspace-view-state"', JSON.stringify(pathToFileURL(stateModule.modulePath).href)), "utf8");
+  .replace('"../../common/workspace-view-state"', JSON.stringify(pathToFileURL(stateModule.modulePath).href)), "utf8");
 const { useWorkspaceStore } = await import(pathToFileURL(storeModule.modulePath).href);
 after(async () => { await Promise.all([stateModule.cleanup(), storeModule.cleanup()]); });
 

@@ -6,10 +6,10 @@ import ts from "typescript";
 
 const root = workspaceRoot(import.meta.url);
 const repoRoot = resolve(root, "..");
-const sourcePath = resolve(root, "src/utils/task-order.ts");
+const sourcePath = resolve(root, "renderer/utils/task-order.ts");
 const source = await readFile(sourcePath, "utf8");
-const parserSource = await readFile(resolve(root, "shared/quick-add-parser.ts"), "utf8");
-const dbSource = await readFile(resolve(root, "electron/db.ts"), "utf8");
+const parserSource = await readFile(resolve(root, "common/quick-add-parser.ts"), "utf8");
+const dbSource = await readFile(resolve(root, "main/db.ts"), "utf8");
 const timelineFixtures = JSON.parse(
   await readFile(resolve(repoRoot, "shared/task-timeline-fixtures.json"), "utf8"),
 );
@@ -20,7 +20,7 @@ const parserCompiled = ts.transpileModule(parserSource, {
   },
 }).outputText;
 const parserUrl = `data:text/javascript;base64,${Buffer.from(parserCompiled).toString("base64")}`;
-const compiled = ts.transpileModule(source.replace('../../shared/quick-add-parser', parserUrl), {
+const compiled = ts.transpileModule(source.replace('../../common/quick-add-parser', parserUrl), {
   compilerOptions: {
     module: ts.ModuleKind.ES2022,
     target: ts.ScriptTarget.ES2022,

@@ -1,0 +1,31 @@
+groups:
+  - name: taskbridge-sync
+    rules:
+      - alert: TaskBridgeSyncErrors
+        expr: sum by (instance) (rate(taskbridge_sync_operations_total{outcome="error"}[5m])) / clamp_min(sum by (instance) (rate(taskbridge_sync_operations_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "TaskBridge sync error ratio exceeds 5%"
+      - alert: TaskBridgePendingQueueOld
+        expr: taskbridge_client_oldest_pending_seconds > 600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A reporting workspace has changes pending for over 10 minutes"
+      - alert: TaskBridgeConflictsUnresolved
+        expr: taskbridge_client_conflicts > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Reporting workspaces have unresolved conflicts"
+      - alert: TaskBridgeBackendUnavailable
+        expr: up{job="taskbridge"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "TaskBridge metrics endpoint is unavailable"

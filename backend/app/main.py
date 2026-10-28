@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from hmac import compare_digest
 
 from fastapi import Depends, FastAPI, Request
@@ -6,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import PlainTextResponse
 
@@ -21,16 +23,29 @@ from app.core.observability import (
 )
 from app.core.redis import redis_health_status
 from app.core.response import api_error, api_success
+from app.schemas.responses import HTTP_ERROR_RESPONSES, ApiResponse, DependencyStatus, HealthStatus
+from app.services.websocket_manager import websocket_manager
+
+
+@asynccontextmanager
+async def application_lifespan(_application: FastAPI):
+    await websocket_manager.start()
+    try:
+        yield
+    finally:
+        await websocket_manager.stop()
 
 
 def create_app() -> FastAPI:
     application = FastAPI(
         title=settings.app_name,
+        responses=HTTP_ERROR_RESPONSES,
         version=settings.app_version,
         description="TaskBridge backend API for Android and Windows desktop clients.",
         docs_url=None if settings.is_production else "/docs",
         redoc_url=None if settings.is_production else "/redoc",
         openapi_url=None if settings.is_production else "/openapi.json",
+        lifespan=application_lifespan,
     )
 
     application.add_middleware(GZipMiddleware, minimum_size=1024)
@@ -48,6 +63,11 @@ def create_app() -> FastAPI:
     install_observability(application)
     application.include_router(api_router, prefix="/api/v1")
     application.include_router(websocket_router)
+
+    @application.exception_handler(StaleDataError)
+    async def task_write_conflict_handler(_, _exc: StaleDataError):
+        record_task_version_conflict()
+        return api_error(code=409, message="version conflict", status_code=409)
 
     @application.exception_handler(AppException)
     async def app_exception_handler(_, exc: AppException):
@@ -71,7 +91,7 @@ def create_app() -> FastAPI:
         message = str(first_error.get("msg", "validation error"))
         return api_error(code=422, message=message, status_code=422)
 
-    @application.get("/health", tags=["health"])
+    @application.get("/health", tags=["health"], response_model=ApiResponse[HealthStatus])
     def read_health():
         return api_success(
             {
@@ -81,7 +101,7 @@ def create_app() -> FastAPI:
             },
         )
 
-    @application.get("/ready", tags=["health"])
+    @application.get("/ready", tags=["health"], response_model=ApiResponse[DependencyStatus])
     def read_ready(db: Session = Depends(get_db)):
         status_payload = read_dependency_status(db)
         return api_success(
@@ -90,7 +110,7 @@ def create_app() -> FastAPI:
             status_code=200 if status_payload["status"] == "ready" else 503,
         )
 
-    @application.get("/status", tags=["health"])
+    @application.get("/status", tags=["health"], response_model=ApiResponse[DependencyStatus])
     def read_status(db: Session = Depends(get_db)):
         return api_success(read_dependency_status(db))
 

@@ -102,9 +102,11 @@ def _seed_timeline_tasks(
 ) -> None:
     user = db_session.scalar(select(User).where(User.username == username))
     assert user is not None
-    db_session.add_all(
+    # Seed persisted historical records; normal ORM writes reserve server time.
+    db_session.execute(
+        Task.__table__.insert(),
         [
-            Task(
+            dict(
                 user_id=user.id,
                 title=item["id"],
                 status=item.get("status", "todo"),

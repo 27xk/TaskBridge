@@ -71,3 +71,64 @@ def test_openapi_contract_documents_cross_client_surface():
     }
     assert required_paths.issubset(schema["paths"])
     assert "OAuth2PasswordBearer" in schema["components"]["securitySchemes"]
+
+
+def test_all_json_success_responses_have_payload_contracts():
+    schema = create_app().openapi()
+    for path, methods in schema["paths"].items():
+        for method, operation in methods.items():
+            if method not in {"get", "post", "put", "patch", "delete"}:
+                continue
+            for status, response in operation["responses"].items():
+                if not status.startswith("2"):
+                    continue
+                json_body = response.get("content", {}).get("application/json")
+                if json_body is not None:
+                    assert json_body.get("schema"), f"{method} {path} {status}: missing response schema"
+
+
+def test_task_response_preserves_null_and_checklist_contract(client):
+    from tests.conftest import auth_headers
+
+    headers = auth_headers(client, "contract-payload", "contract-payload@example.com")
+    response = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"title": "契约样本", "content": None, "checklist": [{"id": "one", "title": "子项", "done": False}]},
+    )
+    assert response.status_code == 201
+    from app.schemas.responses import ApiResponse
+    from app.schemas.task import TaskRead
+
+    validated = ApiResponse[TaskRead].model_validate(response.json())
+    assert validated.data.content is None
+    assert validated.data.checklist[0].done is False
+    assert validated.model_dump(mode="json") == response.json()
+
+
+def test_task_export_response_matches_documented_payload(client):
+    from app.schemas.responses import ApiResponse, TaskExportResult
+    from tests.conftest import auth_headers
+
+    headers = auth_headers(client, "export-contract", "export-contract@example.com")
+    client.post("/api/v1/tasks", headers=headers, json={"title": "export"})
+    response = client.get("/api/v1/tasks/export", headers=headers)
+    assert response.status_code == 200
+    validated = ApiResponse[TaskExportResult].model_validate(response.json())
+    assert len(validated.data.tasks) == 1
+
+
+def test_task_export_documents_the_csv_representation():
+    operation = create_app().openapi()["paths"]["/api/v1/tasks/export"]["get"]
+    content = operation["responses"]["200"]["content"]
+    assert content["text/csv"]["schema"] == {"type": "string"}
+
+
+def test_validation_error_schema_matches_unified_error_response(client):
+    from app.schemas.responses import ApiError
+
+    response = client.post("/api/v1/auth/login", json={})
+    assert response.status_code == 422
+    assert ApiError.model_validate(response.json()).data is None
+    schema = create_app().openapi()["paths"]["/api/v1/auth/login"]["post"]["responses"]["422"]
+    assert schema["content"]["application/json"]["schema"]["$ref"].endswith("/ApiError")

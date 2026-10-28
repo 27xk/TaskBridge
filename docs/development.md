@@ -107,6 +107,15 @@ Web/PWA 支持登录、注册、任务新建、编辑、完成、删除、恢复
 
 ## 开发者常用验证命令
 
+仓库与跨端检查从根目录运行；Electron 构建和原生模块工具在 `desktop/` 执行。目录职责与依赖方向参见 [架构说明](./architecture.md)。
+
+```powershell
+npm run check:security-config
+npm run check:contract-drift
+npm run check:user-experience
+npm run test:web
+```
+
 ```powershell
 # 首次拉取或依赖缺失时，先补齐本地验证依赖
 .\scripts\bootstrap-local.ps1

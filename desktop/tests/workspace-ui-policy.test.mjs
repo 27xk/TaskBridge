@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 import { loadTsModule } from "./helpers/load-ts-module.mjs";
 
 const { deriveWorkspaceStatus } = await loadTsModule(
-  "shared/workspace-ui-policy.ts",
+  "common/workspace-ui-policy.ts",
 );
 
 const zeroDiagnostics = {

@@ -12,8 +12,8 @@ const {
   calendarWeekBounds,
   isValidCalendarDate,
   matchesTaskView,
-} = await loadTsModule("shared/workspace-view-state.ts");
-const { todayLocalDate } = await loadTsModule("shared/quick-add-parser.ts");
+} = await loadTsModule("common/workspace-view-state.ts");
+const { todayLocalDate } = await loadTsModule("common/quick-add-parser.ts");
 
 function memoryStorage() {
   const data = new Map();

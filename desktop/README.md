@@ -35,6 +35,19 @@
 
 下面内容面向本地开发、构建和发布。应用使用 Vue 3、TypeScript、Pinia、SQLite 和 electron-builder。运行时配置使用轻量 JSON 存储，避免引入额外桌面端配置依赖。
 
+## 源码目录
+
+| 目录 | 职责 |
+| --- | --- |
+| `main/` | Electron 主进程、SQLite、Token、IPC 和系统集成 |
+| `preload/` | `window.taskBridge` 沙箱桥接入口 |
+| `renderer/` | Vue 界面、Pinia 状态和桥接调用 |
+| `common/` | 进程共用类型和纯策略，不依赖界面或 Electron |
+| `scripts/` | 桌面构建、原生依赖和桌面专用检查 |
+| `tests/` | 业务行为、桥接和窗口交互回归 |
+
+运行与打包统一使用 `electron.vite.config.ts`，输出仍为 `out/main/`、`out/preload/`、`out/renderer/`。跨端与仓库检查放在根 `scripts/checks/`，可从根目录运行同名 npm 命令；本目录保留兼容代理。完整边界见 [架构说明](../docs/architecture.md)。
+
 ## 环境要求
 
 - Windows 10/11
@@ -57,6 +70,8 @@ npm run check:auth-session-config
 npm run check:backend-observability
 npm run check:desktop-endpoint-config
 npm run check:package-size-config
+npm run check:data-budget
+npm run check:artifact-budget
 npm run test:unit
 npm run check:quick-add-parser
 npm run check:task-order
@@ -191,6 +206,24 @@ npm run test:unit
 npm run typecheck
 npm run build
 ```
+
+### 数据与产物预算
+
+主窗口和悬浮窗列表只读取 `TaskListSummary`：正文预览最多 240 个字符，清单只包含完成计数，冲突只包含状态和变更版本。打开编辑器或展开冲突比较时才读取完整详情；保存、模板实例化、撤销、备份和同步仍使用完整记录。全文搜索在主进程逐行匹配正文，仅向界面返回任务 ID。
+
+`npm run check:data-budget` 使用临时 SQLite 工作区写入 10,000 条任务，每条含 16,384 个字符正文、50 项清单，其中 10% 含双份冲突快照；验证快照、增量、全文搜索和完整详情读取。预算为摘要总载荷不超过 12 MiB、单页不超过 1.25 MiB、较完整记录减少至少 90%、单任务增量不超过 2 KiB。堆增量和读取时间仅记录，避免不同机器速度影响 CI；没有启动客户端窗口或连接真实服务。
+
+```powershell
+npm run build
+npm run check:artifact-budget
+node scripts/check-desktop-data-budget.mjs --output tmp/desktop-data-budget.json
+node scripts/check-desktop-artifact-budget.mjs --unpacked-dir tmp/artifact-budget-package/win-unpacked
+node scripts/check-desktop-artifact-budget.mjs --installer release/TaskBridge-0.2.0-Setup.exe
+```
+
+产物检查会实际读取构建文件，缺失时直接失败。默认预算为主进程 160 KiB、preload 16 KiB、renderer JavaScript 600 KiB、CSS 200 KiB、`out/` 总量 1 MiB；指定展开包或安装器后，还检查 `app.asar` 8 MiB、展开目录 400 MiB、安装器 140 MiB。安装器路径应与本次构建版本一致。
+
+同步结束后，客户端最多每分钟提交一次健康摘要，内容为设备 ID、排队/冲突数量、最老排队时长和最近成功同步时长。SQLite 使用聚合查询，报告失败不会改变同步结果；未登录时不读取或发送报告。
 
 ## 日常录入与任务整理
 

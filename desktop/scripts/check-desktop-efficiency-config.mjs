@@ -10,12 +10,12 @@ import {
 const root = workspaceRoot(import.meta.url);
 
 const [stateSource, appSource, dbSource, mainSource, settingsViewSource, syncRecoveryPanelSource] = await Promise.all([
-  readFile(resolve(root, "electron/state.ts"), "utf8"),
-  readFile(resolve(root, "src/App.vue"), "utf8"),
-  readFile(resolve(root, "electron/db.ts"), "utf8"),
-  readFile(resolve(root, "electron/main.ts"), "utf8"),
-  readFile(resolve(root, "src/views/SettingsView.vue"), "utf8"),
-  readFile(resolve(root, "src/components/settings/SettingsSyncRecoveryPanel.vue"), "utf8"),
+  readFile(resolve(root, "main/state.ts"), "utf8"),
+  readFile(resolve(root, "renderer/App.vue"), "utf8"),
+  readFile(resolve(root, "main/db.ts"), "utf8"),
+  readFile(resolve(root, "main/main.ts"), "utf8"),
+  readFile(resolve(root, "renderer/views/SettingsView.vue"), "utf8"),
+  readFile(resolve(root, "renderer/components/settings/SettingsSyncRecoveryPanel.vue"), "utf8"),
 ]);
 
 assert.match(

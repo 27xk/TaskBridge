@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadElectronModule } from "./helpers/mock-electron-windows.mjs";
 
-const { sortTasksBySchedule, groupTasksByCategory } = loadElectronModule("src/utils/task-view-order.ts");
+const { sortTasksBySchedule, groupTasksByCategory } = loadElectronModule("renderer/utils/task-view-order.ts");
 const task = (id, fields = {}) => ({ id, dueTime: null, plannedDate: null, createdAt: "2026-10-01T00:00:00Z", tag: null, ...fields });
 
 test("planned days and deadlines are sorted on a shared timeline", () => {

@@ -6,6 +6,8 @@ import com.taskbridge.app.data.remote.dto.ChecklistItemDto
 import com.taskbridge.app.data.remote.dto.SyncChangeDto
 import com.taskbridge.app.data.remote.dto.TaskDto
 import com.taskbridge.app.domain.model.SyncStatus
+import com.taskbridge.app.domain.model.Task
+import com.taskbridge.app.domain.model.TaskStatus
 import com.google.gson.Gson
 
 private val mapperGson = Gson()
@@ -86,4 +88,37 @@ private fun String?.toChecklistDtos(): List<ChecklistItemDto>? {
     return runCatching {
         mapperGson.fromJson(this, Array<ChecklistItemDto>::class.java).toList()
     }.getOrDefault(emptyList())
+}
+
+fun TaskEntity.toDomain(): Task {
+    return Task(
+        localId = localId,
+        serverId = serverId,
+        title = title,
+        content = content,
+        status = TaskStatus.fromWire(status),
+        priority = priority,
+        tag = tag,
+        project = project,
+        listType = listType,
+        dueTime = dueTime,
+        remindTime = remindTime,
+        repeatRule = repeatRule,
+        plannedDate = plannedDate,
+        completedAt = completedAt,
+        snoozedUntil = snoozedUntil,
+        parentServerId = parentServerId,
+        checklistJson = checklistJson,
+        isTemplate = isTemplate,
+        templateName = templateName,
+        sortOrder = sortOrder,
+        version = version,
+        isDeleted = isDeleted,
+        syncStatus = SyncStatus.fromWire(syncStatus),
+        conflictServerJson = conflictServerJson,
+        conflictLocalJson = conflictLocalJson,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        lastSyncAt = lastSyncAt,
+    )
 }

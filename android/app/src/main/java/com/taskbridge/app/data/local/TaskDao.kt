@@ -225,6 +225,15 @@ interface TaskDao {
 
 @Dao
 interface SyncQueueDao {
+    @Query(
+        """
+        SELECT COUNT(*) AS pendingCount, MIN(createdAt) AS oldestCreatedAt,
+          (SELECT COUNT(*) FROM tasks WHERE workspaceId = :workspaceId AND syncStatus = 'conflict') AS conflictCount
+        FROM sync_queue WHERE workspaceId = :workspaceId
+        """,
+    )
+    suspend fun syncHealthSnapshot(workspaceId: String): SyncHealthSnapshot
+
     @Query("SELECT * FROM sync_queue WHERE workspaceId = :workspaceId AND localId = :localId ORDER BY id DESC LIMIT 1")
     suspend fun getLatestForTask(workspaceId: String, localId: String): SyncQueueEntity?
 

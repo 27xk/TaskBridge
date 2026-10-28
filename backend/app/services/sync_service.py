@@ -1,11 +1,16 @@
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
+from time import perf_counter
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
+from app.core.observability import record_sync_operation
+from app.core.task_clock import advance_task_clock
 from app.models.sync_log import SyncLog
 from app.models.task import Task
 from app.models.user import User
@@ -19,13 +24,9 @@ from app.schemas.sync import (
     SyncPushResponse,
 )
 from app.schemas.task import TaskRead
+from app.services.sync_log_service import append_sync_log
+from app.services.tasks import recurrence
 from app.utils.time import normalize_to_utc_naive, utc_iso, utc_now
-
-
-def shift_repeat_task(task: Task) -> Task | None:
-    from app.services.task_service import _build_repeat_occurrence
-
-    return _build_repeat_occurrence(task, task.user_id)
 
 TASK_SYNC_FIELDS = (
     "title",
@@ -73,37 +74,6 @@ class SyncPushContext:
     repeat_child_parent_ids: set[int]
 
 
-def append_sync_log(
-    db: Session,
-    *,
-    user_id: int,
-    task_id: int | None,
-    operation: str | None = None,
-    action: str | None = None,
-    version: int,
-    device_id: str | None = None,
-    local_id: str | None = None,
-    server_id: int | None = None,
-    result: str = "applied",
-    client_version: int | None = None,
-    payload: dict | None = None,
-) -> SyncLog:
-    sync_log = SyncLog(
-        user_id=user_id,
-        task_id=task_id,
-        device_id=device_id,
-        local_id=local_id,
-        server_id=server_id,
-        action=action or operation or "unknown",
-        result=result,
-        client_version=client_version,
-        version=version,
-        payload=payload,
-    )
-    db.add(sync_log)
-    return sync_log
-
-
 def pull_changes(
     db: Session,
     current_user: User,
@@ -113,8 +83,41 @@ def pull_changes(
     cursor_updated_at: datetime | None = None,
     cursor_id: int | None = None,
 ) -> SyncPullResponse:
+    started = perf_counter()
+    try:
+        response = _pull_changes_once(
+            db,
+            current_user,
+            last_sync_time,
+            limit=limit,
+            cursor_updated_at=cursor_updated_at,
+            cursor_id=cursor_id,
+        )
+    except Exception:
+        db.rollback()
+        record_sync_operation("pull", "error", (perf_counter() - started) * 1000)
+        raise
+    record_sync_operation(
+        "pull",
+        "success",
+        (perf_counter() - started) * 1000,
+        {"changed": len(response.changed_tasks), "deleted": len(response.deleted_tasks)},
+    )
+    return response
+
+
+def _pull_changes_once(
+    db: Session,
+    current_user: User,
+    last_sync_time: datetime,
+    *,
+    limit: int,
+    cursor_updated_at: datetime | None,
+    cursor_id: int | None,
+) -> SyncPullResponse:
     since = normalize_to_utc_naive(last_sync_time)
     cursor = normalize_to_utc_naive(cursor_updated_at) if cursor_updated_at else None
+    watermark = advance_task_clock(db, current_user.id)
     page = list_changed_tasks_page(
         db,
         user_id=current_user.id,
@@ -134,14 +137,16 @@ def pull_changes(
 
     changed_tasks = [task for task in visible_page if not task.is_deleted]
     deleted_tasks = [task for task in visible_page if task.is_deleted]
-    return SyncPullResponse(
+    response = SyncPullResponse(
         changed_tasks=[TaskRead.model_validate(task) for task in changed_tasks],
         deleted_tasks=[TaskRead.model_validate(task) for task in deleted_tasks],
-        server_time=utc_iso(),
+        server_time=utc_iso(watermark),
         has_more=has_more,
         next_cursor_updated_at=next_cursor_updated_at,
         next_cursor_id=next_cursor_id,
     )
+    db.commit()
+    return response
 
 
 def push_changes(
@@ -150,6 +155,57 @@ def push_changes(
     payload: SyncPushRequest,
     *,
     retry_on_idempotency_conflict: bool = True,
+) -> tuple[SyncPushResponse, list[SyncNotification]]:
+    started = perf_counter()
+    try:
+        response, notifications = _push_changes_with_retry(
+            db,
+            current_user,
+            payload,
+            retry_on_idempotency_conflict=retry_on_idempotency_conflict,
+        )
+    except Exception:
+        record_sync_operation("push", "error", (perf_counter() - started) * 1000)
+        raise
+    record_sync_operation(
+        "push",
+        "success",
+        (perf_counter() - started) * 1000,
+        dict(Counter(result.status for result in response.results)),
+    )
+    return response, notifications
+
+
+def _push_changes_with_retry(
+    db: Session,
+    current_user: User,
+    payload: SyncPushRequest,
+    *,
+    retry_on_idempotency_conflict: bool,
+) -> tuple[SyncPushResponse, list[SyncNotification]]:
+    previous_actor = db.info.get("actor_device_id")
+    db.info["actor_device_id"] = payload.device_id
+    try:
+        return _push_changes_once(db, current_user, payload)
+    except (StaleDataError, IntegrityError) as exc:
+        retryable = isinstance(exc, StaleDataError) or _is_sync_log_idempotency_integrity_error(exc)
+        db.rollback()
+        if not retry_on_idempotency_conflict or not retryable:
+            raise
+        return _push_changes_with_retry(
+            db, current_user, payload, retry_on_idempotency_conflict=False
+        )
+    finally:
+        if previous_actor is None:
+            db.info.pop("actor_device_id", None)
+        else:
+            db.info["actor_device_id"] = previous_actor
+
+
+def _push_changes_once(
+    db: Session,
+    current_user: User,
+    payload: SyncPushRequest,
 ) -> tuple[SyncPushResponse, list[SyncNotification]]:
     results: list[SyncChangeResult] = []
     notifications: list[SyncNotification] = []
@@ -170,18 +226,7 @@ def push_changes(
         if notification is not None:
             notifications.append(notification)
 
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        if not retry_on_idempotency_conflict or not _is_sync_log_idempotency_integrity_error(exc):
-            raise
-        db.rollback()
-        return push_changes(
-            db,
-            current_user,
-            payload,
-            retry_on_idempotency_conflict=False,
-        )
+    db.commit()
     return SyncPushResponse(results=results, server_time=server_time), notifications
 
 
@@ -192,7 +237,9 @@ def _is_sync_log_idempotency_integrity_error(exc: IntegrityError) -> bool:
     message = " ".join(message_parts).lower()
     if SYNC_LOG_IDEMPOTENCY_CONSTRAINT in message:
         return True
-    return "sync_logs" in message and all(column in message for column in SYNC_LOG_IDEMPOTENCY_COLUMNS)
+    return "sync_logs" in message and all(
+        column in message for column in SYNC_LOG_IDEMPOTENCY_COLUMNS
+    )
 
 
 def _can_merge_stale_update(db: Session, user_id: int, task: Task, change: SyncChange) -> bool:
@@ -201,7 +248,9 @@ def _can_merge_stale_update(db: Session, user_id: int, task: Task, change: SyncC
     changed_fields = set(change.model_fields_set).intersection(TASK_SYNC_FIELDS)
     if not changed_fields:
         return True
-    base_payload = _load_task_version_payload(db, user_id=user_id, task_id=task.id, version=change.version)
+    base_payload = _load_task_version_payload(
+        db, user_id=user_id, task_id=task.id, version=change.version
+    )
     if base_payload is None:
         return False
     current_payload = _task_payload(task)
@@ -243,7 +292,9 @@ def _prepare_push_context(
     applied_logs = _load_applied_logs(db, user_id, device_id, changes)
     task_ids = {change.server_id for change in changes if change.server_id is not None}
     task_ids.update(log.task_id for log in applied_logs if log.task_id is not None)
-    task_ids.update(change.parent_task_id for change in changes if change.parent_task_id is not None)
+    task_ids.update(
+        change.parent_task_id for change in changes if change.parent_task_id is not None
+    )
 
     tasks_by_id: dict[int, Task] = {}
     if task_ids:
@@ -272,11 +323,7 @@ def _prepare_push_context(
             ),
         )
 
-    owned_parent_ids = {
-        task.id
-        for task in tasks_by_id.values()
-        if not task.is_deleted
-    }
+    owned_parent_ids = {task.id for task in tasks_by_id.values() if not task.is_deleted}
     return SyncPushContext(
         applied_logs=applied_logs,
         tasks_by_id=tasks_by_id,
@@ -352,7 +399,9 @@ def _apply_change(
             None,
         )
 
-    if change.version < task.version and not _can_merge_stale_update(db, current_user.id, task, change):
+    if change.version < task.version and not _can_merge_stale_update(
+        db, current_user.id, task, change
+    ):
         return (
             SyncChangeResult(
                 local_id=change.local_id,
@@ -366,7 +415,9 @@ def _apply_change(
             None,
         )
 
-    if "parent_task_id" in change.model_fields_set and not _is_owned_parent_task(context, change.parent_task_id, child_task_id=task.id):
+    if "parent_task_id" in change.model_fields_set and not _is_owned_parent_task(
+        context, change.parent_task_id, child_task_id=task.id
+    ):
         return (
             SyncChangeResult(
                 local_id=change.local_id,
@@ -396,6 +447,9 @@ def _apply_change(
     task.version += 1
     task.updated_at = server_now
     db.add(task)
+    db.info.setdefault("task_notification_actions", {})[id(task)] = NOTIFICATION_ACTIONS[
+        change.action
+    ]
     db.flush()
     _append_success_log(db, current_user.id, device_id, change, task, context)
     if change.action == "complete":
@@ -492,17 +546,17 @@ def _change_matches_logged_payload(change: SyncChange, payload: dict[str, Any] |
     return True
 
 
-def _create_repeat_from_sync(db: Session, user_id: int, task: Task, context: SyncPushContext) -> Task | None:
+def _create_repeat_from_sync(
+    db: Session, user_id: int, task: Task, context: SyncPushContext
+) -> Task | None:
     if not task.repeat_rule:
         return None
     if task.id in context.repeat_child_parent_ids:
         return None
-    from app.services.task_service import _find_existing_repeat_occurrence
-
-    if _find_existing_repeat_occurrence(db, user_id, task) is not None:
+    if recurrence.find_existing_repeat_occurrence(db, user_id, task) is not None:
         context.repeat_child_parent_ids.add(task.id)
         return None
-    next_task = shift_repeat_task(task)
+    next_task = recurrence.build_repeat_occurrence(task, user_id)
     if next_task is None:
         return None
     db.add(next_task)
@@ -567,7 +621,9 @@ def _create_from_change(
         repeat_rule=change.repeat_rule,
         planned_date=_normalize_date(change.planned_date),
         completed_at=normalize_to_utc_naive(change.completed_at) if change.completed_at else None,
-        snoozed_until=normalize_to_utc_naive(change.snoozed_until) if change.snoozed_until else None,
+        snoozed_until=normalize_to_utc_naive(change.snoozed_until)
+        if change.snoozed_until
+        else None,
         parent_task_id=change.parent_task_id,
         checklist=_normalize_checklist(change.checklist),
         is_template=change.is_template or False,

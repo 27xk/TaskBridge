@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { normalizeLineEndings } from "../scripts/script-helpers.mjs";
+import { extractBalancedBlock, normalizeLineEndings } from "../scripts/script-helpers.mjs";
 
 const desktopRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const repoRoot = resolve(desktopRoot, "..");
@@ -15,9 +15,9 @@ async function source(path) {
 
 test("desktop navigation protects dirty task editors", async () => {
   const [app, todayView, taskView] = await Promise.all([
-    source("desktop/src/App.vue"),
-    source("desktop/src/views/TodayView.vue"),
-    source("desktop/src/views/TaskView.vue"),
+    source("desktop/renderer/App.vue"),
+    source("desktop/renderer/views/TodayView.vue"),
+    source("desktop/renderer/views/TaskView.vue"),
   ]);
 
   assert.match(app, /const editorDirty = ref\(false\)/);
@@ -31,8 +31,8 @@ test("desktop navigation protects dirty task editors", async () => {
 
 test("desktop login preserves custom API and websocket endpoints across retries", async () => {
   const [loginView, connectionEndpoints] = await Promise.all([
-    source("desktop/src/views/LoginView.vue"),
-    source("desktop/shared/connection-endpoints.ts"),
+    source("desktop/renderer/views/LoginView.vue"),
+    source("desktop/common/connection-endpoints.ts"),
   ]);
 
   assert.match(connectionEndpoints, /export function hasCustomConnectionEndpoints/);
@@ -43,8 +43,8 @@ test("desktop login preserves custom API and websocket endpoints across retries"
 
 test("desktop keeps valid stored endpoints after logout and routes empty connections to login", async () => {
   const [electronState, authStore] = await Promise.all([
-    source("desktop/electron/state.ts"),
-    source("desktop/src/stores/auth.ts"),
+    source("desktop/main/state.ts"),
+    source("desktop/renderer/stores/auth.ts"),
   ]);
 
   assert.doesNotMatch(electronState, /hasStoredSessionCredentials/);
@@ -57,9 +57,9 @@ test("desktop keeps valid stored endpoints after logout and routes empty connect
 
 test("desktop settings connection drafts participate in navigation protection", async () => {
   const [app, settingsView, i18n] = await Promise.all([
-    source("desktop/src/App.vue"),
-    source("desktop/src/views/SettingsView.vue"),
-    source("desktop/src/i18n.ts"),
+    source("desktop/renderer/App.vue"),
+    source("desktop/renderer/views/SettingsView.vue"),
+    source("desktop/renderer/i18n.ts"),
   ]);
 
   assert.match(app, /const settingsConnectionDirty = ref\(false\)/);
@@ -73,9 +73,9 @@ test("desktop settings connection drafts participate in navigation protection", 
 
 test("desktop task drawers share adaptive modal and docked keyboard behavior", async () => {
   const [drawer, taskView, todayView] = await Promise.all([
-    source("desktop/src/components/EditorDrawer.vue"),
-    source("desktop/src/views/TaskView.vue"),
-    source("desktop/src/views/TodayView.vue"),
+    source("desktop/renderer/components/EditorDrawer.vue"),
+    source("desktop/renderer/views/TaskView.vue"),
+    source("desktop/renderer/views/TodayView.vue"),
   ]);
 
   assert.match(drawer, /:role="docked \? 'complementary' : 'dialog'"/);
@@ -92,8 +92,8 @@ test("desktop task drawers share adaptive modal and docked keyboard behavior", a
 
 test("desktop settings requests select a persistent category without anchor scrolling", async () => {
   const [settingsView, metadataPanel] = await Promise.all([
-    source("desktop/src/views/SettingsView.vue"),
-    source("desktop/src/components/settings/SettingsMetadataPanel.vue"),
+    source("desktop/renderer/views/SettingsView.vue"),
+    source("desktop/renderer/components/settings/SettingsMetadataPanel.vue"),
   ]);
 
   assert.match(settingsView, /const activeSettingsSection = ref<SettingsSectionId>\("account-display"\)/);
@@ -110,7 +110,7 @@ test("desktop settings requests select a persistent category without anchor scro
 });
 
 test("desktop auth mode buttons use button-group semantics", async () => {
-  const loginView = await source("desktop/src/views/LoginView.vue");
+  const loginView = await source("desktop/renderer/views/LoginView.vue");
 
   assert.match(loginView, /class="segment-control" role="group"/);
   assert.match(loginView, /:aria-pressed="mode === 'login'"/);
@@ -119,8 +119,8 @@ test("desktop auth mode buttons use button-group semantics", async () => {
 
 test("development desktop fields accept address input while Web uses its deployed origin", async () => {
   const [desktopLogin, desktopConnection, webHtml] = await Promise.all([
-    source("desktop/src/views/LoginView.vue"),
-    source("desktop/src/components/settings/SettingsConnectionPanel.vue"),
+    source("desktop/renderer/views/LoginView.vue"),
+    source("desktop/renderer/components/settings/SettingsConnectionPanel.vue"),
     source("web/index.html"),
   ]);
 
@@ -131,10 +131,10 @@ test("development desktop fields accept address input while Web uses its deploye
 
 test("desktop bootstrap leaves an unconfigured server visibly empty", async () => {
   const [electronState, electronVite, desktopLogin, desktopSettings] = await Promise.all([
-    source("desktop/electron/state.ts"),
+    source("desktop/main/state.ts"),
     source("desktop/electron.vite.config.ts"),
-    source("desktop/src/views/LoginView.vue"),
-    source("desktop/src/views/SettingsView.vue"),
+    source("desktop/renderer/views/LoginView.vue"),
+    source("desktop/renderer/views/SettingsView.vue"),
   ]);
 
   assert.match(electronState, /const FALLBACK_BASE_URL = ""/);
@@ -147,7 +147,7 @@ test("desktop bootstrap leaves an unconfigured server visibly empty", async () =
 
 test("login forms put sign-in controls before optional setup guidance", async () => {
   const [desktopLogin, webHtml, androidLogin] = await Promise.all([
-    source("desktop/src/views/LoginView.vue"),
+    source("desktop/renderer/views/LoginView.vue"),
     source("web/index.html"),
     source("android/app/src/main/java/com/taskbridge/app/ui/login/LoginScreen.kt"),
   ]);
@@ -183,7 +183,7 @@ test("web registration remains actionable until the server explicitly disables i
 test("responsive task workspaces place tasks before secondary diagnostics", async () => {
   const [webStyles, desktopToday, androidTaskList] = await Promise.all([
     source("web/styles.css"),
-    source("desktop/src/views/TodayView.vue"),
+    source("desktop/renderer/views/TodayView.vue"),
     source("android/app/src/main/java/com/taskbridge/app/ui/task/TaskListScreen.kt"),
   ]);
 
@@ -198,7 +198,7 @@ test("responsive task workspaces place tasks before secondary diagnostics", asyn
   assert.doesNotMatch(responsiveWorkspaceCss, /\.(?:main-panel|sidebar)\s*\{[^}]*\border\s*:/);
   assert.doesNotMatch(desktopToday, /class="today-overview"/);
   assert.doesNotMatch(desktopToday, /TaskSyncHealthBar/);
-  assert.match(await source("desktop/src/App.vue"), /<WorkspaceStatusBanner[\s\S]{0,160}v-if="auth\.isAuthenticated && workspaceStatus\.banner !== 'none'"/);
+  assert.match(await source("desktop/renderer/App.vue"), /<WorkspaceStatusBanner[\s\S]{0,160}v-if="auth\.isAuthenticated && workspaceStatus\.banner !== 'none'"/);
   assert.match(androidTaskList, /if \(!localWorkspaceMode && syncHealth\.needsAttention\)[\s\S]{0,180}TaskListSyncHealthBar/);
 });
 
@@ -209,9 +209,12 @@ test("Android top-level navigation, task actions and dropdowns use platform conv
     source("android/app/src/main/java/com/taskbridge/app/ui/components/AppUi.kt"),
   ]);
 
-  assert.match(mainActivity, /fun NavHostController\.navigateTopLevel/);
-  assert.match(mainActivity, /popUpTo\(Routes\.Today\)/);
-  assert.match(mainActivity, /launchSingleTop = true/);
+  const topLevelNavigation = extractBalancedBlock(mainActivity, "private fun NavHostController.navigateTopLevel(");
+  assert.match(topLevelNavigation, /while \(currentDestination\?\.id != destination\.id && currentDestination\?\.route != Routes\.Today\)/);
+  assert.match(topLevelNavigation, /popBackStack\(currentId, inclusive = true, saveState = true\)/);
+  assert.match(topLevelNavigation, /if \(currentDestination\?\.id == destination\.id\) return/);
+  assert.match(topLevelNavigation, /launchSingleTop = true/);
+  assert.match(topLevelNavigation, /restoreState = true/);
   assert.doesNotMatch(mainActivity, /onTodayClick = \{ navController\.navigate\(Routes\.Today\) \}/);
   assert.match(taskDetail, /TextButton\([\s\S]{0,220}pendingTaskDelete = true/);
   assert.match(taskDetail, /color = MaterialTheme\.colorScheme\.error/);

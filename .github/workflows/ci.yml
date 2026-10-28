@@ -58,6 +58,9 @@ jobs:
       - name: Verify OpenAPI contract
         run: python -m tools.openapi_contract --check
 
+      - name: Verify generated client wire types
+        run: python -m tools.client_contract --check
+
       - name: Lint backend
         run: python -m ruff check app tests tools
 
@@ -153,6 +156,12 @@ jobs:
 
       - name: Verify version source
         run: node ..\scripts\check-version-source.mjs
+
+      - name: Verify architecture boundaries
+        run: npm --prefix .. run check:architecture
+
+      - name: Test repository tooling
+        run: npm --prefix .. run test:tooling
 
       - name: Verify desktop lockfile registry metadata
         run: npm run check:lockfile-registry
@@ -297,8 +306,14 @@ jobs:
       - name: Smoke test Web client shell
         run: node ..\scripts\smoke-web-client.mjs
 
+      - name: Verify desktop data budget
+        run: npm run check:data-budget
+
       - name: Build desktop app
         run: npm run build
+
+      - name: Verify built artifact size budget
+        run: npm run check:artifact-budget
 
   android:
     name: Android build

@@ -18,7 +18,7 @@ export function createSessionHarness(options = {}) {
   const { context, run, state } = harness;
   const databases = new Map();
   const requests = [];
-  const effects = { busy: [], renders: [], drafts: [], writes: [], statuses: [] };
+  const effects = { busy: [], renders: [], drafts: [], writes: [], reads: [], statuses: [] };
   const controls = { cookieUserId: 1, respond: null, read: null };
   let createdId = 1000;
   const database = (name) => {
@@ -33,14 +33,28 @@ export function createSessionHarness(options = {}) {
       close() {},
       transaction() {
         let pending = 0;
+        let aborted = false;
+        const undo = [];
         const tx = {
+          abort() {
+            aborted = true;
+            for (const restore of undo.reverse()) restore();
+            queueMicrotask(() => tx.onabort?.());
+          },
           objectStore(storeName) {
             const store = stores.get(storeName);
+            const remember = (key) => {
+              const existed = store.has(key);
+              const value = store.get(key);
+              undo.push(() => { if (existed) store.set(key, value); else store.delete(key); });
+            };
             const makeRequest = (method, result) => {
+              effects.reads.push({ name, storeName, method });
               const request = {};
               pending += 1;
               const response = controls.read?.({ name, storeName, method, result });
               Promise.resolve(response === undefined ? result : response).then((value) => {
+                if (aborted) return;
                 request.result = structuredClone(value);
                 request.onsuccess?.();
                 pending -= 1;
@@ -54,21 +68,60 @@ export function createSessionHarness(options = {}) {
               return request;
             };
             const keyFor = (record) => record.id ?? record.offline_queue_id ?? record.key;
+            const openCursor = (indexName = null, key = undefined) => {
+                effects.reads.push({ name, storeName, method: "openCursor", index: indexName, key });
+                const entries = [...store.entries()].filter(([, record]) => !indexName || record[indexName] === key);
+                const request = {};
+                pending += 1;
+                let offset = 0;
+                const advance = () => queueMicrotask(() => {
+                  if (aborted) return;
+                  const entry = entries[offset++];
+                  if (entry) effects.reads.push({ name, storeName, method: "cursorValue", index: indexName });
+                  request.result = entry ? {
+                    value: structuredClone(entry[1]),
+                    continue: advance,
+                    update: (record) => {
+                      remember(entry[0]);
+                      effects.writes.push({ name, storeName, method: "put", record: structuredClone(record) });
+                      store.set(entry[0], structuredClone(record));
+                    },
+                    delete: () => { remember(entry[0]); effects.writes.push({ name, storeName, method: "delete", key: entry[0] }); store.delete(entry[0]); },
+                  } : null;
+                  request.onsuccess?.();
+                  if (!entry) { pending -= 1; if (!pending) queueMicrotask(() => tx.oncomplete?.()); }
+                });
+                advance();
+                return request;
+              };
             return {
+              openCursor: () => openCursor(),
+              index: (indexName) => ({
+                openCursor: (key) => openCursor(indexName, key),
+                count: (key) => makeRequest("indexCount", [...store.values()].filter((record) => record[indexName] === key).length),
+                openKeyCursor: () => {
+                  const key = [...store.values()].map((record) => record[indexName]).filter((value) => value != null).sort()[0];
+                  return makeRequest("openKeyCursor", key === undefined ? null : { key });
+                },
+              }),
               getAll: () => makeRequest("getAll", [...store.values()]),
               get: (key) => makeRequest("get", store.get(key)),
               count: () => makeRequest("count", store.size),
               put(record) {
+                remember(keyFor(record));
                 effects.writes.push({ name, storeName, method: "put", record: structuredClone(record) });
                 store.set(keyFor(record), structuredClone(record));
                 return makeRequest("put", keyFor(record));
               },
               delete(key) {
+                remember(key);
                 effects.writes.push({ name, storeName, method: "delete", key });
                 store.delete(key);
                 return makeRequest("delete", undefined);
               },
               clear() {
+                const previous = new Map(store);
+                undo.push(() => { store.clear(); for (const [key, value] of previous) store.set(key, value); });
                 effects.writes.push({ name, storeName, method: "clear" });
                 store.clear();
                 return makeRequest("clear", undefined);

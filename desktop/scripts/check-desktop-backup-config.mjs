@@ -9,7 +9,7 @@ const [
   ipcSource,
   settingsViewSource,
   i18nSource,
-  envSource,
+  backupTypesSource,
   packageSource,
   localCheckSource,
   androidSettingsSource,
@@ -19,10 +19,10 @@ const [
   androidManifestSource,
   androidFilePathsSource,
 ] = await Promise.all([
-  readFile(resolve(desktopRoot, "electron/ipc.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/views/SettingsView.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "src/i18n.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/env.d.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "main/ipc.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/views/SettingsView.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/i18n.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "common/backup.ts"), "utf8"),
   readFile(resolve(desktopRoot, "package.json"), "utf8"),
   readFile(resolve(repoRoot, "scripts/check-local.ps1"), "utf8"),
   readFile(resolve(repoRoot, "android/app/src/main/java/com/taskbridge/app/ui/settings/SettingsScreen.kt"), "utf8"),
@@ -165,7 +165,7 @@ for (const key of [
   assert.match(i18nSource, new RegExp(escapeRegExp(`"${key}"`)), `i18n must include ${key}`);
 }
 
-assert.match(envSource, /BackupImportError/, "desktop env types must expose backup import error details");
+assert.match(backupTypesSource, /BackupImportError/, "common backup contract must expose import error details");
 assert.match(packageSource, /check:desktop-backup/, "package scripts must expose the desktop backup check");
 assert.match(localCheckSource, /check:desktop-backup/, "local verification must run the desktop backup check");
 

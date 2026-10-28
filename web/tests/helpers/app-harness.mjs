@@ -3,9 +3,12 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import * as core from "../../offline-core.js";
+import * as repository from "../../offline-repository.js";
+import * as taskList from "../../task-list.js";
+import * as sessionCoordinator from "../../session-coordinator.js";
 
 const appSource = (await readFile(new URL("../../app.js", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-const withoutImports = appSource.replace(/^import \{[\s\S]*?\} from "[^"\n]+";\n/, "");
+const withoutImports = appSource.replace(/^import \{[\s\S]*?\} from "[^"\n]+";\n/gm, "");
 const bootStart = withoutImports.indexOf("try {\n  boot();");
 const bootEnd = withoutImports.indexOf("function markAppReady()", bootStart);
 assert.ok(bootStart > 0 && bootEnd > bootStart, "app bootstrap must be isolated from function tests");
@@ -78,7 +81,16 @@ export function createAppHarness({ origin = "https://taskbridge.test/", stored =
       const candidate = String(value);
       this._value = this.tagName === "SELECT" && !this.children.some((child) => child.value === candidate) ? "" : candidate;
     }
-    appendChild(child) { child.parentElement = this; this.children.push(child); return child; }
+    appendChild(child) { return this.insertBefore(child, null); }
+    insertBefore(child, before) {
+      if (child.tagName === "#FRAGMENT") { [...child.children].forEach((item) => this.insertBefore(item, before)); return child; }
+      if (child.parentElement) child.parentElement.children = child.parentElement.children.filter((item) => item !== child);
+      const index = before ? this.children.indexOf(before) : -1;
+      this.children.splice(index < 0 ? this.children.length : index, 0, child);
+      child.parentElement = this;
+      child.isConnected = true;
+      return child;
+    }
     append(...children) { children.forEach((child) => this.appendChild(child)); }
     replaceChildren(...children) { this.children = []; this.append(...children); }
     setAttribute(name, value) { this.attributes.set(name, String(value)); }
@@ -145,6 +157,9 @@ export function createAppHarness({ origin = "https://taskbridge.test/", stored =
   for (const [key, value] of Object.entries(session)) sessionStorage.setItem(key, value);
   const context = vm.createContext({
     ...core,
+    ...repository,
+    ...taskList,
+    ...sessionCoordinator,
     console, URL, URLSearchParams, Date, Error, TypeError, Promise,
     crypto: { randomUUID },
     document,

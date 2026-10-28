@@ -18,7 +18,6 @@ import com.taskbridge.app.data.remote.dto.TaskDto
 import com.taskbridge.app.domain.model.SyncStatus
 import com.taskbridge.app.domain.model.Task
 import com.taskbridge.app.domain.model.TaskStatus
-import com.taskbridge.app.domain.model.toDomain
 import com.taskbridge.app.utils.ShanghaiTime
 import com.google.gson.Gson
 import com.google.gson.JsonObject

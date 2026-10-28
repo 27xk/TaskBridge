@@ -10,12 +10,17 @@ from app.models.user import User
 from app.schemas.auth import (
     LoginRequest,
     PasswordChangeRequest,
+    RefreshSessionRead,
     RefreshTokenRequest,
     RevokeOtherSessionsRequest,
+    RevokeSessionsResponse,
+    TokenPair,
     UserCreate,
     UserRead,
     WebSocketTicketRequest,
+    WebSocketTicketResponse,
 )
+from app.schemas.responses import ApiResponse, RegistrationStatus, SessionRevoked
 from app.services.auth_service import (
     change_password,
     create_websocket_ticket,
@@ -32,12 +37,12 @@ REFRESH_COOKIE_NAME = "taskbridge_refresh"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 
-@router.get("/registration")
+@router.get("/registration", response_model=ApiResponse[RegistrationStatus])
 def registration_status():
     return api_success({"registration_enabled": settings.registration_enabled})
 
 
-@router.post("/register")
+@router.post("/register", response_model=ApiResponse[TokenPair], status_code=201)
 def register(payload: UserCreate, request: Request, db: Session = Depends(get_db)):
     if not settings.registration_enabled:
         raise AppException(status_code=403, message="registration disabled")
@@ -52,7 +57,7 @@ def register(payload: UserCreate, request: Request, db: Session = Depends(get_db
     return _token_response(token_pair, request, status_code=201)
 
 
-@router.post("/login")
+@router.post("/login", response_model=ApiResponse[TokenPair])
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     check_rate_limit(
         request,
@@ -65,7 +70,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     return _token_response(token_pair, request)
 
 
-@router.post("/refresh")
+@router.post("/refresh", response_model=ApiResponse[TokenPair])
 def refresh(payload: RefreshTokenRequest, request: Request, db: Session = Depends(get_db)):
     check_rate_limit(
         request,
@@ -81,7 +86,7 @@ def refresh(payload: RefreshTokenRequest, request: Request, db: Session = Depend
     return _token_response(token_pair, request)
 
 
-@router.delete("/session")
+@router.delete("/session", response_model=ApiResponse[SessionRevoked])
 def logout_current_session(
     request: Request,
     db: Session = Depends(get_db),
@@ -99,12 +104,12 @@ def logout_current_session(
     return response
 
 
-@router.get("/me")
+@router.get("/me", response_model=ApiResponse[UserRead])
 def read_current_user(current_user: User = Depends(get_current_user)):
     return api_success(UserRead.model_validate(current_user))
 
 
-@router.put("/password")
+@router.put("/password", response_model=ApiResponse[RevokeSessionsResponse])
 def update_password(
     payload: PasswordChangeRequest,
     request: Request,
@@ -128,7 +133,7 @@ def update_password(
     )
 
 
-@router.get("/sessions")
+@router.get("/sessions", response_model=ApiResponse[list[RefreshSessionRead]])
 def read_sessions(
     db: Session = Depends(get_db),
     current_session: CurrentUserSession = Depends(get_current_user_session),
@@ -136,7 +141,7 @@ def read_sessions(
     return api_success(list_refresh_sessions(db, current_session.user))
 
 
-@router.post("/sessions/revoke-other-devices")
+@router.post("/sessions/revoke-other-devices", response_model=ApiResponse[RevokeSessionsResponse])
 def revoke_other_sessions(
     payload: RevokeOtherSessionsRequest,
     db: Session = Depends(get_db),
@@ -153,7 +158,7 @@ def revoke_other_sessions(
     )
 
 
-@router.delete("/sessions/{session_id}")
+@router.delete("/sessions/{session_id}", response_model=ApiResponse[RefreshSessionRead])
 def revoke_session(
     session_id: int,
     db: Session = Depends(get_db),
@@ -162,7 +167,7 @@ def revoke_session(
     return api_success(revoke_refresh_session(db, current_session.user, session_id))
 
 
-@router.post("/ws-ticket")
+@router.post("/ws-ticket", response_model=ApiResponse[WebSocketTicketResponse])
 def create_ws_ticket(
     payload: WebSocketTicketRequest,
     request: Request,

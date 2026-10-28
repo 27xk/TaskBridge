@@ -19,7 +19,7 @@ function harness(t) {
     observe(target) { this.observed.add(target); }
     disconnect() { this.observed.clear(); }
   }
-  const { useTaskVirtualList } = loadElectronModule("src/composables/useTaskVirtualList.ts", {
+  const { useTaskVirtualList } = loadElectronModule("renderer/composables/useTaskVirtualList.ts", {
     vue: { ...vue, onMounted: callback => mounted.push(callback), onBeforeUnmount: callback => unmounted.push(callback) },
     "@tanstack/vue-virtual": { ...tanstack, useVirtualizer: options => (virtualizer = tanstack.useVirtualizer(options)) },
   }, { window: browser, ResizeObserver });

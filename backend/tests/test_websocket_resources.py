@@ -132,6 +132,9 @@ def test_handler_failure_removes_online_socket(pooled_socket_client, monkeypatch
             assert len(manager.online_devices(1)) == 1
             socket.send_text("ping")
             assert handled.wait(2), "WebSocket handler did not receive the message"
+            # Consume the server exception before closing the client context;
+            # closing immediately can cancel the handler before it propagates.
+            socket.receive_json()
 
     assert manager.online_devices(1) == []
     assert engine.pool.checkedout() == 0

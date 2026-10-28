@@ -5,12 +5,13 @@ from app.api.deps import get_current_user, get_db
 from app.core.response import api_success
 from app.models.user import User
 from app.schemas.device import DeviceRead, DeviceRegister
+from app.schemas.responses import ApiResponse
 from app.services.device_service import delete_device, list_devices, register_device
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
 
-@router.post("/register")
+@router.post("/register", response_model=ApiResponse[DeviceRead], status_code=201)
 def register(
     payload: DeviceRegister,
     db: Session = Depends(get_db),
@@ -20,13 +21,13 @@ def register(
     return api_success(DeviceRead.model_validate(device), status_code=201)
 
 
-@router.get("")
+@router.get("", response_model=ApiResponse[list[DeviceRead]])
 def read_devices(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     devices = list_devices(db, current_user)
     return api_success([DeviceRead.model_validate(device) for device in devices])
 
 
-@router.delete("/{device_id}")
+@router.delete("/{device_id}", response_model=ApiResponse[DeviceRead])
 def remove_device(
     device_id: str,
     db: Session = Depends(get_db),

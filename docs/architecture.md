@@ -2,6 +2,52 @@
 
 TaskBridge 由后端服务、Web/PWA、Android App 和 Windows 桌面端组成。系统采用本地优先架构，客户端先写本地数据库，再通过同步队列与服务器保持一致。
 
+## 仓库目录
+
+各端保留独立构建入口，目录按运行环境和职责划分：
+
+```text
+TaskBridge/
+├── android/              # Kotlin / Compose Android 应用
+├── backend/              # FastAPI 服务、迁移与后端测试
+├── desktop/              # Electron / Vue 桌面应用
+│   ├── main/             # 主进程、SQLite、Token 和系统能力
+│   ├── preload/          # 向沙箱界面暴露受控桥接
+│   ├── renderer/         # Vue 界面、Pinia 和桥接调用
+│   ├── common/           # 主进程与界面共用的类型和纯策略
+│   ├── scripts/          # 桌面构建、原生依赖和专用检查
+│   └── tests/            # 桌面行为测试与集成回归
+├── web/                  # 独立原生 JavaScript PWA
+├── shared/               # OpenAPI 契约和跨端测试向量
+├── scripts/
+│   ├── checks/           # 仓库治理与跨端检查
+│   └── lib/              # 检查脚本共用工具
+├── deploy/               # Compose 部署、备份与恢复
+└── docs/                 # 使用、开发、架构与设计记录
+```
+
+`web/` 和桌面 renderer 是独立客户端。根 `shared/` 保存跨语言契约与测试数据；`desktop/common/` 仅服务桌面应用，不承诺跨端可复用。Web 和桌面的本地 ID、数据库及队列模型不同，不能直接共享持久化对象。
+
+仓库级检查从根目录运行 `npm run check:<名称>`；桌面目录保留对应命令代理以兼容现有 CI。Electron 原生依赖、构建、打包仍在 `desktop/` 执行。
+
+## 桌面进程边界
+
+```mermaid
+flowchart LR
+    Renderer[renderer: Vue / Pinia] --> Preload[preload: 受控桥接]
+    Preload --> Main[main: IPC / 系统能力 / SQLite]
+    Renderer -. 类型与纯策略 .-> Common[common]
+    Preload -. 类型 .-> Common
+    Main -. 类型与纯策略 .-> Common
+```
+
+- `main/` 负责数据库、Token、窗口、托盘、通知、更新和 IPC 校验。
+- `preload/` 只提供受控接口，不承载业务流程。
+- `renderer/` 管理界面、状态和用户交互，通过桥接访问本地能力。
+- `common/` 定义共享类型与不依赖 Vue、DOM、Electron 的策略，不反向导入 renderer 或主进程。
+
+构建入口由 `electron.vite.config.ts` 管理，输出固定为 `out/main/index.js`、`out/preload/index.cjs` 和 `out/renderer/index.html`；目录调整不改变安装包的加载约定。
+
 ## 产品边界
 
 - **后端服务：** 负责账号、设备、任务持久化、同步顺序、同步日志和 WebSocket 通知。
@@ -108,8 +154,16 @@ flowchart LR
 | `app/models` | SQLAlchemy ORM 模型 |
 | `app/schemas` | Pydantic 请求和响应模型 |
 | `app/services` | 认证、任务、设备、同步和 WebSocket 业务流程 |
+| `app/services/tasks` | 重复任务规则、后继生成与并发查重 |
+| `app/services/sync_log_service.py` | 任务操作与同步流程共用的日志写入 |
 | `app/repositories` | 复杂数据访问边界 |
 | `tests` | 后端自动化测试 |
+
+任务服务与同步服务共同依赖同步日志、重复任务模块，公共模块不反向导入协调服务。重复任务的父记录锁定、事务边界与幂等检查集中在一个实现中，避免 HTTP 创建和同步重放各自实现规则。
+
+Android 的依赖方向为 `ui → domain`、`data → domain`，应用装配负责组合仓库与平台能力。Room 实体到领域对象的映射位于 `data/repository/Mappers.kt`，领域模型不引用 Room 实体。
+
+新增代码应放入拥有该职责的模块。涉及多个客户端、发布或仓库策略的检查放在根 `scripts/checks/`；仅依赖 Electron 或桌面实现的工具留在 `desktop/scripts/`。
 
 ## 客户端职责
 

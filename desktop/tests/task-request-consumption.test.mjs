@@ -11,13 +11,13 @@ const vue = require("vue");
 const ts = require("typescript");
 const { parse, compileScript } = require("@vue/compiler-sfc");
 const desktopRoot = resolve(import.meta.dirname, "..");
-const viewPath = resolve(desktopRoot, "src/views/TaskView.vue");
+const viewPath = resolve(desktopRoot, "renderer/views/TaskView.vue");
 const { descriptor } = parse(readFileSync(viewPath, "utf8"), { filename: viewPath });
 const script = compileScript(descriptor, { id: "task-request-consumption" });
 const compiled = ts.transpileModule(script.content, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
 }).outputText;
-const { createWorkspaceViewState } = loadElectronModule("shared/workspace-view-state.ts");
+const { createWorkspaceViewState } = loadElectronModule("common/workspace-view-state.ts");
 
 function task(localId) {
   return {
@@ -40,13 +40,13 @@ async function flush() {
   await vue.nextTick();
 }
 
-async function harness(t, { initialRequest = null, quickAddSignal = 0, tasks = [task("a"), task("b")], load } = {}) {
+async function harness(t, { initialRequest = null, quickAddSignal = 0, tasks = [task("a"), task("b")], load, readDetail } = {}) {
   const props = vue.reactive({ openTaskRequest: initialRequest, quickAddSignal, searchSignal: 0 });
   const parent = {
     openTaskRequest: vue.toRef(props, "openTaskRequest"),
     quickAddSignal: vue.toRef(props, "quickAddSignal"),
   };
-  const consumption = await loadTsFunctions("src/App.vue", ["consumeTaskDetailRequest", "consumeQuickAddRequest"], parent);
+  const consumption = await loadTsFunctions("renderer/App.vue", ["consumeTaskDetailRequest", "consumeQuickAddRequest"], parent);
   const events = [];
   const errors = [];
   const beforeUnmount = [];
@@ -63,7 +63,8 @@ async function harness(t, { initialRequest = null, quickAddSignal = 0, tasks = [
     "../stores/task": { useTaskStore: () => taskStore },
     "../stores/workspace": { useWorkspaceStore: () => workspaceStore },
     "../stores/settings": { useSettingsStore: () => ({ language: "zh-CN", displayTimeZone: "Asia/Shanghai", t: (key) => key }) },
-    "../stores/capture": { useCaptureStore: () => ({ updateDraft() {} }) },
+    "../stores/capture": { useCaptureStore: () => ({ updateDraft() {}, snapshot: () => ({}) }) },
+    "../db/task.dao": { getTask: readDetail ?? (async (id) => taskStore.tasks.find(item => item.localId === id) ?? task(id)), searchTaskIds: async () => [] },
   };
   const module = { exports: {} };
   const resolveImport = (specifier) => {
@@ -106,6 +107,20 @@ test("a first floating task request opens the requested editor and is consumed e
   assert.equal(h.view.editingTask.value.localId, "a");
   assert.equal(h.props.openTaskRequest, null);
   assert.deepEqual(h.events.filter(([name]) => name === "taskRequestConsumed"), [["taskRequestConsumed", 1]]);
+});
+
+test("opening an index summary reads complete detail and discards a slower previous detail read", async (t) => {
+  const pending = deferred();
+  const detail = { ...task("b"), content: "Full body beyond the preview", checklistJson: '[{"id":"x","title":"Full checklist"}]' };
+  const h = await harness(t, { readDetail: async id => id === "a" ? pending.promise : detail });
+  const first = h.view.openEdit({ localId: "a", title: "summary a" });
+  await flush();
+  await h.view.openEdit({ localId: "b", title: "summary b" });
+  assert.equal(h.view.editingTask.value.content, detail.content);
+  assert.equal(h.view.editingTask.value.checklistJson, detail.checklistJson);
+  pending.resolve(task("a"));
+  await first;
+  assert.equal(h.view.editingTask.value.localId, "b");
 });
 
 test("closing and remounting all tasks cannot revive a consumed floating request", async (t) => {

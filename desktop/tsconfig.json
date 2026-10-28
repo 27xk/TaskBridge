@@ -15,11 +15,12 @@
     "types": ["node"]
   },
   "include": [
-    "electron/**/*.ts",
-    "shared/**/*.ts",
-    "src/**/*.ts",
-    "src/**/*.vue",
-    "src/env.d.ts",
+    "main/**/*.ts",
+    "preload/**/*.ts",
+    "common/**/*.ts",
+    "renderer/**/*.ts",
+    "renderer/**/*.vue",
+    "renderer/env.d.ts",
     "electron.vite.config.ts",
     "vite.config.ts"
   ]

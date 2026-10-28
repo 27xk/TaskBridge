@@ -5,7 +5,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import com.taskbridge.app.domain.model.TaskFilter
 import com.taskbridge.app.domain.model.TaskListPage
 import com.taskbridge.app.domain.model.TaskListQuery
-import com.taskbridge.app.domain.model.toDomain
+import com.taskbridge.app.data.repository.toDomain
 import com.taskbridge.app.utils.ShanghaiTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow

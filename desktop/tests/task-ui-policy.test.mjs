@@ -11,7 +11,7 @@ const {
   getTaskRepeatRuleLabel,
   shouldConfirmTaskAction,
 } = await loadTsModule(
-  "shared/task-ui-policy.ts",
+  "common/task-ui-policy.ts",
 );
 
 test("task delete actions require explicit user confirmation", () => {

@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import { effectScope, shallowRef } from "vue";
 import { compileTsModule } from "./helpers/load-ts-module.mjs";
 
-const module = await compileTsModule("src/composables/useDismissibleDetails.ts", { resolvePackagesFromProject: true });
+const module = await compileTsModule("renderer/composables/useDismissibleDetails.ts", { resolvePackagesFromProject: true });
 const { useDismissibleDetails } = await import(pathToFileURL(module.modulePath).href);
 after(module.cleanup);
 

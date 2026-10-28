@@ -4,6 +4,18 @@
 
 后端是云端权威数据源。Android 和 Windows 客户端都通过 HTTP API 与后端同步数据；WebSocket 只发送任务变化通知，不传输完整任务内容。
 
+## 模块职责
+
+`app/api/` 负责 HTTP / WebSocket 路由，`app/schemas/` 负责请求与响应，`app/models/` 负责持久化模型，`app/core/` 提供运行基础设施。业务流程放在 `app/services/`：
+
+- `task_service.py`：任务查询与操作入口。
+- `sync_service.py`：增量拉取、推送与合并协调。
+- `sync_log_service.py`：各业务流程共用的同步日志写入。
+- `tasks/recurrence.py`：重复任务规则、后继生成、并发锁定与幂等检查。
+- `tasks/serialization.py`：任务快照序列化。
+
+任务服务和同步服务共同调用公共模块，不相互导入私有函数。目录关系与客户端边界见 [架构说明](../docs/architecture.md)。
+
 ## 功能
 
 - 用户注册、登录、刷新 Token 和当前用户查询。

@@ -291,6 +291,10 @@ docker compose -f docker-compose.release.yml run --rm api alembic upgrade head
 
 ## 备份和恢复
 
+恢复演练使用独立入口：`python deploy/verify-backup.py <backup.sql.gz> --report drill.json`（在仓库根目录运行；部署包内使用 `python verify-backup.py ...`）。脚本先完整验证 gzip 和校验值，再在随机命名、无外部网络和端口、无持久卷的临时 MySQL 8.4 容器中恢复，记录表与行数、迁移版本和恢复耗时，最后删除本次容器。它不能选择已有服务器、容器或数据库，不会执行生产恢复。需要 Python 3.11+ 和 Docker，可按维护周期显式执行。
+
+新同步时钟需要数据库迁移 `20261026_0014`。升级时先备份，再执行后端 `alembic upgrade head`；当前 Docker 启动入口会运行迁移。监控配置、告警与 Grafana 面板参见 [同步监控](./monitoring/README.md)。
+
 推荐使用仓库内置脚本做在线一致性备份，脚本会通过 `mysqldump --single-transaction` 导出并 gzip 压缩：
 
 ```bash

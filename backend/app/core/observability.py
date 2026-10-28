@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
 
+from app.core.sync_health import render_sync_health_metrics
+
 REQUEST_ID_HEADER = "X-Request-ID"
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 request_id_context: ContextVar[str] = ContextVar("request_id", default="")
@@ -30,6 +32,38 @@ _http_series: dict[tuple[str, str, int], tuple[int, float]] = {}
 _client_error_reports_by_source: dict[str, int] = {}
 _http_duration_bucket_counts = [0 for _ in HTTP_REQUEST_DURATION_MS_BUCKETS]
 _http_series_duration_bucket_counts: dict[tuple[str, str, int], list[int]] = {}
+_sync_operations: dict[tuple[str, str], int] = {}
+_sync_items: dict[tuple[str, str], int] = {}
+_sync_durations: dict[str, tuple[int, float, list[int]]] = {}
+
+
+def record_sync_operation(
+    direction: str,
+    outcome: str,
+    duration_ms: float,
+    results: dict[str, int] | None = None,
+) -> None:
+    direction = direction if direction in {"pull", "push"} else "other"
+    outcome = outcome if outcome in {"success", "error"} else "error"
+    with _metrics_lock:
+        key = (direction, outcome)
+        _sync_operations[key] = _sync_operations.get(key, 0) + 1
+        count, total, buckets = _sync_durations.get(
+            direction,
+            (0, 0.0, [0 for _ in HTTP_REQUEST_DURATION_MS_BUCKETS]),
+        )
+        for index, bound in enumerate(HTTP_REQUEST_DURATION_MS_BUCKETS):
+            if duration_ms <= bound:
+                buckets[index] += 1
+        _sync_durations[direction] = (count + 1, total + duration_ms, buckets)
+        for result, amount in (results or {}).items():
+            result = (
+                result
+                if result in {"applied", "conflict", "failed", "changed", "deleted"}
+                else "other"
+            )
+            key = (direction, result)
+            _sync_items[key] = _sync_items.get(key, 0) + amount
 
 
 def install_observability(application: FastAPI) -> None:
@@ -121,8 +155,13 @@ def render_prometheus_metrics() -> str:
         client_error_reports_by_source = dict(sorted(_client_error_reports_by_source.items()))
         duration_bucket_counts = list(_http_duration_bucket_counts)
         series_duration_bucket_counts = {
-            key: list(value)
-            for key, value in sorted(_http_series_duration_bucket_counts.items())
+            key: list(value) for key, value in sorted(_http_series_duration_bucket_counts.items())
+        }
+        sync_operations = dict(_sync_operations)
+        sync_items = dict(_sync_items)
+        sync_durations = {
+            key: (count, total, list(buckets))
+            for key, (count, total, buckets) in _sync_durations.items()
         }
     lines = [
         "# HELP taskbridge_http_requests_total Total HTTP responses served by TaskBridge.",
@@ -178,7 +217,7 @@ def render_prometheus_metrics() -> str:
             strict=True,
         ):
             lines.append(
-                f'taskbridge_http_request_duration_ms_bucket{{{labels},'
+                f"taskbridge_http_request_duration_ms_bucket{{{labels},"
                 f'le="{_bucket_label(bucket)}"}} {bucket_count}',
             )
         lines.append(
@@ -206,12 +245,48 @@ def render_prometheus_metrics() -> str:
     )
     for source, count in client_error_reports_by_source.items():
         lines.append(
-            'taskbridge_client_error_reports_total{'
+            "taskbridge_client_error_reports_total{"
             f'source="{_escape_label_value(source)}"'
             f"}} {count}",
         )
+    lines.extend(
+        [
+            "# HELP taskbridge_sync_operations_total Sync requests by direction and outcome.",
+            "# TYPE taskbridge_sync_operations_total counter",
+        ]
+    )
+    for (direction, outcome), count in sorted(sync_operations.items()):
+        lines.append(
+            f'taskbridge_sync_operations_total{{direction="{direction}",outcome="{outcome}"}} {count}'
+        )
+    lines.extend(
+        [
+            "# HELP taskbridge_sync_items_total Sync items by direction and result.",
+            "# TYPE taskbridge_sync_items_total counter",
+        ]
+    )
+    for (direction, result), count in sorted(sync_items.items()):
+        lines.append(
+            f'taskbridge_sync_items_total{{direction="{direction}",result="{result}"}} {count}'
+        )
+    lines.extend(
+        [
+            "# HELP taskbridge_sync_duration_ms Sync operation duration in milliseconds.",
+            "# TYPE taskbridge_sync_duration_ms histogram",
+        ]
+    )
+    for direction, (count, total, buckets) in sorted(sync_durations.items()):
+        for bound, bucket in zip(HTTP_REQUEST_DURATION_MS_BUCKETS, buckets, strict=True):
+            lines.append(
+                f'taskbridge_sync_duration_ms_bucket{{direction="{direction}",le="{bound}"}} {bucket}'
+            )
+        lines.append(
+            f'taskbridge_sync_duration_ms_bucket{{direction="{direction}",le="+Inf"}} {count}'
+        )
+        lines.append(f'taskbridge_sync_duration_ms_count{{direction="{direction}"}} {count}')
+        lines.append(f'taskbridge_sync_duration_ms_sum{{direction="{direction}"}} {total:.2f}')
     lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines) + render_sync_health_metrics()
 
 
 def _normalize_request_id(value: str | None) -> str:

@@ -3,14 +3,15 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import { loadElectronModule } from "./helpers/mock-electron-windows.mjs";
 import { loadVueComponent } from "./helpers/load-vue-component.mjs";
+import { loadTsFunctions } from "./helpers/load-ts-functions.mjs";
 
-const { formatTaskDate, getTaskSchedulePresentation } = loadElectronModule("src/utils/task-presentation.ts");
+const { formatTaskDate, getTaskSchedulePresentation } = loadElectronModule("renderer/utils/task-presentation.ts");
 const now = "2026-10-14T12:00:00Z";
 const options = { language: "zh-CN", timeZone: "Asia/Shanghai", now };
 const require = createRequire(import.meta.url);
 const { createSSRApp } = require("vue");
 const { renderToString } = require("@vue/server-renderer");
-const { translate } = loadElectronModule("src/i18n.ts");
+const { translate } = loadElectronModule("renderer/i18n.ts");
 
 test("task dates compare calendar days in the selected display time zone", () => {
   const value = "2026-10-14T23:00:00Z";
@@ -115,15 +116,36 @@ test("conflict comparison may collapse while the warning and recovery actions st
     conflictLocalJson: '{"title":"本地方案","content":"local"}',
     conflictServerJson: '{"title":"云端方案","content":"cloud"}',
   });
-  assert.ok(html.includes("查看版本差异") && html.includes("本地方案") && html.includes("云端方案"));
+  assert.ok(html.includes("查看版本差异"));
+  assert.ok(!html.includes("本地方案") && !html.includes("云端方案"), "closed comparisons do not retain full snapshots");
   assert.match(html, /<\/details><div class="conflict-actions-inline">/);
   assert.ok(html.includes("sync-pill is-warning"));
   assert.ok(!html.includes('class="task-menu-panel"'));
 });
 
+test("conflict snapshots load only on expansion and are released or ignored after collapse", async () => {
+  let finish;
+  const globals = { conflictGeneration: 0, conflictDetail: { value: null }, conflictError: { value: false }, conflictLoading: { value: false },
+    props: { task: { localId: "conflict" } }, getTask: () => new Promise(resolve => { finish = resolve; }) };
+  const { loadConflictDetail } = await loadTsFunctions("renderer/components/TaskItem.vue", ["loadConflictDetail"], globals);
+  const opening = loadConflictDetail({ target: { open: true } });
+  assert.equal(globals.conflictLoading.value, true);
+  await loadConflictDetail({ target: { open: false } });
+  finish({ localId: "conflict", content: "Large body", conflictServerJson: '{"title":"cloud"}' });
+  await opening;
+  assert.equal(globals.conflictDetail.value, null);
+  assert.equal(globals.conflictLoading.value, false);
+  const current = loadConflictDetail({ target: { open: true } });
+  finish({ localId: "conflict", conflictServerJson: '{"title":"cloud"}' });
+  await current;
+  assert.equal(globals.conflictDetail.value.conflictServerJson, '{"title":"cloud"}');
+  await loadConflictDetail({ target: { open: false } });
+  assert.equal(globals.conflictDetail.value, null);
+});
+
 async function renderTask(fields) {
   const settings = { language: "zh-CN", displayTimeZone: "Asia/Shanghai", t: key => translate(key, "zh-CN") };
-  const component = loadVueComponent("src/components/TaskItem.vue", {
+  const component = loadVueComponent("renderer/components/TaskItem.vue", {
     "../stores/settings": { useSettingsStore: () => settings },
     "../stores/task": { useTaskStore: () => ({ timelineNow: new Date(now) }) },
   }, { window: {} });

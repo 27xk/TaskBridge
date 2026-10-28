@@ -20,7 +20,7 @@ async function createApp(overrides = {}, names = ["requestViewChange", "openTask
     Date: { now: () => 42 },
     ...overrides,
   };
-  return { state, api: await loadTsFunctions("src/App.vue", names, state) };
+  return { state, api: await loadTsFunctions("renderer/App.vue", names, state) };
 }
 
 test("leaving all tasks discards the old floating task request before the view can remount", async () => {

@@ -32,7 +32,11 @@ def list_changed_tasks_page(
             select(Task)
             .where(*conditions)
             .order_by(Task.updated_at.asc(), Task.id.asc())
-            .limit(limit),
+            .limit(limit)
+            # A locking read bypasses an earlier MySQL REPEATABLE READ snapshot.
+            # The caller holds the user clock lock, so task writes cannot interleave.
+            .with_for_update()
+            .execution_options(populate_existing=True),
         ),
     )
 

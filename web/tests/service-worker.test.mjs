@@ -36,8 +36,22 @@ function loadServiceWorker(overrides = {}) {
     },
   });
   vm.runInContext(source, context, { filename: "sw.js" });
-  return { listeners, self };
+  return { listeners, self, shellAssets: vm.runInContext("SHELL_ASSETS", context) };
 }
+
+test("the offline shell includes every module in the application import graph", async () => {
+  const { shellAssets } = loadServiceWorker();
+  const cached = new Set(shellAssets);
+  const visited = new Set();
+  async function visit(asset) {
+    if (visited.has(asset)) return;
+    visited.add(asset);
+    assert.ok(cached.has(asset), `${asset} must be available for offline startup`);
+    const text = await readFile(new URL(`../${asset}`, import.meta.url), "utf8");
+    for (const match of text.matchAll(/from\s+["'](\.\/[^"']+\.js\?v=[^"']+)["']/g)) await visit(match[1]);
+  }
+  await visit("./app.js?v=0.2.1");
+});
 
 test("offline guide navigation serves the cached requested guide before the app shell", async () => {
   const guideResponse = { name: "local-trial" };

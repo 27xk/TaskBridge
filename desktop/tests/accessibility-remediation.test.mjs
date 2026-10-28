@@ -12,7 +12,7 @@ async function source(path) {
 }
 
 test("dangerous confirmations focus cancel while ordinary confirmations focus confirm", async () => {
-  const dialog = await source("desktop/src/components/ConfirmDialog.vue");
+  const dialog = await source("desktop/renderer/components/ConfirmDialog.vue");
 
   assert.match(dialog, /const cancelButton = ref<HTMLButtonElement \| null>\(null\)/);
   assert.match(dialog, /props\.danger\s*\?\s*cancelButton\.value\s*:\s*confirmButton\.value/);
@@ -21,7 +21,7 @@ test("dangerous confirmations focus cancel while ordinary confirmations focus co
 
 test("desktop language metadata follows the selected interface language", async () => {
   const index = await source("desktop/index.html");
-  const settings = await source("desktop/src/stores/settings.ts");
+  const settings = await source("desktop/renderer/stores/settings.ts");
 
   assert.match(index, /<html lang="zh-CN">/);
   assert.match(settings, /function applyDocumentLanguage\(/);
@@ -30,15 +30,15 @@ test("desktop language metadata follows the selected interface language", async 
 });
 
 test("task completion and quick-add text meet desktop accessibility targets", async () => {
-  const base = await source("desktop/src/assets/base.css");
-  const workspace = await source("desktop/src/assets/workspace.css");
+  const base = await source("desktop/renderer/assets/base.css");
+  const workspace = await source("desktop/renderer/assets/workspace.css");
 
   assert.match(base, /\.check-button\s*\{[^}]*min-width:\s*40px;[^}]*min-height:\s*40px;/s);
   assert.match(workspace, /input::placeholder,[\s\S]*textarea::placeholder\s*\{\s*color:\s*var\(--workspace-muted\);/);
 });
 
 test("today view has one advanced editor entry instead of duplicate create buttons", async () => {
-  const today = await source("desktop/src/views/TodayView.vue");
+  const today = await source("desktop/renderer/views/TodayView.vue");
   const header = today.slice(today.indexOf('<header class="view-header">'), today.indexOf("<WorkspaceQuickAdd"));
 
   assert.doesNotMatch(header, /task\.addToday/);
@@ -46,15 +46,15 @@ test("today view has one advanced editor entry instead of duplicate create butto
 });
 
 test("desktop login tells users how password recovery works", async () => {
-  const login = await source("desktop/src/views/LoginView.vue");
-  const i18n = await source("desktop/src/i18n.ts");
+  const login = await source("desktop/renderer/views/LoginView.vue");
+  const i18n = await source("desktop/renderer/i18n.ts");
 
   assert.match(login, /settingsStore\.t\("auth\.forgotPasswordHelp"\)/);
   assert.match(i18n, /"auth\.forgotPasswordHelp"/);
 });
 
 test("narrow selectable task rows reserve columns only for checkbox, body, and actions", async () => {
-  const workspace = await source("desktop/src/assets/workspace.css");
+  const workspace = await source("desktop/renderer/assets/workspace.css");
 
   assert.match(
     workspace,
@@ -64,7 +64,7 @@ test("narrow selectable task rows reserve columns only for checkbox, body, and a
 });
 
 test("task completion control names its task and remains the only restore entry", async () => {
-  const taskItem = await source("desktop/src/components/TaskItem.vue");
+  const taskItem = await source("desktop/renderer/components/TaskItem.vue");
 
   assert.match(
     taskItem,

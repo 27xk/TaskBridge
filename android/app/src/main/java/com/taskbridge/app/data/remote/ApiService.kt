@@ -16,6 +16,8 @@ import com.taskbridge.app.data.remote.dto.RevokeSessionsResponseDto
 import com.taskbridge.app.data.remote.dto.SyncPullResponseDto
 import com.taskbridge.app.data.remote.dto.SyncPushRequestDto
 import com.taskbridge.app.data.remote.dto.SyncPushResponseDto
+import com.taskbridge.app.data.remote.dto.SyncHealthReportDto
+import com.taskbridge.app.data.remote.dto.SyncHealthAcceptedDto
 import com.taskbridge.app.data.remote.dto.TaskCreateRequestDto
 import com.taskbridge.app.data.remote.dto.TaskDto
 import com.taskbridge.app.data.remote.dto.TaskHistoryDto
@@ -37,6 +39,12 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface ApiService {
+    @POST("observability/sync-health")
+    suspend fun reportSyncHealth(
+        @Body request: SyncHealthReportDto,
+        @Header(INTERNAL_WORKSPACE_HEADER) expectedWorkspaceId: String,
+    ): ApiEnvelope<SyncHealthAcceptedDto>
+
     @POST("auth/register")
     suspend fun register(@Body request: RegisterRequestDto): ApiEnvelope<TokenPairDto>
 

@@ -682,7 +682,7 @@ def test_sync_pull_paginates_changed_and_deleted_tasks(client, db_session: Sessi
 
     base_time = datetime(2026, 5, 17, 12, 0, 0)
     tasks = [
-        Task(
+        dict(
             user_id=user.id,
             title=f"Paged task {index}",
             status="todo",
@@ -693,8 +693,10 @@ def test_sync_pull_paginates_changed_and_deleted_tasks(client, db_session: Sessi
         )
         for index in range(3)
     ]
-    db_session.add_all(tasks)
+    # Historical fixture data bypasses the runtime task write clock deliberately.
+    db_session.execute(Task.__table__.insert(), tasks)
     db_session.commit()
+    tasks = list(db_session.scalars(select(Task).where(Task.user_id == user.id).order_by(Task.id)))
 
     first_response = client.get(
         "/api/v1/sync/pull",

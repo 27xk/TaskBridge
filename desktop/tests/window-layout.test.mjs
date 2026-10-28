@@ -11,10 +11,10 @@ const initialBounds = { x: 2200, y: 110, width: 1020, height: 720 };
 const limits = { minWidth: 760, minHeight: 600 };
 
 function layoutHarness() {
-  assert.ok(existsSync(resolve(import.meta.dirname, "../electron/window-layout.ts")), "window lifecycle must persist normal bounds independently of maximized state");
+  assert.ok(existsSync(resolve(import.meta.dirname, "../main/window-layout.ts")), "window lifecycle must persist normal bounds independently of maximized state");
   const screen = createScreen();
   const timers = createTimers();
-  const layout = loadElectronModule("electron/window-layout.ts", { electron: { screen } }, {
+  const layout = loadElectronModule("main/window-layout.ts", { electron: { screen } }, {
     setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout,
   });
   const window = new MockWindow(initialBounds);
@@ -44,7 +44,7 @@ function floatingHarness() {
     normalizeFloatingSize: (width, height) => ({ width: Math.max(280, Math.min(520, width)), height: Math.max(260, Math.min(720, height)) }),
     setFloatingOpacity(value) { return value; },
   };
-  const floating = loadElectronModule("electron/floating-window.ts", {
+  const floating = loadElectronModule("main/floating-window.ts", {
     electron: { app: { isPackaged: false }, BrowserWindow: MockWindow, screen },
     "./state": state,
     "node:fs": { existsSync: () => true },
@@ -73,8 +73,8 @@ test("hidden floating windows do not reappear when their first renderer load com
 });
 
 test("window bounds stay on the display they overlap and recover from a removed display", async () => {
-  assert.ok(existsSync(resolve(import.meta.dirname, "../shared/window-layout.ts")), "bounds clamping must be shared and testable without Electron");
-  const { clampWindowBounds, normalizeWindowBounds } = await loadTsModule("shared/window-layout.ts");
+  assert.ok(existsSync(resolve(import.meta.dirname, "../common/window-layout.ts")), "bounds clamping must be shared and testable without Electron");
+  const { clampWindowBounds, normalizeWindowBounds } = await loadTsModule("common/window-layout.ts");
   const screen = createScreen();
   assert.deepEqual(clampWindowBounds(initialBounds, screen.areas, limits), initialBounds);
   assert.deepEqual(clampWindowBounds(initialBounds, [screen.areas[0]], limits), { x: 900, y: 110, width: 1020, height: 720 });
@@ -155,7 +155,7 @@ async function mainHarness({ saved = { bounds: initialBounds, maximized: true },
     getLoginItemSettings: () => ({ wasOpenedAsHidden: false }),
   });
   class MainWindow extends MockWindow { constructor(options) { super(options); created.push(this); } }
-  loadElectronModule("electron/main.ts", {
+  loadElectronModule("main/main.ts", {
     electron: { app, BrowserWindow: MainWindow, Menu: { setApplicationMenu() {} }, screen },
     "node:fs": { existsSync: () => true },
     "./app-icon": { resolveAppIconPath() {} },
@@ -253,7 +253,7 @@ test("window layouts survive a settings-store restart and preserve unrelated pre
   const directory = mkdtempSync(join(parent, "window-settings-"));
   const configPath = join(directory, "config.json");
   writeFileSync(configPath, JSON.stringify({ language: "en-US", floatingOpacity: 0.7, desktopDensity: "comfortable" }));
-  const openState = () => loadElectronModule("electron/state.ts", {
+  const openState = () => loadElectronModule("main/state.ts", {
     electron: { app: { isPackaged: false, getPath: () => directory }, safeStorage: {} },
   }, { __TASKBRIDGE_BASE_URL__: "", __TASKBRIDGE_WS_URL__: "" });
   try {

@@ -13,8 +13,9 @@ async function editorHarness({ dirty = true, saving = false, confirm = false, cu
     settingsStore: { t: (key) => key }, confirmations: [],
     requestConfirmation: async (options) => { globals.confirmations.push(options); return confirm; },
     setEditorDirty: (value) => { globals.editorDirty.value = value; },
+    getTask: async (id) => ({ localId: id, title: id.toUpperCase(), content: "Full detail" }),
   };
-  const functions = await loadTsFunctions("src/views/TaskView.vue", ["canLeaveEditor", "openEdit", "openCreate", "openCreateIfCurrent", "closeEditor"], globals);
+  const functions = await loadTsFunctions("renderer/views/TaskView.vue", ["canLeaveEditor", "openEdit", "openCreate", "openCreateIfCurrent", "closeEditor"], globals);
   return { ...functions, globals };
 }
 
@@ -33,6 +34,23 @@ test("confirming a task switch resets the editor for the requested task", async 
   assert.equal(editor.globals.editingTask.value.localId, "b");
   assert.equal(editor.globals.editorDirty.value, false);
   assert.equal(editor.globals.editorSaveError.value, "");
+});
+
+test("today detail reads cannot replace a newer editor or a new draft", async () => {
+  const pending = [];
+  const globals = { editorRequestGeneration: 0, editorOpen: { value: false }, editingTask: { value: null },
+    authStore: { workspaceKey: "a" }, editorSaveError: { value: "" }, setEditorDirty() {}, canSwitchEditor: async () => true,
+    getTask: id => new Promise(resolve => pending.push({ id, resolve })) };
+  const api = await loadTsFunctions("renderer/views/TodayView.vue", ["openEdit"], globals);
+  const first = api.openEdit({ localId: "a" });
+  await new Promise(resolve => setImmediate(resolve));
+  const second = api.openEdit({ localId: "b" });
+  await new Promise(resolve => setImmediate(resolve));
+  pending.find(item => item.id === "b").resolve({ localId: "b", content: "Full body" });
+  await second;
+  pending.find(item => item.id === "a").resolve({ localId: "a", content: "Old body" });
+  await first;
+  assert.equal(globals.editingTask.value.localId, "b");
 });
 
 test("cannot replace a saving editor with a task or a new draft", async () => {
@@ -78,7 +96,7 @@ async function bulkHarness() {
     console: { error() {} },
     exitSelectionMode: () => { globals.selectionMode.value = false; globals.selectedTaskIds.value = new Set(); },
   };
-  const functions = await loadTsFunctions("src/views/TaskView.vue", ["runBulkAction"], globals);
+  const functions = await loadTsFunctions("renderer/views/TaskView.vue", ["runBulkAction"], globals);
   return { ...functions, globals };
 }
 
@@ -165,7 +183,7 @@ test("single-task scheduling failure is visible even when the task list is scrol
     notices: [], IMPORTANT_NOTICE_MS: 4500, console: { error() {} },
   };
   globals.showNotice = (message) => globals.notices.push(message);
-  const { planTaskToday } = await loadTsFunctions("src/views/TaskView.vue", ["runTaskAction", "planTaskToday"], globals);
+  const { planTaskToday } = await loadTsFunctions("renderer/views/TaskView.vue", ["runTaskAction", "planTaskToday"], globals);
   await planTaskToday({ localId: "a", title: "Keep this task" });
   assert.match(globals.actionError.value, /Keep this task/);
   assert.deepEqual(globals.notices, [globals.actionError.value]);

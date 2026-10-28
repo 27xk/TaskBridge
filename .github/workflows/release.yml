@@ -99,6 +99,10 @@ jobs:
         working-directory: backend
         run: python -m tools.openapi_contract --check
 
+      - name: Verify generated client wire types
+        working-directory: backend
+        run: python -m tools.client_contract --check
+
       - name: Lint backend
         working-directory: backend
         run: python -m ruff check app tests tools
@@ -194,6 +198,12 @@ jobs:
             "deploy/nginx.web.conf" \
             "deploy/start-local.cmd" \
             "deploy/start-local.sh" \
+            "deploy/backup-mysql.sh" \
+            "deploy/restore-mysql.sh" \
+            "deploy/verify-backup.py" \
+            "deploy/monitoring/prometheus.yml.example" \
+            "deploy/monitoring/alerts.yml" \
+            "deploy/monitoring/grafana-dashboard.json" \
             "web/index.html"; do
             if ! grep -Fq "$required" deployment-files.txt; then
               echo "::error::Deployment bundle is missing ${required}."
@@ -474,8 +484,14 @@ jobs:
       - name: Smoke test Web client shell
         run: node ..\scripts\smoke-web-client.mjs
 
+      - name: Verify desktop data budget
+        run: npm run check:data-budget
+
       - name: Build desktop application
         run: npm run build
+
+      - name: Verify built artifact size budget
+        run: npm run check:artifact-budget
 
       - name: Prepare Windows signing certificate
         shell: pwsh
@@ -511,6 +527,15 @@ jobs:
           ELECTRON_CACHE: ${{ github.workspace }}\\.cache\\electron
           ELECTRON_BUILDER_CACHE: ${{ github.workspace }}\\.cache\\electron-builder
 
+      - name: Verify packaged Windows artifact budgets
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath release -Filter '*.exe' -File)
+          if ($installers.Count -eq 0) { throw 'No Windows installer was produced' }
+          foreach ($installer in $installers) {
+            npm run check:artifact-budget -- --unpacked-dir release/win-unpacked --installer $installer.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Verify Windows installer signatures
         if: env.TASKBRIDGE_WINDOWS_SIGNED_RELEASE == 'true'
         shell: pwsh

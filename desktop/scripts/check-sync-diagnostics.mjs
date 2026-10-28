@@ -10,17 +10,17 @@ import {
 
 const desktopRoot = workspaceRoot(import.meta.url);
 
-const [syncStoreSource, settingsViewSource, syncRecoveryPanelSource, i18nSource, cssSource, workspaceCssSource, packageSource, preloadSource, ipcSource, envSource] = await Promise.all([
-  readFile(resolve(desktopRoot, "src/stores/sync.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/views/SettingsView.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "src/components/settings/SettingsSyncRecoveryPanel.vue"), "utf8"),
-  readFile(resolve(desktopRoot, "src/i18n.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/assets/base.css"), "utf8"),
-  readFile(resolve(desktopRoot, "src/assets/workspace.css"), "utf8"),
+const [syncStoreSource, settingsViewSource, syncRecoveryPanelSource, i18nSource, cssSource, workspaceCssSource, packageSource, preloadSource, ipcSource, commonTypesSource] = await Promise.all([
+  readFile(resolve(desktopRoot, "renderer/stores/sync.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/views/SettingsView.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/components/settings/SettingsSyncRecoveryPanel.vue"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/i18n.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/assets/base.css"), "utf8"),
+  readFile(resolve(desktopRoot, "renderer/assets/workspace.css"), "utf8"),
   readFile(resolve(desktopRoot, "package.json"), "utf8"),
-  readFile(resolve(desktopRoot, "electron/preload.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "electron/ipc.ts"), "utf8"),
-  readFile(resolve(desktopRoot, "src/env.d.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "preload/index.ts"), "utf8"),
+  readFile(resolve(desktopRoot, "main/ipc.ts"), "utf8"),
+  Promise.all([readFile(resolve(desktopRoot, "common/task.ts"), "utf8"), readFile(resolve(desktopRoot, "common/bridge.ts"), "utf8")]).then((sources) => sources.join("\n")),
 ]);
 
 const settingsSurfaceSource = `${settingsViewSource}\n${syncRecoveryPanelSource}`;
@@ -96,7 +96,7 @@ for (const key of [
 assert.match(preloadSource, /exportDiagnostics/, "preload must expose diagnostic package export");
 assert.match(preloadSource, /getQueueCounts/, "preload must expose sync queue aggregate counts");
 assert.match(ipcSource, /db:queue:counts/, "IPC must expose sync queue aggregate counts");
-assert.match(envSource, /interface SyncQueueCounts/, "desktop env types must define SyncQueueCounts");
+assert.match(commonTypesSource, /interface SyncQueueCounts/, "desktop common contracts must define SyncQueueCounts");
 assert.match(
   preloadSource,
   /exportDiagnostics:\s*\(\)\s*=>\s*ipcRenderer\.invoke\("task:export-diagnostics"\)/,
@@ -173,7 +173,7 @@ assert.doesNotMatch(
   /settingsStore\.t\("settings\.syncIssueAction"\)\s*\}\}:\s*\{\{\s*issue\.action\s*\}\}/,
   "settings sync recovery center must not expose raw queue action values",
 );
-assert.match(envSource, /exportDiagnostics/, "desktop env types must expose diagnostic package export");
+assert.match(commonTypesSource, /exportDiagnostics/, "desktop common contracts must expose diagnostic package export");
 assert.match(cssSource, /sync-diagnostics/, "CSS must style the sync diagnostics block");
 assert.match(cssSource, /settings-advanced-details summary/, "CSS must style the sync diagnostics summary");
 assert.match(workspaceCssSource, /\.focus-workspace \.sync-issue-list/, "workspace CSS must preserve the recovery issue list override");

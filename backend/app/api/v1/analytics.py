@@ -6,6 +6,7 @@ from app.core.rate_limit import check_rate_limit
 from app.core.response import api_success
 from app.models.user import User
 from app.schemas.analytics import ProductEventAck, ProductEventCreate, ProductEventSummary
+from app.schemas.responses import ApiResponse
 from app.services.analytics_service import record_product_event, summarize_product_events
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -31,7 +32,7 @@ def _check_analytics_rate_limit(
     )
 
 
-@router.post("/events", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/events", status_code=status.HTTP_202_ACCEPTED, response_model=ApiResponse[ProductEventAck])
 def create_product_event(
     request: Request,
     payload: ProductEventCreate,
@@ -51,7 +52,7 @@ def create_product_event(
     )
 
 
-@router.get("/summary")
+@router.get("/summary", response_model=ApiResponse[ProductEventSummary])
 def read_product_event_summary(
     request: Request,
     days: int = Query(default=30, ge=1, le=366),

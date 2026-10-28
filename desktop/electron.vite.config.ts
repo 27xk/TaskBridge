@@ -19,7 +19,7 @@ export default defineConfig({
       sourcemap: false,
       rollupOptions: {
         input: {
-          index: resolve(__dirname, "electron/main.ts"),
+          index: resolve(__dirname, "main/main.ts"),
         },
       },
     },
@@ -30,7 +30,7 @@ export default defineConfig({
       sourcemap: false,
       rollupOptions: {
         input: {
-          index: resolve(__dirname, "electron/preload.ts"),
+          index: resolve(__dirname, "preload/index.ts"),
         },
         output: {
           format: "cjs",

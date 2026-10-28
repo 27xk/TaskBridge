@@ -26,7 +26,7 @@ test("workspace identity normalizes server origin and isolates users and servers
     isLegacyWorkspaceOwner,
     normalizeServerOrigin,
     workspaceDatabaseFileName,
-  } = await loadTsModule("shared/workspace.ts");
+  } = await loadTsModule("common/workspace.ts");
 
   assert.equal(normalizeServerOrigin(" HTTPS://Example.COM:443/api/v1/ "), "https://example.com");
   assert.equal(normalizeServerOrigin("http://example.com:8080/custom/api/v1"), "http://example.com:8080");
@@ -46,7 +46,7 @@ test("workspace identity normalizes server origin and isolates users and servers
 });
 
 test("legacy sync cursor is restored only when its persisted workspace owner is known", async () => {
-  const { EPOCH_SYNC_TIME, migrateLegacyWorkspaceCursor } = await loadTsModule("shared/workspace.ts");
+  const { EPOCH_SYNC_TIME, migrateLegacyWorkspaceCursor } = await loadTsModule("common/workspace.ts");
   const legacyCursor = "2026-07-01T12:00:00Z";
   const workspaceKey = "https://one.example::user:9";
   const unclaimed = migrateLegacyWorkspaceCursor({}, legacyCursor, undefined, workspaceKey);
@@ -72,7 +72,7 @@ test("legacy sync cursor is restored only when its persisted workspace owner is 
 });
 
 test("workspace state is preserved only when reauthentication returns to the same workspace", async () => {
-  const { shouldPreserveWorkspaceState } = await loadTsModule("shared/workspace.ts");
+  const { shouldPreserveWorkspaceState } = await loadTsModule("common/workspace.ts");
   const first = "https://one.example::user:9";
 
   assert.equal(shouldPreserveWorkspaceState(first, first), true);
@@ -86,7 +86,7 @@ test("refresh results cannot overwrite or invalidate a newer server session", as
     captureAuthSession,
     classifyRefreshCommit,
     canInvalidateAuthSession,
-  } = await loadTsModule("shared/auth-session.ts");
+  } = await loadTsModule("common/auth-session.ts");
   const oldTokens = { accessToken: "access-old", refreshToken: "refresh-old", userId: 9 };
   const oldSession = captureAuthSession("https://one.example/api/v1", oldTokens, "device-1");
   const refreshed = { access_token: "access-rotated", refresh_token: "refresh-rotated" };
@@ -118,7 +118,7 @@ test("refresh results cannot overwrite or invalidate a newer server session", as
 });
 
 test("generic settings IPC cannot mutate connection or identity fields", async () => {
-  const { isMutableAppSettingKey } = await loadTsModule("shared/settings-policy.ts");
+  const { isMutableAppSettingKey } = await loadTsModule("common/settings-policy.ts");
 
   assert.equal(isMutableAppSettingKey("language"), true);
   assert.equal(isMutableAppSettingKey("displayTimeZone"), true);
@@ -130,7 +130,7 @@ test("generic settings IPC cannot mutate connection or identity fields", async (
 
 test("legacy SQLite migration includes committed WAL rows and publishes atomically", async () => {
   const compiledModule = await compileTsModule(
-    "electron/sqlite-migration.ts",
+    "main/sqlite-migration.ts",
     { resolvePackagesFromProject: true },
   );
   const directory = await mkdtemp(join(tmpdir(), "taskbridge-sqlite-migration-"));
@@ -192,8 +192,8 @@ test("legacy SQLite migration includes committed WAL rows and publishes atomical
 
 test("desktop state and database select a migrated origin-plus-user workspace", async () => {
   const [state, database] = await Promise.all([
-    source("desktop/electron/state.ts"),
-    source("desktop/electron/db.ts"),
+    source("desktop/main/state.ts"),
+    source("desktop/main/db.ts"),
   ]);
 
   assert.match(state, /lastSyncTimeByWorkspace\?: Record<string, string>/);
@@ -207,18 +207,18 @@ test("desktop state and database select a migrated origin-plus-user workspace", 
 });
 
 test("refresh rejection broadcasts session expiry and renderer stops services", async () => {
-  const [http, preload, env, authStore, app] = await Promise.all([
-    source("desktop/electron/http.ts"),
-    source("desktop/electron/preload.ts"),
-    source("desktop/src/env.d.ts"),
-    source("desktop/src/stores/auth.ts"),
-    source("desktop/src/App.vue"),
+  const [http, preload, bridge, authStore, app] = await Promise.all([
+    source("desktop/main/http.ts"),
+    source("desktop/preload/index.ts"),
+    source("desktop/common/bridge.ts"),
+    source("desktop/renderer/stores/auth.ts"),
+    source("desktop/renderer/App.vue"),
   ]);
 
   assert.match(http, /broadcastSessionExpired\("refresh-rejected"\)/);
   assert.match(preload, /onSessionExpired/);
   assert.match(preload, /taskbridge:session-expired/);
-  assert.match(env, /onSessionExpired/);
+  assert.match(bridge, /onSessionExpired/);
   assert.match(authStore, /const sessionExpired = ref\(false\)/);
   assert.match(authStore, /const workspaceKey = ref<string \| null>\(null\)/);
   assert.match(authStore, /function expireSession/);
@@ -235,7 +235,7 @@ test("refresh rejection broadcasts session expiry and renderer stops services", 
 });
 
 test("stopped sync runs cannot continue into a switched workspace", async () => {
-  const manager = await source("desktop/src/sync/SyncManager.ts");
+  const manager = await source("desktop/renderer/sync/SyncManager.ts");
 
   assert.match(manager, /private generation = 0/);
   assert.match(manager, /this\.generation \+= 1/);
@@ -246,9 +246,9 @@ test("stopped sync runs cannot continue into a switched workspace", async () => 
 
 test("Windows lifecycle is single-instance, hidden on login launch, and signed-out safe", async () => {
   const [main, autoStart, tray] = await Promise.all([
-    source("desktop/electron/main.ts"),
-    source("desktop/electron/auto-start.ts"),
-    source("desktop/electron/tray.ts"),
+    source("desktop/main/main.ts"),
+    source("desktop/main/auto-start.ts"),
+    source("desktop/main/tray.ts"),
   ]);
 
   assert.match(main, /app\.requestSingleInstanceLock\(\)/);
@@ -261,7 +261,7 @@ test("Windows lifecycle is single-instance, hidden on login launch, and signed-o
 });
 
 test("desktop updater uses an ESM-to-CommonJS compatible runtime import", async () => {
-  const updater = await source("desktop/electron/updater.ts");
+  const updater = await source("desktop/main/updater.ts");
 
   assert.doesNotMatch(
     updater,
@@ -273,11 +273,11 @@ test("desktop updater uses an ESM-to-CommonJS compatible runtime import", async 
 
 test("task and login submissions are latched and quick add focuses the title", async () => {
   const [login, taskView, todayView, editor, drawer] = await Promise.all([
-    source("desktop/src/views/LoginView.vue"),
-    source("desktop/src/views/TaskView.vue"),
-    source("desktop/src/views/TodayView.vue"),
-    source("desktop/src/components/TaskEditor.vue"),
-    source("desktop/src/components/EditorDrawer.vue"),
+    source("desktop/renderer/views/LoginView.vue"),
+    source("desktop/renderer/views/TaskView.vue"),
+    source("desktop/renderer/views/TodayView.vue"),
+    source("desktop/renderer/components/TaskEditor.vue"),
+    source("desktop/renderer/components/EditorDrawer.vue"),
   ]);
 
   assert.match(login, /const submitting = ref\(false\)/);
@@ -295,8 +295,8 @@ test("task and login submissions are latched and quick add focuses the title", a
 
 test("desktop accessibility exposes auth errors and editor disclosure state", async () => {
   const [login, editor] = await Promise.all([
-    source("desktop/src/views/LoginView.vue"),
-    source("desktop/src/components/TaskEditor.vue"),
+    source("desktop/renderer/views/LoginView.vue"),
+    source("desktop/renderer/components/TaskEditor.vue"),
   ]);
 
   assert.match(login, /role="alert"/);
@@ -310,12 +310,12 @@ test("desktop accessibility exposes auth errors and editor disclosure state", as
 
 test("floating truncation, shortcut conflict, and notification task routing are explicit", async () => {
   const [floatingStore, floatingView, shortcut, notification, ipc, app] = await Promise.all([
-    source("desktop/src/stores/floating.ts"),
-    source("desktop/src/views/FloatingView.vue"),
-    source("desktop/electron/shortcut.ts"),
-    source("desktop/electron/notification.ts"),
-    source("desktop/electron/ipc.ts"),
-    source("desktop/src/App.vue"),
+    source("desktop/renderer/stores/floating.ts"),
+    source("desktop/renderer/views/FloatingView.vue"),
+    source("desktop/main/shortcut.ts"),
+    source("desktop/main/notification.ts"),
+    source("desktop/main/ipc.ts"),
+    source("desktop/renderer/App.vue"),
   ]);
 
   assert.match(floatingStore, /hiddenTaskCount/);
@@ -330,10 +330,10 @@ test("floating truncation, shortcut conflict, and notification task routing are 
 
 test("task API uses configured timezone and account security contracts are reachable", async () => {
   const [taskApi, authApi, settingsView, securityPanel] = await Promise.all([
-    source("desktop/src/api/task.ts"),
-    source("desktop/src/api/auth.ts"),
-    source("desktop/src/views/SettingsView.vue"),
-    source("desktop/src/components/settings/SettingsAccountSecurityPanel.vue"),
+    source("desktop/renderer/api/task.ts"),
+    source("desktop/renderer/api/auth.ts"),
+    source("desktop/renderer/views/SettingsView.vue"),
+    source("desktop/renderer/components/settings/SettingsAccountSecurityPanel.vue"),
   ]);
 
   assert.match(taskApi, /timezone\?: string/);

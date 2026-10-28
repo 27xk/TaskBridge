@@ -7,7 +7,7 @@ import { loadTsModule } from "./helpers/load-ts-module.mjs";
 import { loadElectronModule, MockWindow } from "./helpers/mock-electron-windows.mjs";
 
 function captureHarness() {
-  assert.ok(existsSync(resolve(import.meta.dirname, "../electron/quick-capture.ts")), "quick capture must have a shared single-window controller");
+  assert.ok(existsSync(resolve(import.meta.dirname, "../main/quick-capture.ts")), "quick capture must have a shared single-window controller");
   const main = new MockWindow();
   let floating = null;
   let creations = 0;
@@ -29,7 +29,7 @@ function captureHarness() {
       return true;
     },
   };
-  const capture = loadElectronModule("electron/quick-capture.ts", {
+  const capture = loadElectronModule("main/quick-capture.ts", {
     "./floating-window": floatingApi,
     "./state": { windows },
   });
@@ -37,7 +37,7 @@ function captureHarness() {
 }
 
 test("disconnected WebSocket status is shown as waiting, not connected", () => {
-  const tray = loadElectronModule("electron/tray.ts", {
+  const tray = loadElectronModule("main/tray.ts", {
     electron: {}, "./state": {}, "./floating-window": {}, "./app-icon": {}, "./quick-capture": {}, "./window-layout": {},
   });
   tray.setTraySyncStatus("ws: disconnected");
@@ -47,8 +47,8 @@ test("disconnected WebSocket status is shown as waiting, not connected", () => {
 });
 
 test("sync status accepts defined tokens and localized states without substring collisions", async () => {
-  assert.ok(existsSync(resolve(import.meta.dirname, "../shared/sync-status.ts")), "sync status must be shared with the renderer");
-  const { normalizeSyncStatus, formatSyncStatus } = await loadTsModule("shared/sync-status.ts");
+  assert.ok(existsSync(resolve(import.meta.dirname, "../common/sync-status.ts")), "sync status must be shared with the renderer");
+  const { normalizeSyncStatus, formatSyncStatus } = await loadTsModule("common/sync-status.ts");
   const cases = [
     ["disconnected", "disconnected", "等待连接", "Waiting"],
     [" WS: DISCONNECTED ", "disconnected", "等待连接", "Waiting"],
@@ -78,7 +78,7 @@ test("global quick add routes only to the floating capture entry without a notif
   const floating = new MockWindow();
   const notifications = [];
   let captures = 0;
-  const shortcuts = loadElectronModule("electron/shortcut.ts", {
+  const shortcuts = loadElectronModule("main/shortcut.ts", {
     electron: { globalShortcut: { register(key, callback) { callbacks.set(key, callback); return true; }, unregisterAll() {} } },
     "./floating-window": { toggleFloatingWindow() {} },
     "./quick-capture": { openQuickCapture() { captures += 1; } },
