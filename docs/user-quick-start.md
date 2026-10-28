@@ -17,7 +17,7 @@
 如果管理员或部署者已经给你 TaskBridge 服务入口和账号，按这个顺序开始：
 
 1. Web/PWA：打开部署者提供的 TaskBridge 访问地址。
-2. Windows 或 Android：从 [GitHub Releases](https://github.com/27xk/TaskBridge/releases) 下载该版本提供的已签名 Windows 安装包或 Android APK。名称带 `unsigned` 的历史文件不适合普通用户；当前版本没有对应客户端文件时先使用 Web/PWA。
+2. Windows 或 Android：从 [GitHub Releases](https://github.com/27xk/TaskBridge/releases) 下载该版本提供的 Windows 安装包或已签名 Android APK。Windows 安装包当前未签名，安装时可能显示「未知发布者」；当前版本没有对应客户端文件时先使用 Web/PWA。
 3. 在登录页输入账号和密码。服务地址由 Web 访问入口或安装包决定；连接失败时检查网络，持续失败请联系管理员。
 
 登录成功后，默认从“今日”开始。新建任务时只填标题就能保存，也可以直接输入“明天下午 3 点写周报 #工作 P3”让客户端识别时间、标签和优先级。

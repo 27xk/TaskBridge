@@ -18,7 +18,7 @@ TaskBridge 是一个登录后本地优先的跨端待办应用。首次使用需
 | 我还没有服务入口 | 向管理员索取 Web 访问地址或已配置的客户端安装包，以及账号 | 拿到入口后直接登录 |
 | 我要维护或部署服务 | 本机试用先启动服务；长期使用先完成自托管部署 | [本机试用](./deploy/README.md#本机试用) / [自托管部署](./deploy/README.md) |
 
-下载客户端：[GitHub Releases](https://github.com/27xk/TaskBridge/releases)。普通用户只安装名称中不带 `unsigned` 的已签名客户端；新版工作流不会再把 unsigned APK 或 EXE 上传到公开 Release。
+下载客户端：[GitHub Releases](https://github.com/27xk/TaskBridge/releases)。Android APK 使用正式签名；Windows 安装包当前未签名，安装时可能显示「未知发布者」。未签名的 Android APK 不会上传到公开 Release。
 
 ## 普通用户快速开始
 
@@ -29,7 +29,7 @@ TaskBridge 是一个登录后本地优先的跨端待办应用。首次使用需
 如果管理员已经给你 TaskBridge 入口和账号，直接按下面的路径开始：
 
 1. 如果使用 Web/PWA，打开部署者提供的 TaskBridge 访问地址。
-2. 如果使用桌面或手机客户端，打开 [Releases](https://github.com/27xk/TaskBridge/releases)，下载该版本提供的已签名 Windows 安装包或 Android APK；没有对应文件表示维护者尚未配置该平台签名，请先使用 Web/PWA。
+2. 如果使用桌面或手机客户端，打开 [Releases](https://github.com/27xk/TaskBridge/releases)，下载该版本提供的 Windows 安装包或已签名 Android APK；暂时没有对应文件时，可以先使用 Web/PWA。
 3. 在登录页输入账号和密码。连接失败时检查网络；持续失败请联系管理员确认部署状态和安装包版本。
 
 ### 没有服务入口
@@ -41,7 +41,7 @@ TaskBridge 是一个登录后本地优先的跨端待办应用。首次使用需
 说明：
 
 - Windows 和 Android 发布包固定使用构建时写入的服务地址；地址变更时需要管理员重新发布客户端。
-- 下载后可用 Release 中的 `SHA256SUMS.txt` 核对文件；不要安装历史版本中名称带 `unsigned` 的文件。
+- 下载后可用 Release 中的 `SHA256SUMS.txt` 核对文件；历史版本中名称带 `unsigned` 的 Android APK 只供开发验证。
 - 使用 Release Compose 时，发布配置应指向统一入口 `http://<服务器>:8080`；端口 `8000` 只用于开发或 API 直连。
 - 新建任务只需要先写标题；备注、清单、时间安排、标签和模板都可以按需展开。
 - Windows、Web 和 Android 都可以进入选择模式，批量完成或删除当前列表中的任务；回收站中的恢复和永久删除仍单独确认。

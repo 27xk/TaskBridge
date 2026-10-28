@@ -154,7 +154,7 @@ Android 可在“设置 -> 偏好 -> 关于”查看已安装版本并打开最�
 - Build and publish backend image
 - Update GitHub Release
 
-所有 job 成功后，最后的 Release job 才会更新说明。部署包和容器镜像不依赖客户端签名；没有 Android 或 Windows 签名 Secrets 时，对应客户端 job 会完成测试但省略下载文件。
+所有 job 成功后，最后的 Release job 才会更新说明并上传完整产物。Android 的四项签名 Secrets 缺少任一项都会阻止发布。Windows 的两项签名 Secrets 都为空时仍发布未签名安装包和自动更新文件；只配置其中一项会使 Windows job 失败。
 
 处理方式：
 
@@ -164,7 +164,7 @@ Android 可在“设置 -> 偏好 -> 关于”查看已安装版本并打开最�
 
 ## Android Release 构建失败
 
-Release APK 不会回退到 debug signing。需要已签名产物时，请确认仓库 Secrets 完整：
+Release APK 不会回退到 debug signing。正式发布必须完整配置以下仓库 Secrets：
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`
@@ -177,7 +177,9 @@ Release APK 不会回退到 debug signing。需要已签名产物时，请确认
 .\gradlew.bat :app:assembleDebug
 ```
 
-本地 `assembleRelease` 仍可生成 unsigned release APK 供开发验证，但 unsigned 客户端不应进入公开 Release。未配置全部 Android 签名 Secrets 时，公开 Release 会省略 APK；如果只配置了部分 Secrets，workflow 会失败并列出缺失项。Windows 同理，未签名 EXE 不会上传。
+本地 `assembleRelease` 仍可生成 unsigned release APK 供开发验证，但 unsigned APK 不应进入公开 Release。四项 Android 签名 Secrets 中任一项缺失，workflow 都会失败并列出缺失项，不会省略 APK 后继续发布。
+
+Windows 安装包当前未签名，仍会随 `latest.yml` 和 `.blockmap` 一起发布，安装时可能显示「未知发布者」。维护者配置完整的 Windows 证书和密码后，工作流才会签名并校验安装包。
 
 ## Gradle JDK 配置无效
 
